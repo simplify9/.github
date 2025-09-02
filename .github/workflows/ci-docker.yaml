@@ -4,43 +4,45 @@ on:
   workflow_call:
     inputs:
       registry_profile:
-        description: Select which registry credentials to use (e.g., s9, wisewell)
+        description: "Profile code for credentials/registry (e.g., S9, WISEWELL)"
         required: false
         type: string
-        default: s9
+        default: S9
       app_name:
-        description: Application name (used for image name and Helm release)
+        description: "Application name (image name / Helm release)"
         required: true
         type: string
       version:
-        description: Version label used in image tag (e.g., staging, prod)
+        description: "Version label used in image tag (e.g., staging, prod)"
         required: false
         default: staging
         type: string
       docker_registry:
-        description: Container registry base (e.g., registry.digitalocean.com/sf9cr)
+        description: "Fallback container registry base"
         required: false
         default: registry.digitalocean.com/sf9cr
         type: string
       build_context:
-        description: Docker build context
+        description: "Docker build context"
         required: false
         default: .
         type: string
       dockerfile:
-        description: Path to Dockerfile
+        description: "Path to Dockerfile"
         required: false
         default: Dockerfile
         type: string
-    secrets:
-      registry_username:
-        required: true
-      registry_token:
-        required: true
+
+# NOTE: we do NOT declare workflow_call.secrets here; we resolve them dynamically below.
 
 env:
   VERSION: ${{ inputs.version }}
   APP_NAME: ${{ inputs.app_name }}
+  # Try profile-specific registry var first, then global DOCKER_REGISTRY var, then input default
+  EFFECTIVE_REGISTRY: ${{ vars[format('{0}_DOCKER_REGISTRY', inputs.registry_profile)] || vars.DOCKER_REGISTRY || inputs.docker_registry }}
+  # Resolve profile-scoped secrets dynamically
+  REGISTRY_USERNAME: ${{ secrets[format('{0}_REGISTRY_USERNAME', inputs.registry_profile)] }}
+  REGISTRY_TOKEN:    ${{ secrets[format('{0}_REGISTRY_TOKEN',    inputs.registry_profile)] }}
 
 concurrency:
   group: ${{ inputs.app_name }}-${{ inputs.version }}
@@ -49,31 +51,64 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Attach to an environment with the same name as the profile (optional; remove if you don't use env approvals)
     environment: ${{ inputs.registry_profile }}
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Normalize profile case (optional)
+        id: norm
+        shell: bash
+        env:
+          PROFILE: ${{ inputs.registry_profile }}
+        run: |
+          set -euo pipefail
+          # Uppercase the profile for consistent secret/var naming (S9, WISEWELL, etc.)
+          UP=$(printf "%s" "${PROFILE}" | tr '[:lower:]' '[:upper:]')
+          echo "profile_upper=$UP" >> "$GITHUB_OUTPUT"
+
+      - name: Re-resolve secrets/registry with normalized profile
+        id: resolve
+        run: |
+          echo "E_REGISTRY=${{ vars[format('{0}_DOCKER_REGISTRY', steps.norm.outputs.profile_upper)] || env.EFFECTIVE_REGISTRY }}" >> "$GITHUB_OUTPUT"
+        env:
+          EFFECTIVE_REGISTRY: ${{ env.EFFECTIVE_REGISTRY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Container Registry
+      - name: Validate and login to container registry
         shell: bash
         env:
-          ENV_REGISTRY: ${{ vars.DOCKER_REGISTRY }}
-          DEFAULT_REGISTRY: ${{ inputs.docker_registry }}
-          REGISTRY_USERNAME: ${{ secrets.registry_username }}
-          REGISTRY_TOKEN: ${{ secrets.registry_token }}
+          E_REGISTRY: ${{ steps.resolve.outputs.E_REGISTRY }}
+          # Try secrets with normalized profile first; else keep env values from top-level
+          U_FALLBACK: ${{ env.REGISTRY_USERNAME }}
+          P_FALLBACK: ${{ env.REGISTRY_TOKEN }}
+          U_UP: ${{ secrets[format('{0}_REGISTRY_USERNAME', steps.norm.outputs.profile_upper)] }}
+          P_UP: ${{ secrets[format('{0}_REGISTRY_TOKEN',    steps.norm.outputs.profile_upper)] }}
         run: |
           set -euo pipefail
-          EFFECTIVE_REGISTRY="${ENV_REGISTRY:-}"; if [ -z "$EFFECTIVE_REGISTRY" ]; then EFFECTIVE_REGISTRY="$DEFAULT_REGISTRY"; fi
-          if [ -z "$EFFECTIVE_REGISTRY" ]; then echo "Effective registry is empty." >&2; exit 1; fi
-          if [ -z "${REGISTRY_USERNAME}" ] || [ -z "${REGISTRY_TOKEN}" ]; then
-            echo "Registry credentials are not set for environment '${{ inputs.registry_profile }}'." >&2
+          REGISTRY="${E_REGISTRY}"
+          # Prefer normalized-profile secrets if present; else fall back to unnormalized
+          USERNAME="${U_UP:-${U_FALLBACK:-}}"
+          TOKEN="${P_UP:-${P_FALLBACK:-}}"
+
+          if [ -z "${REGISTRY:-}" ]; then
+            echo "Effective registry is empty. Provide <PROFILE>_DOCKER_REGISTRY or DOCKER_REGISTRY var, or set inputs.docker_registry." >&2
             exit 1
           fi
-          environment: ${{ inputs.registry_profile }}
-          echo "$REGISTRY_TOKEN" | docker login "$EFFECTIVE_REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
-          echo "EFFECTIVE_REGISTRY=$EFFECTIVE_REGISTRY" >> "$GITHUB_ENV"
+          if [ -z "${USERNAME:-}" ] || [ -z "${TOKEN:-}" ]; then
+            echo "Missing credentials. Expected secrets named:"
+            echo "   - ${{ steps.norm.outputs.profile_upper }}_REGISTRY_USERNAME"
+            echo "   - ${{ steps.norm.outputs.profile_upper }}_REGISTRY_TOKEN"
+            echo "   (You can define them at org/repo or env scope.)" >&2
+            exit 1
+          fi
+
+          echo "Logging into ${REGISTRY} as ${USERNAME}"
+          echo "${TOKEN}" | docker login "${REGISTRY}" -u "${USERNAME}" --password-stdin
+          echo "EFFECTIVE_REGISTRY=${REGISTRY}" >> "$GITHUB_ENV"
 
       - name: Build and push image
         shell: bash
