@@ -239,21 +239,23 @@ jobs:
             --set ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/proxy-body-size="${INGRESS_PROXY_BODY_SIZE}"
           )
 
+
           # Build path args from YAML-style list (INGRESS_PATHS). Accept lines beginning with optional '-'.
           PATH_SET_ARGS=()
           if [ -n "${INGRESS_PATHS// /}" ]; then
             INDEX=0
-            while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              # Strip comments (anything after #) unless in quotes (simple heuristic)
+            # Normalize CRLF to LF to avoid hidden \r in paths
+            printf '%s' "$INGRESS_PATHS" | tr -d '\r' | while IFS= read -r line; do
+              # Strip end-of-line comments (simple heuristic) then trim both ends
               line="$(printf '%s' "$line" | sed -E 's/#.*$//')"
-              line="${line%%[[:space:]]*}" # collapse trailing spaces
-              # Remove leading dash and surrounding quotes/spaces
-              P=$(printf '%s' "$line" | sed -E 's/^[- ]+//;s/^"//;s/"$//;s/^\'\''//;s/\'\''$//')
+              line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+              [ -z "$line" ] && continue
+              # Remove leading '-' and any following spaces; then unquote
+              P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
               [ -z "$P" ] && continue
               PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
               INDEX=$((INDEX+1))
-            done <<< "$INGRESS_PATHS"
+            done
           fi
 
           EXTRA_SET_ARGS=""
