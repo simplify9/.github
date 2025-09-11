@@ -57,6 +57,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive sanitized branch name
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_NAME="${GITHUB_REF_NAME:-}"  # Provided by Actions runtime
+          if [ -z "$RAW_NAME" ]; then
+            RAW_NAME="${GITHUB_REF##*/}" || RAW_NAME="detached"
+          fi
+          # Lowercase, replace any disallowed chars with '-', collapse repeats, trim leading/trailing '-'
+          SANITIZED=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/-{2,}/-/g; s/^-+//; s/-+$//' )
+          [ -z "$SANITIZED" ] && SANITIZED="detached"
+          # Limit length to 40 for tag brevity
+          SANITIZED=${SANITIZED:0:40}
+          echo "name=$SANITIZED" >> "$GITHUB_OUTPUT"
+          echo "BRANCH_SANITIZED=$SANITIZED" >> "$GITHUB_ENV"
+
       - name: Normalize profile case (optional)
         id: norm
         shell: bash
@@ -118,6 +135,7 @@ jobs:
           APP: ${{ inputs.app_name }}
           VER: ${{ inputs.version }}
           RUN: ${{ github.run_number }}
+          BRANCH: ${{ steps.branch.outputs.name }}
         run: |
           set -euo pipefail
           # Disable build provenance/attestations explicitly
@@ -127,6 +145,6 @@ jobs:
             --file "$FILE" \
             --push \
             --provenance=false \
-            --tag "$EFFECTIVE_REGISTRY/$APP:github-$VER" \
-            --tag "$EFFECTIVE_REGISTRY/$APP:github-$RUN" \
+            --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$VER" \
+            --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$RUN" \
             "$CTX"

@@ -134,6 +134,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Derive sanitized branch name
+        id: branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_NAME="${GITHUB_REF_NAME:-}"  # Provided by Actions runtime
+          if [ -z "$RAW_NAME" ]; then
+            RAW_NAME="${GITHUB_REF##*/}" || RAW_NAME="detached"
+          fi
+            SANITIZED=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/-{2,}/-/g; s/^-+//; s/-+$//' )
+          [ -z "$SANITIZED" ] && SANITIZED="detached"
+          SANITIZED=${SANITIZED:0:40}
+          echo "name=$SANITIZED" >> "$GITHUB_OUTPUT"
+          echo "BRANCH_SANITIZED=$SANITIZED" >> "$GITHUB_ENV"
+
       - name: Normalize profile case
         id: norm
         shell: bash
@@ -194,6 +209,7 @@ jobs:
           EXTRA_SET_VALUES: ${{ env.EXTRA_SET_VALUES }}
           EXTRA_ARGS: ${{ env.EXTRA_ARGS }}
           INGRESS_PATHS: ${{ env.INGRESS_PATHS }}
+          BRANCH: ${{ steps.branch.outputs.name }}
         run: |
           set -euo pipefail
           REPO_ARG=""
@@ -213,7 +229,7 @@ jobs:
           BASE_SET_ARGS=(
             --set service.targetPort="${SERVICE_TARGET_PORT}"
             --set app.name="${APP_NAME}"
-            --set app.version="github-${GITHUB_RUN_NUMBER}"
+            --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
             --set environment="${ENVIRONMENT_LABEL}"
             --set ingress.hosts[0].host="${INGRESS_HOST}"
             --set ingress.hosts[0].tlsSecret="${INGRESS_TLS_SECRET}"

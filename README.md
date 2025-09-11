@@ -25,7 +25,7 @@ Use `workflow_call` from another repository.
 |-------|----------|---------|-------------|
 | `registry_profile` | false | `S9` | Profile code prefixing secrets/vars (e.g. `S9`, `WISEWELL`). Case-insensitive. |
 | `app_name` | true | — | Image (and optionally Helm release) base name. |
-| `version` | false | `staging` | Logical version label added to `github-<version>` tag. |
+| `version` | false | `staging` | Logical version label added to `github-<branch>-<version>` tag (branch is sanitized). |
 | `docker_registry` | false | `registry.digitalocean.com/sf9cr` | Fallback registry if profile-scoped var not set. |
 | `build_context` | false | `.` | Docker build context directory. |
 | `dockerfile` | false | `Dockerfile` | Path to Dockerfile. |
@@ -45,8 +45,12 @@ Credentials (must be defined as secrets):
 
 ### Produced Tags
 
-- `<registry>/<app_name>:github-<version>`
-- `<registry>/<app_name>:github-<run_number>`
+Tags now include a sanitized lowercase branch segment to avoid collisions across branches:
+
+- `<registry>/<app_name>:github-<branch>-<version>`
+- `<registry>/<app_name>:github-<branch>-<run_number>`
+
+Branch sanitization: convert to lowercase, replace any character not in `[a-z0-9._-]` with `-`, collapse repeats, trim leading/trailing dashes, fallback to `detached` if empty, and truncate to 40 chars.
 
 ### Minimal Example Caller (Helm)
 
@@ -87,7 +91,7 @@ Reusable workflow name: `helm-deploy (reusable)`
 |-------|----------|---------|-------------|
 | `registry_profile` | false | `S9` | Profile code to locate kubeconfig secret `<PROFILE>_KUBECONFIG`. Case-insensitive. |
 | `app_name` | true | — | Helm release name. |
-| `version` | false | `staging` | Logical version (used only for concurrency grouping and optional tagging logic). |
+| `version` | false | `staging` | Logical version (used for concurrency grouping; image tags & app.version embed branch: `github-<branch>-<run_number>`). |
 | `namespace` | true | — | Target Kubernetes namespace. |
 | `chart` | false | `s9genericchart` | Chart name (repo or local path). |
 | `chart_repo` | false | `https://charts.sf9.io` | Helm repo URL (added as alias `s9generic`). |
@@ -112,7 +116,7 @@ Reusable workflow name: `helm-deploy (reusable)`
 
 - `service.targetPort`
 - `app.name`
-- `app.version` = `github-<run_number>`
+- `app.version` = `github-<branch>-<run_number>`
 - `environment`
 - `ingress.hosts[0].host`
 - `ingress.hosts[0].tlsSecret`
