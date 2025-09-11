@@ -255,7 +255,7 @@ jobs:
               # Remove leading '-' and any following spaces; then unquote potential surrounding quotes
               P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
               [ -z "$P" ] && continue
-              PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
+              PATH_SET_ARGS+=( "--set ingress.paths[$INDEX]=$P" )
               INDEX=$((INDEX+1))
             done <<< "$CLEAN_PATHS"
           fi
@@ -272,6 +272,10 @@ jobs:
           fi
 
           echo "Executing Helm upgrade with base settings plus extras..."
+          echo "DEBUG: Raw INGRESS_PATHS value:" >&2
+          printf '%s\n' "$INGRESS_PATHS" >&2 || true
+          echo "DEBUG: Expanded PATH_SET_ARGS (count=${#PATH_SET_ARGS[@]}):" >&2
+          printf '  %s\n' "${PATH_SET_ARGS[@]}" >&2 || true
           set -x
           helm upgrade "${APP_NAME}" "$CHART_REF" \
             --install \
