@@ -255,7 +255,8 @@ jobs:
               # Remove leading '-' and any following spaces; then unquote potential surrounding quotes
               P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
               [ -z "$P" ] && continue
-              PATH_SET_ARGS+=( "--set ingress.paths[$INDEX]=$P" )
+              # Append as two tokens: '--set' and 'ingress.paths[index]=value' so Helm parses correctly.
+              PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
               INDEX=$((INDEX+1))
             done <<< "$CLEAN_PATHS"
           fi
