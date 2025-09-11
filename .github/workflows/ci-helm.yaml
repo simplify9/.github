@@ -1,0 +1,249 @@
+name: helm-deploy (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      registry_profile:
+        description: "Profile code for dynamic kubeconfig/registry vars & secrets (e.g., S9, WISEWELL)"
+        required: false
+        type: string
+        default: S9
+      app_name:
+        description: "Application name (Helm release name)"
+        required: true
+        type: string
+      version:
+        description: "Logical version label (may be used in image tag selection)"
+        required: false
+        default: staging
+        type: string
+      namespace:
+        description: "Kubernetes namespace to deploy into"
+        required: true
+        type: string
+      chart:
+        description: "Chart name (local or from repo)"
+        required: false
+        default: s9genericchart
+        type: string
+      chart_repo:
+        description: "Helm repo URL providing the chart (ignored if chart is a path)"
+        required: false
+        default: "https://charts.sf9.io"
+        type: string
+      environment_label:
+        description: "Value for app/environment variable passed to chart"
+        required: false
+        default: Staging
+        type: string
+      service_target_port:
+        description: "Service targetPort"
+        required: false
+        default: '5000'
+        type: string
+      ingress_host:
+        description: "Primary ingress host"
+        required: true
+        type: string
+      ingress_tls_secret:
+        description: "TLS secret for ingress host"
+        required: true
+        type: string
+      ingress_cert_issuer:
+        description: "cert-manager cluster issuer"
+        required: false
+        default: letsencrypt-nginx
+        type: string
+      ingress_proxy_body_size:
+        description: "nginx ingress proxy body size annotation"
+        required: false
+        default: 50m
+        type: string
+      image_repo:
+        description: "Container image repository (without tag)"
+        required: false
+        default: registry.digitalocean.com/sf9cr
+        type: string
+      pull_secret:
+        description: "Kubernetes image pull secret name"
+        required: false
+        default: sf9cr
+        type: string
+      helm_timeout:
+        description: "Helm upgrade --timeout value"
+        required: false
+        default: 15m
+        type: string
+      extra_set_values:
+        description: |-
+          Optional multi-line string of additional Helm --set key=value pairs (one per line).
+        required: false
+        default: ''
+        type: string
+      extra_args:
+        description: "Raw extra args appended to helm upgrade (e.g. --debug)"
+        required: false
+        default: ''
+        type: string
+
+    # No explicit secrets declared; they are resolved dynamically like <PROFILE>_KUBECONFIG.
+
+env:
+  APP_NAME: ${{ inputs.app_name }}
+  VERSION: ${{ inputs.version }}
+  # Values overridable by inputs but with opinionated defaults (duplicate defaults here for convenience)
+  NAMESPACE: ${{ inputs.namespace }}
+  CHART: ${{ inputs.chart }}
+  CHART_REPO: ${{ inputs.chart_repo }}
+  ENVIRONMENT_LABEL: ${{ inputs.environment_label }}
+  SERVICE_TARGET_PORT: ${{ inputs.service_target_port }}
+  INGRESS_HOST: ${{ inputs.ingress_host }}
+  INGRESS_TLS_SECRET: ${{ inputs.ingress_tls_secret }}
+  INGRESS_CERT_ISSUER: ${{ inputs.ingress_cert_issuer }}
+  INGRESS_PROXY_BODY_SIZE: ${{ inputs.ingress_proxy_body_size }}
+  IMAGE_REPO: ${{ inputs.image_repo }}
+  PULL_SECRET: ${{ inputs.pull_secret }}
+  HELM_TIMEOUT: ${{ inputs.helm_timeout }}
+  EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
+  EXTRA_ARGS: ${{ inputs.extra_args }}
+  # Raw kubeconfig secret (non-normalized profile reference first)
+  KUBECONFIG_SECRET: ${{ secrets[format('{0}_KUBECONFIG', inputs.registry_profile)] }}
+
+concurrency:
+  group: helm-${{ inputs.app_name }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Optional environment gate: environment named after profile
+    environment: ${{ inputs.registry_profile }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize profile case
+        id: norm
+        shell: bash
+        env:
+          PROFILE: ${{ inputs.registry_profile }}
+        run: |
+          set -euo pipefail
+          UP=$(printf "%s" "$PROFILE" | tr '[:lower:]' '[:upper:]')
+          echo "profile_upper=$UP" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve kubeconfig secret (normalized preference)
+        id: kube
+        shell: bash
+        env:
+          KUBE_RAW: ${{ env.KUBECONFIG_SECRET }}
+          KUBE_UP: ${{ secrets[format('{0}_KUBECONFIG', steps.norm.outputs.profile_upper)] }}
+        run: |
+          set -euo pipefail
+          DATA="${KUBE_UP:-${KUBE_RAW:-}}"
+          if [ -z "$DATA" ]; then
+            echo "Kubeconfig secret missing. Define secret: ${{ steps.norm.outputs.profile_upper }}_KUBECONFIG (or lower-case variant)." >&2
+            exit 1
+          fi
+          # Detect if base64 or raw (very lightweight heuristic)
+            if echo "$DATA" | grep -q 'apiVersion:'; then
+              printf "%s" "$DATA" > kubeconfig.yaml
+            else
+              echo "$DATA" | base64 -d > kubeconfig.yaml || { echo "Failed to base64 decode kubeconfig secret" >&2; exit 1; }
+            fi
+          chmod 600 kubeconfig.yaml
+          echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
+
+      - name: Set KUBECONFIG env
+        shell: bash
+        run: echo "KUBECONFIG=${{ steps.kube.outputs.kubeconfig_path }}" >> "$GITHUB_ENV"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Helm upgrade / install
+        shell: bash
+        env:
+          APP_NAME: ${{ env.APP_NAME }}
+          NAMESPACE: ${{ env.NAMESPACE }}
+          CHART: ${{ env.CHART }}
+          CHART_REPO: ${{ env.CHART_REPO }}
+          ENVIRONMENT_LABEL: ${{ env.ENVIRONMENT_LABEL }}
+          SERVICE_TARGET_PORT: ${{ env.SERVICE_TARGET_PORT }}
+          INGRESS_HOST: ${{ env.INGRESS_HOST }}
+          INGRESS_TLS_SECRET: ${{ env.INGRESS_TLS_SECRET }}
+          INGRESS_CERT_ISSUER: ${{ env.INGRESS_CERT_ISSUER }}
+          INGRESS_PROXY_BODY_SIZE: ${{ env.INGRESS_PROXY_BODY_SIZE }}
+          IMAGE_REPO: ${{ env.IMAGE_REPO }}
+          PULL_SECRET: ${{ env.PULL_SECRET }}
+          HELM_TIMEOUT: ${{ env.HELM_TIMEOUT }}
+          EXTRA_SET_VALUES: ${{ env.EXTRA_SET_VALUES }}
+          EXTRA_ARGS: ${{ env.EXTRA_ARGS }}
+        run: |
+          set -euo pipefail
+          REPO_ARG=""
+          if [ -n "$CHART_REPO" ]; then
+            # Add / update repo idempotently (use chart name as alias if not already present)
+            helm repo add s9generic "$CHART_REPO" 2>/dev/null || true
+            helm repo update >/dev/null
+            if [ "$CHART" = "s9genericchart" ]; then
+              CHART_REF="s9generic/$CHART"
+            else
+              CHART_REF="$CHART"
+            fi
+          else
+            CHART_REF="$CHART"
+          fi
+
+          BASE_SET_ARGS=(
+            --set service.targetPort="${SERVICE_TARGET_PORT}"
+            --set app.name="${APP_NAME}"
+            --set app.version="github-${GITHUB_RUN_NUMBER}"
+            --set environment="${ENVIRONMENT_LABEL}"
+            --set ingress.hosts[0].host="${INGRESS_HOST}"
+            --set ingress.hosts[0].tlsSecret="${INGRESS_TLS_SECRET}"
+            --set image.repo="${IMAGE_REPO}"
+            --set image.pullSecret="${PULL_SECRET}"
+            --set ingress.annotations.cert-manager\\.io/cluster-issuer="${INGRESS_CERT_ISSUER}"
+            --set ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/proxy-body-size="${INGRESS_PROXY_BODY_SIZE}"
+          )
+
+          EXTRA_SET_ARGS=""
+          if [ -n "${EXTRA_SET_VALUES// /}" ]; then
+            while IFS= read -r line; do
+              [ -z "${line}" ] && continue
+              # Trim spaces
+              KV=$(echo "$line" | sed 's/^ *//;s/ *$//')
+              [ -z "$KV" ] && continue
+              EXTRA_SET_ARGS+=" --set $KV"
+            done <<< "$EXTRA_SET_VALUES"
+          fi
+
+          echo "Executing Helm upgrade with base settings plus extras..."
+          set -x
+          helm upgrade "${APP_NAME}" "$CHART_REF" \
+            --install \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            "${BASE_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
+            --timeout "${HELM_TIMEOUT}" \
+            ${EXTRA_ARGS}
+          set +x
+
+      - name: Show release status
+        if: always()
+        shell: bash
+        env:
+          APP_NAME: ${{ env.APP_NAME }}
+          NAMESPACE: ${{ env.NAMESPACE }}
+        run: |
+          set -euo pipefail
+          helm status "$APP_NAME" -n "$NAMESPACE" || true
+          echo "---"
+          kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$APP_NAME" || true
+
+      - name: Notes
+        run: |
+          echo "Override defaults by passing inputs to the workflow_call. Provide extra --set pairs via 'extra_set_values' (newline separated). Raw flags (e.g. --atomic) via 'extra_args'."
