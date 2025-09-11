@@ -244,18 +244,20 @@ jobs:
           PATH_SET_ARGS=()
           if [ -n "${INGRESS_PATHS// /}" ]; then
             INDEX=0
-            # Normalize CRLF to LF to avoid hidden \r in paths
-            printf '%s' "$INGRESS_PATHS" | tr -d '\r' | while IFS= read -r line; do
+            # Normalize CRLF to LF to avoid hidden \r in paths. IMPORTANT: avoid using a pipe into while,
+            # because that would execute the loop in a subshell and lose PATH_SET_ARGS mutations.
+            CLEAN_PATHS="$(printf '%s' "$INGRESS_PATHS" | tr -d '\r')"
+            while IFS= read -r line; do
               # Strip end-of-line comments (simple heuristic) then trim both ends
               line="$(printf '%s' "$line" | sed -E 's/#.*$//')"
               line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
               [ -z "$line" ] && continue
-              # Remove leading '-' and any following spaces; then unquote
+              # Remove leading '-' and any following spaces; then unquote potential surrounding quotes
               P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
               [ -z "$P" ] && continue
               PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
               INDEX=$((INDEX+1))
-            done
+            done <<< "$CLEAN_PATHS"
           fi
 
           EXTRA_SET_ARGS=""
