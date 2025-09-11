@@ -120,9 +120,13 @@ jobs:
           RUN: ${{ github.run_number }}
         run: |
           set -euo pipefail
+          # Disable build provenance/attestations explicitly
+          # (belt & suspenders: env var + explicit flag)
+          export BUILDKIT_PROVENANCE=0
           docker buildx build \
             --file "$FILE" \
             --push \
+            --provenance=false \
             --tag "$EFFECTIVE_REGISTRY/$APP:github-$VER" \
             --tag "$EFFECTIVE_REGISTRY/$APP:github-$RUN" \
             "$CTX"
