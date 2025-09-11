@@ -85,6 +85,17 @@ on:
         required: false
         default: ''
         type: string
+      ingress_paths:
+        description: |-
+          YAML list of ingress paths. Provide as a multi-line YAML sequence, e.g.:
+            - /
+            - /api
+            - /docs
+          Defaults to just the root path '/'. Each entry becomes --set ingress.paths[index]=<value>.
+        required: false
+        type: string
+        default: |-
+          - /
 
     # No explicit secrets declared; they are resolved dynamically like <PROFILE>_KUBECONFIG.
 
@@ -106,6 +117,7 @@ env:
   HELM_TIMEOUT: ${{ inputs.helm_timeout }}
   EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
   EXTRA_ARGS: ${{ inputs.extra_args }}
+  INGRESS_PATHS: ${{ inputs.ingress_paths }}
   # Raw kubeconfig secret (non-normalized profile reference first)
   KUBECONFIG_SECRET: ${{ secrets[format('{0}_KUBECONFIG', inputs.registry_profile)] }}
 
@@ -181,6 +193,7 @@ jobs:
           HELM_TIMEOUT: ${{ env.HELM_TIMEOUT }}
           EXTRA_SET_VALUES: ${{ env.EXTRA_SET_VALUES }}
           EXTRA_ARGS: ${{ env.EXTRA_ARGS }}
+          INGRESS_PATHS: ${{ env.INGRESS_PATHS }}
         run: |
           set -euo pipefail
           REPO_ARG=""
@@ -210,6 +223,23 @@ jobs:
             --set ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/proxy-body-size="${INGRESS_PROXY_BODY_SIZE}"
           )
 
+          # Build path args from YAML-style list (INGRESS_PATHS). Accept lines beginning with optional '-'.
+          PATH_SET_ARGS=()
+          if [ -n "${INGRESS_PATHS// /}" ]; then
+            INDEX=0
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              # Strip comments (anything after #) unless in quotes (simple heuristic)
+              line="$(printf '%s' "$line" | sed -E 's/#.*$//')"
+              line="${line%%[[:space:]]*}" # collapse trailing spaces
+              # Remove leading dash and surrounding quotes/spaces
+              P=$(printf '%s' "$line" | sed -E 's/^[- ]+//;s/^"//;s/"$//;s/^\'\''//;s/\'\''$//')
+              [ -z "$P" ] && continue
+              PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
+              INDEX=$((INDEX+1))
+            done <<< "$INGRESS_PATHS"
+          fi
+
           EXTRA_SET_ARGS=""
           if [ -n "${EXTRA_SET_VALUES// /}" ]; then
             while IFS= read -r line; do
@@ -227,7 +257,7 @@ jobs:
             --install \
             --namespace "${NAMESPACE}" \
             --create-namespace \
-            "${BASE_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
+            "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
             --timeout "${HELM_TIMEOUT}" \
             ${EXTRA_ARGS}
           set +x

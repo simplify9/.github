@@ -102,6 +102,7 @@ Reusable workflow name: `helm-deploy (reusable)`
 | `helm_timeout` | false | `15m` | Helm upgrade timeout. |
 | `extra_set_values` | false | '' | Newline-separated additional `--set key=value` pairs. |
 | `extra_args` | false | '' | Raw extra args appended to `helm upgrade`. |
+| `ingress_paths` | false | `- /` | YAML list of ingress path entries (converted to `ingress.paths[n]` values). Default only root `/`. |
 
 ### Required Secret
 
@@ -119,6 +120,12 @@ Reusable workflow name: `helm-deploy (reusable)`
 - `image.pullSecret`
 - `ingress.annotations.cert-manager.io/cluster-issuer`
 - `ingress.annotations.nginx.ingress.kubernetes.io/proxy-body-size`
+  
+Additionally, each provided ingress path (from `ingress_paths`) is translated into:
+
+- `ingress.paths[<index>] = <path>`
+
+If you don't pass `ingress_paths`, only `ingress.paths[0]=/` is set (root path).
 
 ### Adding Extra Values
 
@@ -128,6 +135,31 @@ Supply newline-separated lines via `extra_set_values`, e.g.:
 ingress.hosts[1].host=alt.example.com
 ingress.hosts[1].tlsSecret=alt-example-com-tls
 ```
+
+### Configuring Ingress Paths
+
+Provide a simple YAML list (each line starting with a dash) via `ingress_paths`. Example:
+
+```yaml
+ingress_paths: |
+  - /
+  - /api
+  - /docs
+  - /downloadapp
+  - /.well-known
+```
+
+This becomes Helm flags:
+
+```text
+--set ingress.paths[0]=/
+--set ingress.paths[1]=/api
+--set ingress.paths[2]=/docs
+--set ingress.paths[3]=/downloadapp
+--set ingress.paths[4]=/.well-known
+```
+
+Blank lines and comments beginning with `#` in the list are ignored. Quotes around paths are optional.
 
 ### Minimal Example Caller
 
@@ -169,6 +201,12 @@ jobs:
       extra_set_values: |
         ingress.hosts[1].host=alt.example.com
         ingress.hosts[1].tlsSecret=alt-example-com-tls
+      ingress_paths: |
+        - /
+        - /api
+        - /docs
+        - /downloadapp
+        - /.well-known
       extra_args: --atomic --debug
 ```
 
