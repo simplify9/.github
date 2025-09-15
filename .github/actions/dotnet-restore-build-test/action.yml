@@ -1,0 +1,31 @@
+name: 'Dotnet Restore, Build, and Test'
+description: 'Reusable action to restore, build, and test .NET projects'
+runs:
+  using: "composite"
+  steps:
+    - name: Restore and Build
+      uses: ../dotnet-restore-build
+      with:
+        projects: ${{ inputs.projects }}
+        configuration: ${{ inputs.configuration }}
+        dotnet-version: ${{ inputs.dotnet-version }}
+    - name: Test
+      run: dotnet test ${{ inputs.test-projects }} --no-build --verbosity normal
+      shell: bash
+inputs:
+  projects:
+    description: 'Project(s) to restore and build (wildcards allowed)'
+    required: true
+    default: '**/*.csproj'
+  test-projects:
+    description: 'Test project(s) to run (wildcards allowed)'
+    required: true
+    default: '**/*UnitTests/*.csproj'
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  dotnet-version:
+    description: 'Version of .NET SDK to use'
+    required: false
+    default: '8.0.x'

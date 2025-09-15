@@ -1,0 +1,26 @@
+name: 'Tag Commit on GitHub Origin'
+description: 'Reusable action to create a tag on the GitHub origin using the REST API.'
+runs:
+  using: "composite"
+  steps:
+    - name: Tag new version on GitHub origin
+      run: |
+        curl -X POST \
+          -H "Authorization: token ${{ inputs.github-token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ inputs.repository }}/git/refs \
+          -d "{\"ref\": \"refs/tags/${{ inputs.tag }}\", \"sha\": \"${{ inputs.sha }}\"}"
+      shell: bash
+inputs:
+  github-token:
+    description: 'GitHub token for authentication'
+    required: true
+  repository:
+    description: 'GitHub repository in owner/repo format'
+    required: true
+  tag:
+    description: 'Tag name to create'
+    required: true
+  sha:
+    description: 'Commit SHA to tag'
+    required: true
