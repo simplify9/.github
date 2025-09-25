@@ -121,11 +121,6 @@ on:
         description: 'GitHub token for tagging'
         required: false
       
-      # Deployment values
-      helm-set-values:
-        description: 'Additional Helm set values (comma-separated: key1=value1,key2=value2)'
-        required: false
-      
       # Secret deployment values
       helm-set-secret-values:
         description: 'Additional Helm set secret values (comma-separated: key1=value1,key2=value2)'
@@ -241,6 +236,24 @@ jobs:
     if: ${{ inputs.deploy-to-development }}
     environment: development
     steps:
+      - name: Prepare Helm values
+        id: helm-values
+        run: |
+          VALUES="${{ inputs.helm-set-values || '' }}"
+          SECRET_VALUES="${{ secrets.helm-set-secret-values || '' }}"
+          
+          if [[ -n "$VALUES" && -n "$SECRET_VALUES" ]]; then
+            COMBINED_VALUES="${VALUES},${SECRET_VALUES}"
+          elif [[ -n "$VALUES" ]]; then
+            COMBINED_VALUES="$VALUES"
+          elif [[ -n "$SECRET_VALUES" ]]; then
+            COMBINED_VALUES="$SECRET_VALUES"
+          else
+            COMBINED_VALUES=""
+          fi
+          
+          echo "values=$COMBINED_VALUES" >> $GITHUB_OUTPUT
+
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
         with:
@@ -253,5 +266,5 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          set-values: ${{ inputs.helm-set-values || '' }}${{ (inputs.helm-set-values != '' && secrets.helm-set-secret-values != '') && ',' || '' }}${{ secrets.helm-set-secret-values || '' }}
+          set-values: ${{ steps.helm-values.outputs.values }}
           timeout: '1m'
