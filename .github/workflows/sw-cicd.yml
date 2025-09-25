@@ -148,13 +148,13 @@ jobs:
 
       - name: Determine semantic version
         id: semver
-        uses: simplify9/.github/actions/determine-semver@main
+        uses: simplify9/.github/.github/actions/determine-semver@main
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
  
       - name: Tag new version on GitHub origin
-        uses: simplify9/.github/actions/tag-github-origin@main
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
         with:
           github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
@@ -170,7 +170,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Dotnet Restore, Build, and Test
-        uses: simplify9/.github/actions/dotnet-build@main
+        uses: simplify9/.github/.github/actions/dotnet-build@main
         with:
           projects: "**/*.csproj"
           test-projects: ${{ inputs.test-projects }}
@@ -179,7 +179,7 @@ jobs:
           run-tests: ${{ inputs.run-tests }}
 
       - name: Pack and Push NuGet Package
-        uses: simplify9/.github/actions/dotnet-pack-push@main
+        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
         with:
           projects: ${{ inputs.nuget-projects }}
           configuration: "Release"
@@ -199,7 +199,7 @@ jobs:
 
       - name: Build and push Docker image
         id: docker
-        uses: simplify9/.github/actions/docker-build-push@main
+        uses: simplify9/.github/.github/actions/docker-build-push@main
         with:
           registry: ${{ env.CONTAINER_REGISTRY }}
           image-name: ${{ env.IMAGE_NAME }}
@@ -212,7 +212,7 @@ jobs:
 
       - name: Package and push Helm chart
         id: helm
-        uses: simplify9/.github/actions/helm-package-push@main
+        uses: simplify9/.github/.github/actions/helm-package-push@main
         with:
           chart-name: ${{ inputs.chart-name }}
           chart-path: ${{ inputs.chart-path }}
@@ -232,7 +232,7 @@ jobs:
     environment: development
     steps:
       - name: Deploy to Development
-        uses: simplify9/.github/actions/helm-deploy@main
+        uses: simplify9/.github/.github/actions/helm-deploy@main
         with:
           chart-name: ${{ inputs.chart-name }}
           chart-version: ${{ needs.version.outputs.version }}
