@@ -88,6 +88,12 @@ on:
         required: false
         type: string
       
+      # Deployment values
+      helm-set-values:
+        description: 'Additional Helm set values (comma-separated: key1=value1,key2=value2)'
+        required: false
+        type: string
+
     secrets:
       # NuGet secrets
       nuget-api-key:
@@ -118,6 +124,11 @@ on:
       # Deployment values
       helm-set-values:
         description: 'Additional Helm set values (comma-separated: key1=value1,key2=value2)'
+        required: false
+      
+      # Secret deployment values
+      helm-set-secret-values:
+        description: 'Additional Helm set secret values (comma-separated: key1=value1,key2=value2)'
         required: false
 
     outputs:
@@ -242,5 +253,5 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          set-values: ${{ secrets.helm-set-values || '' }}
+          set-values: ${{ inputs.helm-set-values || '' }}${{ (inputs.helm-set-values != '' && secrets.helm-set-secret-values != '') && ',' || '' }}${{ secrets.helm-set-secret-values || '' }}
           timeout: '1m'
