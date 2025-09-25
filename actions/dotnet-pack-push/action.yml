@@ -1,0 +1,151 @@
+name: 'Dotnet Pack and Push'
+description: 'Reusable action to pack .NET project(s) and push the resulting NuGet package(s) to a specified feed.'
+runs:
+  using: "composite"
+  steps:
+    - name: Pack NuGet packages
+      run: |
+        # Create output directory
+        mkdir -p ./nupkg
+        
+        projects_input="${{ inputs.projects }}"
+        echo "Processing projects: $projects_input"
+        
+        # Handle wildcards and multiple projects
+        if [[ "$projects_input" == *"*"* ]]; then
+          echo "Wildcard pattern detected, finding matching projects..."
+          
+          if [[ "$projects_input" == "**/*.csproj" ]]; then
+            # Handle the common case of **/*.csproj
+            project_files=$(find . -name "*.csproj" -type f | grep -v "/bin/" | grep -v "/obj/")
+          else
+            # Handle other wildcard patterns
+            project_files=$(find . -name "*.csproj" -type f | grep -v "/bin/" | grep -v "/obj/")
+          fi
+          
+          if [[ -z "$project_files" ]]; then
+            echo "Error: No .csproj files found matching pattern: $projects_input"
+            exit 1
+          fi
+          
+          echo "Found project files:"
+          echo "$project_files"
+          
+        else
+          # Handle space-separated or single project list
+          project_files="$projects_input"
+        fi
+        
+        # Pack each project
+        packed_count=0
+        for project in $project_files; do
+          # Skip if project file doesn't exist
+          if [ ! -f "$project" ]; then
+            echo "Warning: Project file '$project' not found, skipping..."
+            continue
+          fi
+          
+          echo "Processing project: $project"
+          
+          # Pack with or without version
+          if [ -z "${{ inputs.version }}" ]; then
+            echo "Packing $project without explicit version..."
+            if dotnet pack "$project" --configuration ${{ inputs.configuration }} --no-build --output ./nupkg; then
+              echo "✅ Successfully packed: $project"
+              packed_count=$((packed_count + 1))
+            else
+              echo "❌ Failed to pack: $project"
+              exit 1
+            fi
+          else
+            echo "Packing $project with version ${{ inputs.version }}..."
+            if dotnet pack "$project" --configuration ${{ inputs.configuration }} --no-build --output ./nupkg /p:Version=${{ inputs.version }}; then
+              echo "✅ Successfully packed: $project"
+              packed_count=$((packed_count + 1))
+            else
+              echo "❌ Failed to pack: $project"
+              exit 1
+            fi
+          fi
+        done
+        
+        echo "Successfully packed $packed_count project(s)"
+        
+        if [ $packed_count -eq 0 ]; then
+          echo "Error: No projects were successfully packed!"
+          exit 1
+        fi
+      shell: bash
+    - name: Push NuGet packages
+      run: |
+        # Validate required inputs
+        if [ -z "${{ inputs.api-key }}" ]; then
+          echo "Error: API key is required but not provided!"
+          exit 1
+        fi
+        
+        if [ -z "${{ inputs.nuget-source }}" ]; then
+          echo "Error: NuGet source is required but not provided!"
+          exit 1
+        fi
+        
+        # Check if any nupkg files were created
+        if ! ls ./nupkg/*.nupkg 1> /dev/null 2>&1; then
+          echo "Error: No NuGet packages found in ./nupkg/"
+          exit 1
+        fi
+        
+        echo "Found NuGet packages to push:"
+        ls -la ./nupkg/*.nupkg
+        
+        echo "Pushing NuGet packages to: ${{ inputs.nuget-source }}"
+        echo "Using provided API key for authentication"
+        
+        # Push each package individually for better error handling
+        pushed_count=0
+        failed_count=0
+        
+        for nupkg in ./nupkg/*.nupkg; do
+          if [ -f "$nupkg" ]; then
+            echo "Pushing package: $(basename "$nupkg")"
+            if dotnet nuget push "$nupkg" --api-key "${{ inputs.api-key }}" --source "${{ inputs.nuget-source }}" --skip-duplicate; then
+              echo "✅ Successfully pushed: $(basename "$nupkg")"
+              pushed_count=$((pushed_count + 1))
+            else
+              echo "❌ Failed to push: $(basename "$nupkg")"
+              failed_count=$((failed_count + 1))
+            fi
+          fi
+        done
+        
+        echo "Push summary: $pushed_count successful, $failed_count failed"
+        
+        if [ $failed_count -gt 0 ]; then
+          echo "Some packages failed to push"
+          exit 1
+        fi
+        
+        if [ $pushed_count -eq 0 ]; then
+          echo "No packages were pushed"
+          exit 1
+        fi
+        
+        echo "All packages pushed successfully!"
+      shell: bash
+inputs:
+  projects:
+    description: 'Path(s) to .csproj file(s) to pack (supports wildcards and multiple projects)'
+    required: true
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  version:
+    description: 'Semantic version for the NuGet package'
+    required: false
+  api-key:
+    description: 'API key for the NuGet feed'
+    required: true
+  nuget-source:
+    description: 'NuGet feed/source URL'
+    required: true

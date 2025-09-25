@@ -1,0 +1,113 @@
+name: 'Dotnet Restore and Build'
+description: 'Reusable action to restore, build, and optionally test .NET projects'
+runs:
+  using: "composite"
+  steps:
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+    - name: Restore dependencies
+      run: |
+        # Check if there's a solution file first
+        if ls *.sln 1> /dev/null 2>&1; then
+          echo "Found solution file(s), restoring solution..."
+          dotnet restore *.sln
+        else
+          echo "No solution file found, restoring individual projects..."
+          # If projects input contains wildcards, restore without arguments to restore all
+          if [[ "${{ inputs.projects }}" == *"*"* ]]; then
+            dotnet restore
+          else
+            dotnet restore ${{ inputs.projects }}
+          fi
+        fi
+      shell: bash
+    - name: Build
+      run: |
+        # Check if there's a solution file first
+        if ls *.sln 1> /dev/null 2>&1; then
+          echo "Found solution file(s), building solution..."
+          dotnet build *.sln --configuration ${{ inputs.configuration }} --no-restore
+        else
+          echo "No solution file found, building projects..."
+          # If projects input contains wildcards, find and build each project
+          if [[ "${{ inputs.projects }}" == *"*"* ]]; then
+            # Use find to locate projects matching the pattern
+            projects_pattern="${{ inputs.projects }}"
+            echo "Looking for projects matching: $projects_pattern"
+            
+            if [[ "$projects_pattern" == "**/*.csproj" ]]; then
+              # Handle the common case of **/*.csproj
+              find . -name "*.csproj" -type f | while read -r project; do
+                echo "Building $project..."
+                dotnet build "$project" --configuration ${{ inputs.configuration }} --no-restore
+              done
+            else
+              # Handle other patterns
+              for project in $(find . -name "*.csproj" -type f); do
+                echo "Building $project..."
+                dotnet build "$project" --configuration ${{ inputs.configuration }} --no-restore
+              done
+            fi
+          else
+            # Single project or space-separated list
+            dotnet build ${{ inputs.projects }} --configuration ${{ inputs.configuration }} --no-restore
+          fi
+        fi
+      shell: bash
+    - name: Test
+      if: ${{ inputs.run-tests == 'true' }}
+      run: |
+        # Handle wildcards in test projects
+        if [[ "${{ inputs.test-projects }}" == *"*"* ]]; then
+          test_pattern="${{ inputs.test-projects }}"
+          echo "Looking for test projects matching: $test_pattern"
+          
+          if [[ "$test_pattern" == "**/*UnitTests/*.csproj" ]] || [[ "$test_pattern" == "**/*Tests/*.csproj" ]] || [[ "$test_pattern" == "**/*Test*.csproj" ]]; then
+            # Handle common test patterns
+            found_tests=false
+            for test_project in $(find . -name "*Test*.csproj" -o -name "*Tests.csproj" -type f); do
+              echo "Testing $test_project..."
+              dotnet test "$test_project" --no-build --verbosity normal --configuration ${{ inputs.configuration }}
+              found_tests=true
+            done
+            
+            if [ "$found_tests" = false ]; then
+              echo "No test projects found matching pattern: $test_pattern"
+              echo "Skipping tests..."
+            fi
+          else
+            # Handle other wildcard patterns
+            for test_project in $(find . -name "*.csproj" -type f | grep -i test); do
+              echo "Testing $test_project..."
+              dotnet test "$test_project" --no-build --verbosity normal --configuration ${{ inputs.configuration }}
+            done
+          fi
+        else
+          # Single test project or space-separated list
+          echo "Running tests for: ${{ inputs.test-projects }}"
+          dotnet test ${{ inputs.test-projects }} --no-build --verbosity normal --configuration ${{ inputs.configuration }}
+        fi
+      shell: bash
+inputs:
+  projects:
+    description: 'Project(s) to restore and build (wildcards allowed)'
+    required: true
+    default: '**/*.csproj'
+  test-projects:
+    description: 'Test project(s) to run (wildcards allowed)'
+    required: false
+    default: '**/*UnitTests/*.csproj'
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  dotnet-version:
+    description: 'Version of .NET SDK to use'
+    required: false
+    default: '8.0.x'
+  run-tests:
+    description: 'Whether to run tests after building'
+    required: false
+    default: 'true'

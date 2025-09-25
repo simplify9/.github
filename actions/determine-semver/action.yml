@@ -1,0 +1,77 @@
+name: 'Determine Semantic Version'
+description: 'Reusable action to compute semantic version from major/minor and latest tag.'
+runs:
+  using: "composite"
+  steps:
+    - name: Determine semantic version
+      id: semver
+      run: |
+        # Validate inputs
+        major=${{ inputs.major }}
+        minor=${{ inputs.minor }}
+        
+        if ! [[ "$major" =~ ^[0-9]+$ ]]; then
+          echo "Error: Major version must be a number, got: $major"
+          exit 1
+        fi
+        
+        if ! [[ "$minor" =~ ^[0-9]+$ ]]; then
+          echo "Error: Minor version must be a number, got: $minor"
+          exit 1
+        fi
+        
+        echo "Looking for existing tags with prefix: $major.$minor.*"
+        prefix="$major.$minor."
+        
+        # Ensure we have all tags (in case of shallow checkout)
+        echo "Fetching all tags from remote..."
+        git fetch --tags --unshallow 2>/dev/null || git fetch --tags 2>/dev/null || echo "Could not fetch tags"
+        
+        # List all tags for debugging
+        echo "All available tags:"
+        git tag --list | sort -V || echo "No tags found"
+        
+        # Get latest tag matching the pattern
+        echo "Searching for tags matching pattern: $prefix*"
+        matching_tags=$(git tag --list "$prefix*" | sort -V)
+        if [[ -n "$matching_tags" ]]; then
+          echo "Found matching tags:"
+          echo "$matching_tags"
+        else
+          echo "No tags found matching pattern: $prefix*"
+        fi
+        
+        latest_tag=$(echo "$matching_tags" | tail -n1)
+        
+        if [[ -z "$latest_tag" ]]; then
+          patch=0
+          echo "No existing tags found for $major.$minor.*, starting with patch version 0"
+        else
+          echo "Found latest tag: $latest_tag"
+          # Extract patch version and increment
+          patch=$(echo "$latest_tag" | awk -F. '{print $3}')
+          if ! [[ "$patch" =~ ^[0-9]+$ ]]; then
+            echo "Warning: Could not parse patch version from tag $latest_tag, starting with 0"
+            patch=0
+          else
+            echo "Current patch version: $patch"
+            patch=$((patch + 1))
+            echo "Incremented patch version: $patch"
+          fi
+        fi
+        
+        version="$major.$minor.$patch"
+        echo "Computed next version: $version"
+        echo "version=$version" >> $GITHUB_OUTPUT
+      shell: bash
+inputs:
+  major:
+    description: 'Major version number'
+    required: true
+  minor:
+    description: 'Minor version number'
+    required: true
+outputs:
+  version:
+    description: 'Computed semantic version'
+    value: ${{ steps.semver.outputs.version }}
