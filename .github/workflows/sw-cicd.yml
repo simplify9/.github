@@ -239,8 +239,8 @@ jobs:
       - name: Prepare Helm values
         id: helm-values
         run: |
-          VALUES="${{ inputs.helm-set-values || '' }}"
-          SECRET_VALUES="${{ secrets.helm-set-secret-values || '' }}"
+          VALUES='${{ inputs.helm-set-values || '' }}'
+          SECRET_VALUES='${{ secrets.helm-set-secret-values || '' }}'
           
           if [[ -n "$VALUES" && -n "$SECRET_VALUES" ]]; then
             COMBINED_VALUES="${VALUES},${SECRET_VALUES}"
