@@ -137,11 +137,6 @@ on:
         description: 'Published Helm chart URL'
         value: ${{ jobs.ci.outputs.helm-chart }}
 
-env:
-  # Set default registry and image name
-  CONTAINER_REGISTRY: ${{ inputs.container-registry }}
-  IMAGE_NAME: ${{ inputs.image-name || github.repository }}
-
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -195,6 +190,9 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     needs: version
+    env:
+      CONTAINER_REGISTRY: ${{ inputs.container-registry }}
+      IMAGE_NAME: ${{ inputs.image-name || github.repository }}
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
       helm-chart: ${{ steps.helm.outputs.chart-url }}
@@ -226,7 +224,7 @@ jobs:
           repository: ${{ github.repository_owner }}/charts
           username: ${{ secrets.registry-username || github.actor }}
           password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
-          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
+          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}
           image-tag: ${{ needs.version.outputs.version }}
           update-image-values: 'true'
 
@@ -235,6 +233,8 @@ jobs:
     needs: [version, ci]
     if: ${{ inputs.deploy-to-development }}
     environment: development
+    env:
+      CONTAINER_REGISTRY: ${{ inputs.container-registry }}
     steps:
       - name: Prepare Helm values
         id: helm-values
