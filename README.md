@@ -58,6 +58,7 @@ jobs:
 | `container-registry` | false | `'ghcr.io'` | string | Container registry (docker.io, ghcr.io, etc.) |
 | `image-name` | false | — | string | Docker image name (defaults to repository name) |
 | `helm-set-values` | false | — | string | Additional Helm set values (comma-separated: key1=value1,key2=value2) |
+| `helm-secret-mappings` | false | — | string | Map GitHub secrets to Helm values (format: helm.key:SECRET_NAME,another.key:ANOTHER_SECRET) |
 
 ### Secrets
 
@@ -70,16 +71,20 @@ jobs:
 | `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
 | `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
 | `helm-set-secret-values` | false | Additional Helm set secret values (comma-separated) |
-| `database-connection-string` | false | PostgreSQL database connection string for applications requiring database connectivity |
+| `*` | false | **Any custom secret** - Use `helm-secret-mappings` to map any repository secret to any Helm value |
 
-### Database Connection String Support
+### Generic Secret Mapping
 
-The workflow supports PostgreSQL connection strings with special characters:
-- **Format**: `"Server=host;Port=25060;SslMode=Require;Database=db;UserId=usr;Password=pass;TrustServerCertificate=true"`
-- **Automatic escaping**: Handles spaces, semicolons, and special characters
-- **Secure handling**: Connection strings are not logged or exposed
-- **Helm integration**: Passed as `--set db="connection-string"`
-- **Optional**: Works perfectly for applications without databases
+The workflow supports mapping any GitHub repository secret to any Helm value using the `helm-secret-mappings` input:
+
+- **Format**: `helm.key:SECRET_NAME,another.key:ANOTHER_SECRET`
+- **Examples**: 
+  - `db:DATABASE_CONNECTION_STRING` - Maps DATABASE_CONNECTION_STRING secret to `db` Helm value
+  - `api.key:API_SECRET,redis.url:REDIS_CONNECTION` - Maps multiple secrets
+- **Secure handling**: Secret values are not logged or exposed in workflow output
+- **Flexible**: Works with any secret name and any Helm key path
+- **No escaping needed**: The workflow handles special characters automatically
+- **Optional**: Works perfectly for applications without secrets
 
 ### Outputs
 
@@ -91,7 +96,7 @@ The workflow supports PostgreSQL connection strings with special characters:
 
 ### Examples
 
-#### Basic .NET Application (No Database)
+#### Basic .NET Application (No Secrets)
 ```yaml
 name: Deploy Application
 on:
@@ -109,9 +114,9 @@ jobs:
       kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
-#### .NET Application with Database
+#### .NET Application with Database and API Key
 ```yaml
-name: Deploy API with Database
+name: Deploy API with Secrets
 on:
   push:
     branches: [main]
@@ -124,12 +129,37 @@ jobs:
       major-version: '2'
       minor-version: '1'
       helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
+      helm-secret-mappings: 'db:DATABASE_CONNECTION_STRING,apiKey:EXTERNAL_API_KEY'
       deploy-to-development: true
       development-namespace: staging
     secrets:
-      database-connection-string: ${{ secrets.DBCS }}
+      DATABASE_CONNECTION_STRING: ${{ secrets.PROD_DATABASE }}
+      EXTERNAL_API_KEY: ${{ secrets.THIRD_PARTY_API }}
       kubeconfig: ${{ secrets.KUBECONFIG }}
-      helm-set-secret-values: 'api.key=${{ secrets.API_KEY }}'
+```
+
+#### Complex Application with Multiple Secrets
+```yaml
+name: Deploy Enterprise Application
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: enterprise-app
+      helm-set-values: 'replicas=3,environment="production",ingress.enabled=true'
+      helm-secret-mappings: 'database.primary:MAIN_DB,database.readonly:READ_DB,cache.redis:REDIS_URL,storage.s3AccessKey:S3_ACCESS_KEY,email.smtpPassword:SMTP_PASS,auth.jwtSecret:JWT_SECRET'
+    secrets:
+      MAIN_DB: ${{ secrets.PRIMARY_DATABASE_CONNECTION }}
+      READ_DB: ${{ secrets.READONLY_DATABASE_CONNECTION }}
+      REDIS_URL: ${{ secrets.REDIS_CONNECTION_STRING }}
+      S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+      SMTP_PASS: ${{ secrets.EMAIL_PASSWORD }}
+      JWT_SECRET: ${{ secrets.JWT_SIGNING_KEY }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
 #### NuGet Library Publishing
@@ -154,20 +184,116 @@ jobs:
 
 ### Required Repository Secrets
 
-Set up these secrets in your repository:
+Set up these secrets in your repository based on your application needs:
 
+#### Essential Secrets
 1. **KUBECONFIG**: Base64 encoded kubeconfig for your Kubernetes cluster
-2. **DBCS** (if using database): PostgreSQL connection string in raw format
-3. **NUGET_API_KEY** (if publishing NuGet): API key for NuGet.org or private feed
+
+#### Application-Specific Secrets (use with helm-secret-mappings)
+2. **Database secrets** (if using database): 
+   - `DATABASE_CONNECTION_STRING`: PostgreSQL connection string
+   - `READONLY_DATABASE_CONNECTION`: Read-only database connection
+3. **API secrets** (if using external APIs):
+   - `API_KEY`: External API authentication key
+   - `JWT_SECRET`: JWT signing secret
+4. **Infrastructure secrets** (if needed):
+   - `REDIS_CONNECTION_STRING`: Redis cache connection
+   - `SMTP_PASSWORD`: Email service password
+   - `S3_ACCESS_KEY`: Cloud storage access key
+5. **NUGET_API_KEY** (if publishing NuGet packages): API key for NuGet.org or private feed
+
+#### Secret Naming Convention
+- Use descriptive, uppercase names with underscores
+- Examples: `DATABASE_CONNECTION_STRING`, `EXTERNAL_API_KEY`, `JWT_SIGNING_SECRET`
+- Map them to Helm values using `helm-secret-mappings`: `'db:DATABASE_CONNECTION_STRING,api.key:EXTERNAL_API_KEY'`
 
 ### Helm Chart Requirements
 
-Your Helm chart should support these values:
-- `db`: Database connection string (creates Kubernetes secret)
+Your Helm chart should support these standard values:
+- `image.repository`, `image.tag`: Container image settings (automatically set)
 - `ingress.enabled`, `ingress.hosts`, `ingress.tls`: Ingress configuration
 - `replicas`: Pod replica count
 - `environment`: Environment label
-- `image.repository`, `image.tag`: Container image settings
+
+#### Custom Secret Values
+Any secrets mapped via `helm-secret-mappings` will be passed as Helm values. For example:
+- `helm-secret-mappings: 'db:DATABASE_SECRET'` → Creates Helm value `db`
+- `helm-secret-mappings: 'api.key:API_SECRET'` → Creates Helm value `api.key`
+- `helm-secret-mappings: 'database.primary:DB1,database.readonly:DB2'` → Creates `database.primary` and `database.readonly`
+
+#### Example values.yaml structure:
+```yaml
+# Application secrets (from helm-secret-mappings)
+db: ""  # Database connection string
+api:
+  key: ""  # External API key
+auth:
+  jwtSecret: ""  # JWT signing secret
+
+# Standard application values
+replicas: 1
+environment: "development"
+image:
+  repository: ""
+  tag: ""
+ingress:
+  enabled: false
+  hosts: []
+  tls: []
+```
+
+#### Kubernetes Secret Creation
+Your Helm chart should create Kubernetes secrets from these values:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.fullname }}-secrets
+data:
+  {{- if .Values.db }}
+  ConnectionStrings__DefaultConnection: {{ .Values.db | b64enc }}
+  {{- end }}
+  {{- if .Values.api.key }}
+  ExternalApiKey: {{ .Values.api.key | b64enc }}
+  {{- end }}
+```
+
+### Quick Reference
+
+#### Template Usage Pattern
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: "your-app-name"
+      helm-set-values: 'key1=value1,key2=value2'
+      helm-secret-mappings: 'helm.key:SECRET_NAME,another.key:ANOTHER_SECRET'
+    secrets:
+      SECRET_NAME: ${{ secrets.YOUR_SECRET }}
+      ANOTHER_SECRET: ${{ secrets.ANOTHER_SECRET }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+#### Common Secret Mappings
+```yaml
+# Database applications
+helm-secret-mappings: 'db:DATABASE_CONNECTION_STRING'
+
+# API with authentication
+helm-secret-mappings: 'db:DATABASE_CS,api.key:EXTERNAL_API,jwt.secret:JWT_SECRET'
+
+# Microservice with multiple dependencies
+helm-secret-mappings: 'database.primary:MAIN_DB,cache.redis:REDIS_URL,storage.s3:S3_ACCESS,email.smtp:SMTP_PASS'
+```
+
+#### Helm Output Examples
+```bash
+# From: helm-secret-mappings: 'db:DATABASE_CS,api.key:API_SECRET'
+helm upgrade --install app chart \
+  --set db="Server=localhost;Database=mydb;..." \
+  --set api.key="abc123secret"
+```
 
 ---
 

@@ -93,6 +93,15 @@ on:
         description: 'Additional Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
+      helm-secret-mappings:
+        description: |
+          Map GitHub secrets to Helm values using a flexible format.
+          Format: 'helm.key1:SECRET_NAME1,helm.key2:SECRET_NAME2'
+          Example: 'db:DATABASE_CONNECTION_STRING,apiKey:API_KEY_SECRET,redis.url:REDIS_URL'
+          The workflow will fetch the secret values and pass them safely to Helm as --set helm.key1="secret_value"
+          Any secret name can be used - no predefined list required.
+        required: false
+        type: string
 
     secrets:
       # NuGet secrets
@@ -125,11 +134,10 @@ on:
       helm-set-secret-values:
         description: 'Additional Helm set secret values (comma-separated: key1=value1,key2=value2)'
         required: false
-      
-      # Database connection string
-      database-connection-string:
-        description: 'PostgreSQL database connection string for the application'
-        required: false
+
+    # Note: For helm-secret-mappings, use 'secrets: inherit' or pass specific secrets
+    # The workflow will dynamically access any secret specified in the mapping
+    # Format: 'helm.key:SECRET_NAME' - any secret name can be used
 
     outputs:
       version:
@@ -243,14 +251,17 @@ jobs:
     steps:
       - name: Prepare Helm values
         id: helm-values
+        env:
+          # Pass all secrets as environment variables for dynamic access
+          HELM_SECRET_MAPPINGS: ${{ inputs.helm-secret-mappings }}
+          SECRETS_JSON: ${{ toJSON(secrets) }}
         run: |
           VALUES='${{ inputs.helm-set-values || '' }}'
           SECRET_VALUES='${{ secrets.helm-set-secret-values || '' }}'
-          DB_CONNECTION_STRING='${{ secrets.database-connection-string || '' }}'
           
           echo "DEBUG: Raw VALUES input: '$VALUES'"
           echo "DEBUG: Raw SECRET_VALUES input: '[REDACTED]'"
-          echo "DEBUG: Database connection string provided: $([ -n "$DB_CONNECTION_STRING" ] && echo 'YES' || echo 'NO')"
+          echo "DEBUG: Secret mappings provided: $([ -n "$HELM_SECRET_MAPPINGS" ] && echo 'YES' || echo 'NO')"
           
           # Start building the combined values
           COMBINED_VALUES=""
@@ -271,19 +282,41 @@ jobs:
             echo "DEBUG: Added SECRET_VALUES"
           fi
           
-          # Add database connection string as a properly escaped Helm value
-          if [[ -n "$DB_CONNECTION_STRING" ]]; then
-            # Properly escape the connection string for Helm
-            # Replace any single quotes with escaped quotes and wrap in double quotes
-            ESCAPED_DB_CS=$(printf '%s' "$DB_CONNECTION_STRING" | sed "s/'/\\\\'/g")
-            DB_VALUE="db=\"${ESCAPED_DB_CS}\""
+          # Process generic secret mappings
+          if [[ -n "$HELM_SECRET_MAPPINGS" ]]; then
+            echo "DEBUG: Processing secret mappings: $HELM_SECRET_MAPPINGS"
             
-            if [[ -n "$COMBINED_VALUES" ]]; then
-              COMBINED_VALUES="${COMBINED_VALUES},${DB_VALUE}"
-            else
-              COMBINED_VALUES="$DB_VALUE"
-            fi
-            echo "DEBUG: Added database connection string"
+            # Split on commas and process each mapping
+            IFS=',' read -ra MAPPINGS <<< "$HELM_SECRET_MAPPINGS"
+            for mapping in "${MAPPINGS[@]}"; do
+              # Split on : to get helm_key:SECRET_NAME
+              if [[ "$mapping" == *":"* ]]; then
+                helm_key=$(echo "$mapping" | cut -d':' -f1 | xargs)
+                secret_name=$(echo "$mapping" | cut -d':' -f2 | xargs)
+                
+                echo "DEBUG: Processing mapping: $helm_key <- $secret_name"
+                
+                # Extract the secret value from the JSON using jq
+                secret_value=$(echo "$SECRETS_JSON" | jq -r --arg key "$secret_name" '.[$key] // empty')
+                
+                if [[ -n "$secret_value" && "$secret_value" != "null" ]]; then
+                  # Use the secret value directly without additional escaping
+                  # Helm will handle the proper escaping when we pass it as --set parameter
+                  secret_helm_value="${helm_key}=${secret_value}"
+                  
+                  if [[ -n "$COMBINED_VALUES" ]]; then
+                    COMBINED_VALUES="${COMBINED_VALUES},${secret_helm_value}"
+                  else
+                    COMBINED_VALUES="$secret_helm_value"
+                  fi
+                  echo "DEBUG: Added secret mapping: $helm_key"
+                else
+                  echo "DEBUG: Secret '$secret_name' is empty or not found, skipping"
+                fi
+              else
+                echo "WARNING: Invalid mapping format '$mapping'. Expected 'helm.key:SECRET_NAME'"
+              fi
+            done
           fi
           
           echo "DEBUG: Final COMBINED_VALUES length: ${#COMBINED_VALUES}"
