@@ -103,37 +103,9 @@ on:
         required: false
         type: string
 
-    secrets:
-      # NuGet secrets
-      nuget-api-key:
-        description: 'NuGet API key'
-        required: false
-      nuget-source:
-        description: 'NuGet source URL'
-        required: false
-      
-      # Container registry secrets
-      registry-username:
-        description: 'Container registry username'
-        required: false
-      registry-password:
-        description: 'Container registry password/token'
-        required: false
-      
-      # Kubernetes secrets
-      kubeconfig:
-        description: 'Base64 encoded kubeconfig'
-        required: false
-      
-      # GitHub token for tagging
-      github-token:
-        description: 'GitHub token for tagging'
-        required: false
-      
-      # Secret deployment values
-      helm-set-secret-values:
-        description: 'Additional Helm set secret values (comma-separated: key1=value1,key2=value2)'
-        required: false
+    # Note: This workflow uses 'secrets: inherit' pattern
+    # No secrets need to be explicitly declared - the calling workflow
+    # should use 'secrets: inherit' to pass ALL secrets automatically
 
     # Note: For helm-secret-mappings, use 'secrets: inherit' or pass specific secrets
     # The workflow will dynamically access any secret specified in the mapping
