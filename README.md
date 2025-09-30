@@ -4,14 +4,176 @@ This repository hosts reusable GitHub Actions workflows for Simplify9 projects.
 
 ## Workflows Overview
 
-1. build-deploy (ci-docker.yaml)
-   Builds and pushes a Docker image using dynamic profile-based registry credentials.
-2. helm-deploy (ci-helm.yaml)
-   Deploys (upgrade --install) a Helm chart with dynamic profile-based kubeconfig secret resolution.
+1. **sw-cicd.yml** - Complete CI/CD pipeline for .NET applications with Docker, Helm, and Kubernetes deployment
+2. **ci-docker.yaml** - Build and push Docker images using dynamic profile-based registry credentials
+3. **ci-helm.yaml** - Deploy Helm charts with dynamic profile-based kubeconfig secret resolution
 
 ---
 
-## 1. build-deploy (ci-docker.yaml)
+## 1. sw-cicd.yml - Complete CI/CD Pipeline
+
+Reusable workflow name: `Reusable SW CI/CD Pipeline`
+
+### Overview
+
+A comprehensive CI/CD pipeline that handles the complete application lifecycle:
+- Semantic versioning and Git tagging
+- .NET project building and testing
+- NuGet package publishing (optional)
+- Docker image building and pushing
+- Helm chart packaging and publishing
+- Kubernetes deployment with database connection string support
+
+### Invocation
+
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: my-app
+      helm-set-values: 'ingress.enabled=true,replicas=2'
+    secrets:
+      database-connection-string: ${{ secrets.DBCS }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+### Inputs
+
+| Input | Required | Default | Type | Description |
+|-------|----------|---------|------|-------------|
+| `major-version` | false | `'1'` | string | Major version number for semantic versioning |
+| `minor-version` | false | `'0'` | string | Minor version number for semantic versioning |
+| `dotnet-version` | false | `'8.0.x'` | string | .NET SDK version to use |
+| `nuget-projects` | false | `''` | string | NuGet projects to pack and push (glob pattern). Leave empty to skip NuGet publishing |
+| `test-projects` | false | `'**/*UnitTests/*.csproj'` | string | Test projects to run (glob pattern) |
+| `run-tests` | false | `'false'` | string | Whether to run tests during build |
+| `dockerfile-path` | false | `'./Dockerfile'` | string | Path to Dockerfile |
+| `docker-context` | false | `'.'` | string | Docker build context |
+| `docker-platforms` | false | `'linux/amd64'` | string | Target platforms for Docker build |
+| `chart-path` | false | `'./chart'` | string | Path to Helm chart directory |
+| `chart-name` | true | — | string | Helm chart name (required) |
+| `deploy-to-development` | false | `true` | boolean | Deploy to development environment |
+| `development-namespace` | false | `'development'` | string | Kubernetes namespace for development |
+| `container-registry` | false | `'ghcr.io'` | string | Container registry (docker.io, ghcr.io, etc.) |
+| `image-name` | false | — | string | Docker image name (defaults to repository name) |
+| `helm-set-values` | false | — | string | Additional Helm set values (comma-separated: key1=value1,key2=value2) |
+
+### Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `nuget-api-key` | false | NuGet API key for package publishing |
+| `nuget-source` | false | NuGet source URL (defaults to nuget.org) |
+| `registry-username` | false | Container registry username (defaults to github.actor) |
+| `registry-password` | false | Container registry password/token (defaults to GITHUB_TOKEN) |
+| `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
+| `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
+| `helm-set-secret-values` | false | Additional Helm set secret values (comma-separated) |
+| `database-connection-string` | false | PostgreSQL database connection string for applications requiring database connectivity |
+
+### Database Connection String Support
+
+The workflow supports PostgreSQL connection strings with special characters:
+- **Format**: `"Server=host;Port=25060;SslMode=Require;Database=db;UserId=usr;Password=pass;TrustServerCertificate=true"`
+- **Automatic escaping**: Handles spaces, semicolons, and special characters
+- **Secure handling**: Connection strings are not logged or exposed
+- **Helm integration**: Passed as `--set db="connection-string"`
+- **Optional**: Works perfectly for applications without databases
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `version` | Generated semantic version |
+| `docker-image` | Built Docker image with tag |
+| `helm-chart` | Published Helm chart URL |
+
+### Examples
+
+#### Basic .NET Application (No Database)
+```yaml
+name: Deploy Application
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: my-api
+      helm-set-values: 'ingress.enabled=true,replicas=2,environment="Production"'
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+#### .NET Application with Database
+```yaml
+name: Deploy API with Database
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: surl-api
+      major-version: '2'
+      minor-version: '1'
+      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
+      deploy-to-development: true
+      development-namespace: staging
+    secrets:
+      database-connection-string: ${{ secrets.DBCS }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      helm-set-secret-values: 'api.key=${{ secrets.API_KEY }}'
+```
+
+#### NuGet Library Publishing
+```yaml
+name: Build and Publish Library
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: my-library
+      nuget-projects: 'src/**/*.csproj'
+      run-tests: 'true'
+      test-projects: 'tests/**/*Tests.csproj'
+      deploy-to-development: false
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+```
+
+### Required Repository Secrets
+
+Set up these secrets in your repository:
+
+1. **KUBECONFIG**: Base64 encoded kubeconfig for your Kubernetes cluster
+2. **DBCS** (if using database): PostgreSQL connection string in raw format
+3. **NUGET_API_KEY** (if publishing NuGet): API key for NuGet.org or private feed
+
+### Helm Chart Requirements
+
+Your Helm chart should support these values:
+- `db`: Database connection string (creates Kubernetes secret)
+- `ingress.enabled`, `ingress.hosts`, `ingress.tls`: Ingress configuration
+- `replicas`: Pod replica count
+- `environment`: Environment label
+- `image.repository`, `image.tag`: Container image settings
+
+---
+
+## 2. ci-docker.yaml - Build and Deploy
+
+## 2. ci-docker.yaml - Build and Deploy
 
 Reusable workflow name: `build-deploy (reusable)`
 
@@ -81,7 +243,7 @@ jobs:
 
 ---
 
-## 2. helm-deploy (ci-helm.yaml)
+## 3. ci-helm.yaml - Helm Deploy
 
 Reusable workflow name: `helm-deploy (reusable)`
 
