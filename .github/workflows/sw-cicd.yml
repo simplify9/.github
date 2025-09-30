@@ -103,13 +103,39 @@ on:
         required: false
         type: string
 
-    # Note: This workflow uses 'secrets: inherit' pattern
-    # No secrets need to be explicitly declared - the calling workflow
-    # should use 'secrets: inherit' to pass ALL secrets automatically
-
-    # Note: For helm-secret-mappings, use 'secrets: inherit' or pass specific secrets
+    # Note: For helm-secret-mappings, declare your secrets below or use 'secrets: inherit' 
     # The workflow will dynamically access any secret specified in the mapping
     # Format: 'helm.key:SECRET_NAME' - any secret name can be used
+
+    secrets:
+      # Standard workflow secrets
+      nuget-api-key:
+        description: 'NuGet API key'
+        required: false
+      nuget-source:
+        description: 'NuGet source URL'
+        required: false
+      registry-username:
+        description: 'Container registry username'
+        required: false
+      registry-password:
+        description: 'Container registry password/token'
+        required: false
+      kubeconfig:
+        description: 'Base64 encoded kubeconfig'
+        required: false
+      github-token:
+        description: 'GitHub token for tagging'
+        required: false
+      helm-set-secret-values:
+        description: 'Additional Helm set secret values (comma-separated)'
+        required: false
+      
+      # Add your custom secrets here for helm-secret-mappings
+      DBCS_ESCAPED:
+        description: 'Database connection string (escaped)'
+        required: false
+      # Add more secrets as needed for your helm-secret-mappings
 
     outputs:
       version:
@@ -271,6 +297,9 @@ jobs:
                 # Extract the secret value from the JSON using jq
                 secret_value=$(echo "$SECRETS_JSON" | jq -r --arg key "$secret_name" '.[$key] // empty')
                 
+                echo "DEBUG: Secret '$secret_name' value found: $([ -n "$secret_value" ] && [ "$secret_value" != "null" ] && echo 'YES' || echo 'NO')"
+                echo "DEBUG: Secret value length: ${#secret_value}"
+                
                 if [[ -n "$secret_value" && "$secret_value" != "null" ]]; then
                   # Use the secret value directly without additional escaping
                   # Helm will handle the proper escaping when we pass it as --set parameter
@@ -281,7 +310,7 @@ jobs:
                   else
                     COMBINED_VALUES="$secret_helm_value"
                   fi
-                  echo "DEBUG: Added secret mapping: $helm_key"
+                  echo "DEBUG: Added secret mapping: $helm_key (value length: ${#secret_value})"
                 else
                   echo "DEBUG: Secret '$secret_name' is empty or not found, skipping"
                 fi

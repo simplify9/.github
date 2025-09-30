@@ -71,37 +71,80 @@ jobs:
 | `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
 | `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
 | `helm-set-secret-values` | false | Additional Helm set secret values (comma-separated) |
-| `*` | false | **Any custom secret** - Use `secrets: inherit` + `helm-secret-mappings` to map any repository secret to any Helm value |
+| `DBCS_ESCAPED` | false | Database connection string (for helm-secret-mappings) |
+| `*` | false | **Custom secrets** - Add any secret to the workflow's secrets section, then use `helm-secret-mappings` to map to Helm values |
 
-### Generic Secret Mapping
+### Secret-to-Helm Mapping Solution
 
-The workflow supports mapping **any GitHub repository secret** to **any Helm value** using the `helm-secret-mappings` input and `secrets: inherit` pattern.
+For mapping GitHub secrets to Helm values, declare your secrets explicitly and use `helm-secret-mappings`.
 
 #### How It Works
 
-1. **Use `secrets: inherit`** in your calling workflow - this passes ALL repository secrets automatically
-2. **Reference any secret** in `helm-secret-mappings` - even secrets with random/custom names
-3. **Create secrets on-demand** - no need to pre-declare secret names anywhere
+1. **Declare your secrets explicitly** in the `secrets:` section  
+2. **Use `helm-secret-mappings`** to map any declared secret to any Helm value
+3. **Enhanced debugging** shows exactly what's happening with secret processing
 
 #### Usage Pattern
 
 ```yaml
 jobs:
+  cicd:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      # ... your configuration ...
+      helm-secret-mappings: 'database.connectionString:DBCS_ESCAPED,app.apiKey:MY_API_SECRET'
+    secrets:
+      # Standard workflow secrets
+      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+      registry-username: ${{ github.actor }}
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
+      github-token: ${{ secrets.S9_GITHUB_TOKEN }}
+      
+      # Custom secrets for helm-secret-mappings
+      DBCS_ESCAPED: ${{ secrets.DBCS_ESCAPED }}
+      MY_API_SECRET: ${{ secrets.MY_API_SECRET }}
+      # Add any other secrets you want to map to Helm values
+```
+
+#### Pre-declared Secrets
+
+The workflow already declares these common secret names - just pass your values:
+
+- `DBCS_ESCAPED` - For database connection strings
+- `nuget-api-key` - NuGet API key  
+- `kubeconfig` - Kubernetes configuration
+- `github-token` - GitHub token for tagging
+- `registry-username` / `registry-password` - Container registry credentials
+
+#### Adding Custom Secrets
+
+To map additional secrets to Helm values:
+1. **Add them to the workflow's secrets section** (edit the workflow file)
+2. **Pass them in your calling workflow** 
+3. **Reference them in `helm-secret-mappings`**
+
+#### Examples
+
+**Basic Application with Database:**
+```yaml
+jobs:
   deploy:
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    secrets: inherit  # Passes ALL secrets - any name works!
     with:
       enable-ci: true
       enable-deployment: true
-      helm-secret-mappings: 'database.connectionString:MY_RANDOM_SECRET_NAME_123,app.apiKey:ANOTHER_CUSTOM_SECRET'
+      helm-secret-mappings: 'database.connectionString:DBCS_ESCAPED'
+    secrets:
+      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+      kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
+      DBCS_ESCAPED: ${{ secrets.DBCS_ESCAPED }}
 ```
 
-#### Examples with Random Secret Names
-
-**You can use ANY secret name:**
+**Complex Application with Multiple Secrets:**
 ```yaml
-# These work perfectly - no pre-declaration needed:
-helm-secret-mappings: 'db:SUPER_SECRET_DB_2024,api:MY_API_KEY_XYZ,redis:RANDOM_REDIS_NAME'
+# Add custom secrets to the workflow first, then use them:
+helm-secret-mappings: 'db:DATABASE_URL,api:API_KEY,redis:REDIS_URL'
 ```
 
 **Complex nested Helm paths:**
@@ -139,10 +182,11 @@ on:
 jobs:
   deploy:
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    secrets: inherit
     with:
       chart-name: my-api
       helm-set-values: 'ingress.enabled=true,replicas=2,environment="Production"'
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
 #### .NET Application with Database and API Key
@@ -155,7 +199,6 @@ on:
 jobs:
   deploy:
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    secrets: inherit
     with:
       chart-name: surl-api
       major-version: '2'
@@ -164,6 +207,10 @@ jobs:
       helm-secret-mappings: 'db:PROD_DATABASE,apiKey:THIRD_PARTY_API'
       deploy-to-development: true
       development-namespace: staging
+    secrets:
+      PROD_DATABASE: ${{ secrets.PROD_DATABASE }}
+      THIRD_PARTY_API: ${{ secrets.THIRD_PARTY_API }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
 #### Complex Application with Multiple Secrets
@@ -176,11 +223,18 @@ on:
 jobs:
   deploy:
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    secrets: inherit
     with:
       chart-name: enterprise-app
       helm-set-values: 'replicas=3,environment="production",ingress.enabled=true'
       helm-secret-mappings: 'database.primary:PRIMARY_DATABASE_CONNECTION,database.readonly:READONLY_DATABASE_CONNECTION,cache.redis:REDIS_CONNECTION_STRING,storage.s3AccessKey:AWS_S3_ACCESS_KEY,email.smtpPassword:EMAIL_PASSWORD,auth.jwtSecret:JWT_SIGNING_KEY'
+    secrets:
+      PRIMARY_DATABASE_CONNECTION: ${{ secrets.PRIMARY_DATABASE_CONNECTION }}
+      READONLY_DATABASE_CONNECTION: ${{ secrets.READONLY_DATABASE_CONNECTION }}
+      REDIS_CONNECTION_STRING: ${{ secrets.REDIS_CONNECTION_STRING }}
+      AWS_S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
 #### NuGet Library Publishing
@@ -199,25 +253,35 @@ jobs:
       run-tests: 'true'
       test-projects: 'tests/**/*Tests.csproj'
       deploy-to-development: false
-    secrets: inherit
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
 ```
 
 ### Repository Secrets
 
-Set up these secrets in your repository based on your application needs. With `secrets: inherit`, you can use **any secret name** you want:
+Set up these secrets in your repository based on your application needs:
 
 #### Essential Secrets
 1. **KUBECONFIG**: Base64 encoded kubeconfig for your Kubernetes cluster
 
 #### Custom Application Secrets
-2. **Use any names you want** - the workflow supports any secret name through `helm-secret-mappings`:
-   - Database: `MY_DB_CONNECTION`, `PROD_DATABASE`, `DATABASE_URL_123` - any name works!
-   - APIs: `STRIPE_KEY`, `PAYMENT_API_SECRET`, `RANDOM_API_NAME` - your choice!
-   - Auth: `JWT_SIGNING_SECRET`, `AUTH_TOKEN_XYZ` - completely flexible!
-3. **Examples of creative secret names**:
-   - `SUPER_SECRET_DB_2024` → maps to `database.connectionString`
-   - `PAYMENT_PROVIDER_KEY_LIVE` → maps to `payments.stripe.apiKey`
-   - `MY_CUSTOM_JWT_ABC` → maps to `auth.jwt.secret`
+To use secrets in Helm deployments:
+1. **Add the secret to the workflow's secrets section** (edit the workflow file)
+2. **Pass the secret in your calling workflow**
+3. **Reference it in `helm-secret-mappings`**
+
+**Examples:**
+   - `DBCS_ESCAPED` → maps to `database.connectionString`
+   - `API_KEY` → maps to `app.apiKey`  
+   - `JWT_SECRET` → maps to `auth.jwt.secret`
+
+#### Pre-declared Secrets
+These are already declared in the workflow and ready to use:
+- `DBCS_ESCAPED` - Database connection string
+- `nuget-api-key` - NuGet API key
+- `kubeconfig` - Kubernetes configuration
+- `github-token` - GitHub token for operations
+- `registry-username` / `registry-password` - Container registry credentials
 4. **Infrastructure secrets** (if needed):
    - `REDIS_CONNECTION_STRING`: Redis cache connection
    - `SMTP_PASSWORD`: Email service password
