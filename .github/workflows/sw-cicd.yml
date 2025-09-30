@@ -242,17 +242,32 @@ jobs:
           VALUES='${{ inputs.helm-set-values || '' }}'
           SECRET_VALUES='${{ secrets.helm-set-secret-values || '' }}'
           
+          echo "DEBUG: Raw VALUES input: '$VALUES'"
+          echo "DEBUG: Raw SECRET_VALUES input: '$SECRET_VALUES'"
+          
           if [[ -n "$VALUES" && -n "$SECRET_VALUES" ]]; then
             COMBINED_VALUES="${VALUES},${SECRET_VALUES}"
+            echo "DEBUG: Combined both VALUES and SECRET_VALUES"
           elif [[ -n "$VALUES" ]]; then
             COMBINED_VALUES="$VALUES"
+            echo "DEBUG: Using only VALUES"
           elif [[ -n "$SECRET_VALUES" ]]; then
             COMBINED_VALUES="$SECRET_VALUES"
+            echo "DEBUG: Using only SECRET_VALUES"
           else
             COMBINED_VALUES=""
+            echo "DEBUG: No values provided"
           fi
           
+          echo "DEBUG: Final COMBINED_VALUES: '$COMBINED_VALUES'"
           echo "values=$COMBINED_VALUES" >> $GITHUB_OUTPUT
+
+      - name: Debug Helm values before deployment
+        run: |
+          echo "DEBUG: Values being passed to helm-deploy: '${{ steps.helm-values.outputs.values }}'"
+          echo "DEBUG: Chart name: '${{ inputs.chart-name }}'"
+          echo "DEBUG: Chart version: '${{ needs.version.outputs.version }}'"
+          echo "DEBUG: Registry: '${{ env.CONTAINER_REGISTRY }}'"
 
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
@@ -267,4 +282,4 @@ jobs:
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
           set-values: ${{ steps.helm-values.outputs.values }}
-          timeout: '1m'
+          timeout: '10m'
