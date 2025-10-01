@@ -90,22 +90,12 @@ on:
       
       # Deployment values
       helm-set-values:
-        description: 'Additional Helm set values (comma-separated: key1=value1,key2=value2)'
-        required: false
-        type: string
-      helm-secret-mappings:
         description: |
-          Map GitHub secrets to Helm values using a flexible format.
-          Format: 'helm.key1:SECRET_NAME1,helm.key2:SECRET_NAME2'
-          Example: 'db:DATABASE_CONNECTION_STRING,apiKey:API_KEY_SECRET,redis.url:REDIS_URL'
-          The workflow will fetch the secret values and pass them safely to Helm as --set helm.key1="secret_value"
-          Any secret name can be used - no predefined list required.
+          Helm values as comma-separated key=value pairs.
+          Supports secrets by using: database.password="${{ secrets.DB_PASSWORD }}"
+          Example: 'ingress.enabled=true,replicas=3,database.host="localhost"'
         required: false
         type: string
-
-    # Note: For helm-secret-mappings, declare your secrets below or use 'secrets: inherit' 
-    # The workflow will dynamically access any secret specified in the mapping
-    # Format: 'helm.key:SECRET_NAME' - any secret name can be used
 
     secrets:
       # Standard workflow secrets
@@ -127,15 +117,6 @@ on:
       github-token:
         description: 'GitHub token for tagging'
         required: false
-      helm-set-secret-values:
-        description: 'Additional Helm set secret values (comma-separated)'
-        required: false
-      
-      # Add your custom secrets here for helm-secret-mappings
-      DBCS_ESCAPED:
-        description: 'Database connection string (escaped)'
-        required: false
-      # Add more secrets as needed for your helm-secret-mappings
 
     outputs:
       version:
@@ -147,6 +128,10 @@ on:
       helm-chart:
         description: 'Published Helm chart URL'
         value: ${{ jobs.ci.outputs.helm-chart }}
+
+env:
+  CONTAINER_REGISTRY: ${{ inputs.container-registry }}
+  IMAGE_NAME: ${{ inputs.image-name || github.repository }}
 
 jobs:
   version:
@@ -201,9 +186,6 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     needs: version
-    env:
-      CONTAINER_REGISTRY: ${{ inputs.container-registry }}
-      IMAGE_NAME: ${{ inputs.image-name || github.repository }}
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
       helm-chart: ${{ steps.helm.outputs.chart-url }}
@@ -244,95 +226,7 @@ jobs:
     needs: [version, ci]
     if: ${{ inputs.deploy-to-development }}
     environment: development
-    env:
-      CONTAINER_REGISTRY: ${{ inputs.container-registry }}
     steps:
-      - name: Prepare Helm values
-        id: helm-values
-        env:
-          # Pass all secrets as environment variables for dynamic access
-          HELM_SECRET_MAPPINGS: ${{ inputs.helm-secret-mappings }}
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-        run: |
-          VALUES='${{ inputs.helm-set-values || '' }}'
-          SECRET_VALUES='${{ secrets.helm-set-secret-values || '' }}'
-          
-          echo "DEBUG: Raw VALUES input: '$VALUES'"
-          echo "DEBUG: Raw SECRET_VALUES input: '[REDACTED]'"
-          echo "DEBUG: Secret mappings provided: $([ -n "$HELM_SECRET_MAPPINGS" ] && echo 'YES' || echo 'NO')"
-          
-          # Start building the combined values
-          COMBINED_VALUES=""
-          
-          # Add regular values
-          if [[ -n "$VALUES" ]]; then
-            COMBINED_VALUES="$VALUES"
-            echo "DEBUG: Added VALUES"
-          fi
-          
-          # Add secret values
-          if [[ -n "$SECRET_VALUES" ]]; then
-            if [[ -n "$COMBINED_VALUES" ]]; then
-              COMBINED_VALUES="${COMBINED_VALUES},${SECRET_VALUES}"
-            else
-              COMBINED_VALUES="$SECRET_VALUES"
-            fi
-            echo "DEBUG: Added SECRET_VALUES"
-          fi
-          
-          # Process generic secret mappings
-          if [[ -n "$HELM_SECRET_MAPPINGS" ]]; then
-            echo "DEBUG: Processing secret mappings: $HELM_SECRET_MAPPINGS"
-            
-            # Split on commas and process each mapping
-            IFS=',' read -ra MAPPINGS <<< "$HELM_SECRET_MAPPINGS"
-            for mapping in "${MAPPINGS[@]}"; do
-              # Split on : to get helm_key:SECRET_NAME
-              if [[ "$mapping" == *":"* ]]; then
-                helm_key=$(echo "$mapping" | cut -d':' -f1 | xargs)
-                secret_name=$(echo "$mapping" | cut -d':' -f2 | xargs)
-                
-                echo "DEBUG: Processing mapping: $helm_key <- $secret_name"
-                
-                # Extract the secret value from the JSON using jq
-                secret_value=$(echo "$SECRETS_JSON" | jq -r --arg key "$secret_name" '.[$key] // empty')
-                
-                echo "DEBUG: Secret '$secret_name' value found: $([ -n "$secret_value" ] && [ "$secret_value" != "null" ] && echo 'YES' || echo 'NO')"
-                echo "DEBUG: Secret value length: ${#secret_value}"
-                
-                if [[ -n "$secret_value" && "$secret_value" != "null" ]]; then
-                  # Use the secret value directly without additional escaping
-                  # Helm will handle the proper escaping when we pass it as --set parameter
-                  secret_helm_value="${helm_key}=${secret_value}"
-                  
-                  if [[ -n "$COMBINED_VALUES" ]]; then
-                    COMBINED_VALUES="${COMBINED_VALUES},${secret_helm_value}"
-                  else
-                    COMBINED_VALUES="$secret_helm_value"
-                  fi
-                  echo "DEBUG: Added secret mapping: $helm_key (value length: ${#secret_value})"
-                else
-                  echo "DEBUG: Secret '$secret_name' is empty or not found, skipping"
-                fi
-              else
-                echo "WARNING: Invalid mapping format '$mapping'. Expected 'helm.key:SECRET_NAME'"
-              fi
-            done
-          fi
-          
-          echo "DEBUG: Final COMBINED_VALUES length: ${#COMBINED_VALUES}"
-          echo "values=$COMBINED_VALUES" >> $GITHUB_OUTPUT
-
-      - name: Debug Helm values before deployment
-        run: |
-          VALUES_LENGTH="${#HELM_VALUES}"
-          echo "DEBUG: Values being passed to helm-deploy (length: $VALUES_LENGTH characters)"
-          echo "DEBUG: Chart name: '${{ inputs.chart-name }}'"
-          echo "DEBUG: Chart version: '${{ needs.version.outputs.version }}'"
-          echo "DEBUG: Registry: '${{ env.CONTAINER_REGISTRY }}'"
-        env:
-          HELM_VALUES: ${{ steps.helm-values.outputs.values }}
-
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
         with:
@@ -345,5 +239,5 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          set-values: ${{ steps.helm-values.outputs.values }}
+          set-values: ${{ inputs.helm-set-values }}
           timeout: '10m'

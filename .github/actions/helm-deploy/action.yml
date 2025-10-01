@@ -178,12 +178,33 @@ runs:
           HELM_CMD="${HELM_CMD} --values /tmp/custom-values.yaml"
         fi
         
-        # Add custom set values
+        # Add custom set values with improved parsing
         if [ -n "${{ inputs.set-values }}" ]; then
-          IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
-          for value in "${VALUES[@]}"; do
-            HELM_CMD="${HELM_CMD} --set ${value}"
-          done
+          echo "Processing set-values: ${{ inputs.set-values }}"
+          
+          # Save the input to a temporary file for processing
+          echo "${{ inputs.set-values }}" > /tmp/input_values.txt
+          
+          # Use awk to properly split CSV while respecting quotes
+          awk -F',' '
+          {
+            for (i = 1; i <= NF; i++) {
+              value = $i
+              # Remove leading/trailing whitespace
+              gsub(/^[ \t]+|[ \t]+$/, "", value)
+              if (value != "" && index(value, "=") > 0) {
+                print "--set " value
+              }
+            }
+          }' /tmp/input_values.txt > /tmp/helm_set_args.txt
+          
+          # Add each --set argument to the helm command
+          while IFS= read -r set_arg; do
+            if [ -n "$set_arg" ]; then
+              HELM_CMD="${HELM_CMD} ${set_arg}"
+              echo "Added: ${set_arg}"
+            fi
+          done < /tmp/helm_set_args.txt
         fi
         
         echo "Executing: ${HELM_CMD}"
