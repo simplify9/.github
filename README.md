@@ -73,21 +73,31 @@ jobs:
 
 ### Secret Handling
 
-Secrets are passed directly through the `helm-set-values` input using GitHub Actions secret interpolation:
+**Solution**: Use environment variable syntax `${SECRET_NAME}` within `helm-set-values`. The workflow automatically substitutes any secrets you pass.
 
 ```yaml
-helm-set-values: |
-  ingress.enabled=true,
-  database.connectionString="${{ secrets.DATABASE_CONNECTION_STRING }}",
-  redis.url="${{ secrets.REDIS_URL }}",
-  api.key="${{ secrets.API_SECRET }}"
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      helm-set-values: |
+        ingress.enabled=true,
+        replicas=1,
+        ingress.hosts={surl.sf9.io},
+        environment="Staging",
+        ingress.path="/api",
+        db="${DBCS_ESCAPED}"
+    secrets:
+      DBCS_ESCAPED: ${{ secrets.DBCS_ESCAPED }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
 **Key Points:**
-- Use double quotes around `${{ secrets.SECRET_NAME }}` for proper escaping
-- Supports any secret name - no predefined list required  
-- Handles complex values like database connection strings with special characters
-- GitHub Actions resolves secrets before passing to the workflow
+- Use `${SECRET_NAME}` syntax in `helm-set-values` for any secret
+- Pass the secret in the `secrets` section with any name you want
+- The workflow automatically finds and substitutes all secrets
+- **No predefined secret names required** - completely generic!
+- Unknown secrets are left as-is (won't break the workflow)
 
 ### Outputs
 
@@ -129,7 +139,7 @@ jobs:
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
 ### Usage Examples
 
-#### Simple Application
+#### Simple Application (No Secrets)
 ```yaml
 name: Deploy Simple App
 on:
@@ -154,7 +164,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-#### Application with Secrets
+#### Application with Database Secret (Your Exact Use Case)
 ```yaml
 name: Deploy App with Database
 on:
@@ -175,14 +185,12 @@ jobs:
         environment="Staging",
         ingress.path="/api",
         ingress.tls[0].secretName="surl-tls",
-        database.connectionString="${{ secrets.DATABASE_CONNECTION_STRING }}",
-        api.key="${{ secrets.THIRD_PARTY_API }}"
+        db="${DBCS_ESCAPED}"
       deploy-to-development: true
       development-namespace: staging
     secrets:
       kubeconfig: ${{ secrets.KUBECONFIG }}
-      DATABASE_CONNECTION_STRING: ${{ secrets.DATABASE_CONNECTION_STRING }}
-      THIRD_PARTY_API: ${{ secrets.THIRD_PARTY_API }}
+      DBCS_ESCAPED: ${{ secrets.DBCS_ESCAPED }}
 ```
 
 #### Complex Application with Multiple Secrets
@@ -201,14 +209,18 @@ jobs:
         replicas=3,
         environment="production",
         ingress.enabled=true,
-        database.primary="${{ secrets.PRIMARY_DATABASE_CONNECTION }}",
-        database.readonly="${{ secrets.READONLY_DATABASE_CONNECTION }}",
-        cache.redis="${{ secrets.REDIS_CONNECTION_STRING }}",
-        storage.s3AccessKey="${{ secrets.AWS_S3_ACCESS_KEY }}",
-        email.smtpPassword="${{ secrets.EMAIL_PASSWORD }}",
-        auth.jwtSecret="${{ secrets.JWT_SIGNING_KEY }}"
+        database.primary="${PRIMARY_DB}",
+        cache.redis="${REDIS_URL}",
+        storage.s3="${S3_ACCESS_KEY}",
+        email.smtp="${SMTP_PASSWORD}",
+        auth.jwt="${JWT_SECRET}"
     secrets:
       kubeconfig: ${{ secrets.KUBECONFIG }}
+      PRIMARY_DB: ${{ secrets.PRIMARY_DATABASE_CONNECTION }}
+      REDIS_URL: ${{ secrets.REDIS_CONNECTION_STRING }}
+      S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+      SMTP_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      JWT_SECRET: ${{ secrets.JWT_SIGNING_KEY }}
 ```
 
 #### NuGet Library Publishing
@@ -297,29 +309,38 @@ jobs:
       helm-set-values: |
         key1=value1,
         key2=value2,
-        secret.value="${{ secrets.YOUR_SECRET }}"
+        secret.key="${SECRET_NAME}"
     secrets:
+      SECRET_NAME: ${{ secrets.YOUR_SECRET }}
       kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
 #### Common Patterns
 ```yaml
-# Simple configuration
+# Configuration only (no secrets)
 helm-set-values: 'replicas=3,environment="production",ingress.enabled=true'
 
-# With secrets
+# Mixed configuration and secrets  
 helm-set-values: |
   replicas=2,
-  database.connectionString="${{ secrets.DATABASE_URL }}",
-  api.key="${{ secrets.API_SECRET }}"
+  ingress.enabled=true,
+  database.connectionString="${DATABASE_URL}",
+  api.key="${API_SECRET}"
 
-# Complex configuration with multiple secrets
+# Multiple secrets with any names you want
 helm-set-values: |
-  database.primary="${{ secrets.PRIMARY_DB }}",
-  cache.redis="${{ secrets.REDIS_URL }}",
-  storage.s3="${{ secrets.S3_ACCESS }}",
-  email.smtp="${{ secrets.SMTP_PASS }}"
+  database.url="${MY_DB_SECRET}",
+  api.key="${MY_API_KEY}",
+  jwt.secret="${CUSTOM_JWT_SECRET}",
+  redis.url="${WHATEVER_NAME_I_WANT}"
 ```
+
+#### Key Benefits
+- ✅ **Completely generic** - use any secret name you want
+- ✅ **No predefined mappings** - workflow automatically finds and substitutes
+- ✅ **Simple syntax** - just use `${SECRET_NAME}` in helm-set-values  
+- ✅ **Safe handling** - unknown secrets are left as-is
+- ✅ **Works with complex values** - database connection strings, JSON, etc.
 
 ---
 
