@@ -86,10 +86,12 @@ runs:
     - name: Set up Helm
       uses: azure/setup-helm@v4
       with:
-        version: '3.14.0'
+        version: ${{ inputs.helm-version }}
 
     - name: Set up kubectl
       uses: azure/setup-kubectl@v4
+      with:
+        version: ${{ inputs.kubectl-version }}
 
     - name: Configure Kubernetes context
       shell: bash
@@ -133,16 +135,6 @@ runs:
         echo "Custom values:"
         cat /tmp/custom-values.yaml
 
-    - name: Prepare deployment variables
-      id: vars
-      shell: bash
-      run: |
-        # Convert image repository to lowercase for container registry compatibility
-        if [ -n "${{ inputs.image-repository }}" ]; then
-          REPO_LOWER=$(echo "${{ inputs.image-repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "image-repository-lower=${REPO_LOWER}" >> $GITHUB_OUTPUT
-        fi
-
     - name: Deploy Helm chart
       id: deploy
       shell: bash
@@ -164,24 +156,15 @@ runs:
         # Build helm command
         HELM_CMD="helm upgrade --install ${{ inputs.release-name }} ${CHART_URL} --namespace ${{ inputs.namespace }}"
         
-        # Add create-namespace if enabled
-        if [ "${{ inputs.create-namespace }}" == "true" ]; then
-          HELM_CMD="${HELM_CMD} --create-namespace"
-        fi
-        
         # Add timeout and wait options
         if [ "${{ inputs.wait }}" == "true" ]; then
           HELM_CMD="${HELM_CMD} --wait"
         fi
         HELM_CMD="${HELM_CMD} --timeout ${{ inputs.timeout }}"
         
-        # Add image repository and tag if provided (use lowercased version)
-        if [ -n "${{ steps.vars.outputs.image-repository-lower }}" ]; then
-          HELM_CMD="${HELM_CMD} --set image.repository=${{ steps.vars.outputs.image-repository-lower }}"
-        elif [ -n "${{ inputs.image-repository }}" ]; then
-          # Fallback to original if lowercasing step failed
-          REPO_LOWER=$(echo "${{ inputs.image-repository }}" | tr '[:upper:]' '[:lower:]')
-          HELM_CMD="${HELM_CMD} --set image.repository=${REPO_LOWER}"
+        # Add image repository and tag if provided
+        if [ -n "${{ inputs.image-repository }}" ]; then
+          HELM_CMD="${HELM_CMD} --set image.repository=${{ inputs.image-repository }}"
         fi
         if [ -n "${{ inputs.image-tag }}" ]; then
           HELM_CMD="${HELM_CMD} --set image.tag=${{ inputs.image-tag }}"
@@ -197,15 +180,9 @@ runs:
         
         # Add custom set values
         if [ -n "${{ inputs.set-values }}" ]; then
-          echo "Processing set values: ${{ inputs.set-values }}"
           IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
           for value in "${VALUES[@]}"; do
-            # Trim whitespace
-            trimmed=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            if [ -n "$trimmed" ]; then
-              echo "Adding --set: $trimmed"
-              HELM_CMD="${HELM_CMD} --set $trimmed"
-            fi
+            HELM_CMD="${HELM_CMD} --set ${value}"
           done
         fi
         

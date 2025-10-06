@@ -90,32 +90,40 @@ on:
       
       # Deployment values
       helm-set-values:
-        description: |
-          Helm values as comma-separated key=value pairs.
-          For secrets, use GitHub secret syntax with quotes: key="secret-value"
-          Example: 'ingress.enabled=true,replicas=3,database.url="my-secret-value"'
+        description: 'Additional Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
 
     secrets:
-      # Standard workflow secrets
+      # NuGet secrets
       nuget-api-key:
         description: 'NuGet API key'
         required: false
       nuget-source:
         description: 'NuGet source URL'
         required: false
+      
+      # Container registry secrets
       registry-username:
         description: 'Container registry username'
         required: false
       registry-password:
         description: 'Container registry password/token'
         required: false
+      
+      # Kubernetes secrets
       kubeconfig:
         description: 'Base64 encoded kubeconfig'
         required: false
+      
+      # GitHub token for tagging
       github-token:
         description: 'GitHub token for tagging'
+        required: false
+      
+      # Secret deployment values
+      helm-set-secret-values:
+        description: 'Additional Helm set secret values (comma-separated: key1=value1,key2=value2)'
         required: false
 
     outputs:
@@ -130,6 +138,7 @@ on:
         value: ${{ jobs.ci.outputs.helm-chart }}
 
 env:
+  # Set default registry and image name
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.image-name || github.repository }}
 
@@ -217,7 +226,7 @@ jobs:
           repository: ${{ github.repository_owner }}/charts
           username: ${{ secrets.registry-username || github.actor }}
           password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
-          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}
+          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
           image-tag: ${{ needs.version.outputs.version }}
           update-image-values: 'true'
 
@@ -227,6 +236,24 @@ jobs:
     if: ${{ inputs.deploy-to-development }}
     environment: development
     steps:
+      - name: Prepare Helm values
+        id: helm-values
+        run: |
+          VALUES='${{ inputs.helm-set-values || '' }}'
+          SECRET_VALUES='${{ secrets.helm-set-secret-values || '' }}'
+          
+          if [[ -n "$VALUES" && -n "$SECRET_VALUES" ]]; then
+            COMBINED_VALUES="${VALUES},${SECRET_VALUES}"
+          elif [[ -n "$VALUES" ]]; then
+            COMBINED_VALUES="$VALUES"
+          elif [[ -n "$SECRET_VALUES" ]]; then
+            COMBINED_VALUES="$SECRET_VALUES"
+          else
+            COMBINED_VALUES=""
+          fi
+          
+          echo "values=$COMBINED_VALUES" >> $GITHUB_OUTPUT
+
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
         with:
@@ -239,7 +266,5 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}
-          image-tag: ${{ needs.version.outputs.version }}
-          set-values: ${{ inputs.helm-set-values }}
-          timeout: '10m'
+          set-values: ${{ steps.helm-values.outputs.values }}
+          timeout: '1m'
