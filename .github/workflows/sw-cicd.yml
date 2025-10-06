@@ -92,8 +92,8 @@ on:
       helm-set-values:
         description: |
           Helm values as comma-separated key=value pairs.
-          For secrets, use environment variable syntax: key="${DB_SECRET}"
-          Example: 'ingress.enabled=true,replicas=3,database.url="${DATABASE_URL}"'
+          For secrets, use GitHub secret syntax with quotes: key="secret-value"
+          Example: 'ingress.enabled=true,replicas=3,database.url="my-secret-value"'
         required: false
         type: string
 
@@ -227,58 +227,6 @@ jobs:
     if: ${{ inputs.deploy-to-development }}
     environment: development
     steps:
-      - name: Process Helm Values with Secret Substitution
-        id: helm-values
-        env:
-          SECRETS_JSON: ${{ toJson(secrets) }}
-        run: |
-          RAW_VALUES="${{ inputs.helm-set-values }}"
-          
-          if [ -z "$RAW_VALUES" ]; then
-            echo "values=" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "Processing helm values with secret substitution..."
-          echo "Original values: $RAW_VALUES"
-          
-          # Use Node.js to process the secret substitution
-          PROCESSED_VALUES=$(node -e "
-            const secrets = JSON.parse(process.env.SECRETS_JSON || '{}');
-            const rawValues = process.argv[1] || '';
-            
-            // Replace \${SECRET_NAME} with actual secret value
-            const result = rawValues.replace(/\\\$\{([^}]+)\}/g, (match, secretName) => {
-              if (secrets[secretName]) {
-                // Escape quotes in the secret value
-                const escapedValue = secrets[secretName].replace(/\"/g, '\\\\\"');
-                return '\"' + escapedValue + '\"';
-              }
-              return match;
-            });
-            
-            console.log(result);
-          " "$RAW_VALUES")
-          
-          echo "Processed values: $PROCESSED_VALUES"
-          echo "values=$PROCESSED_VALUES" >> $GITHUB_OUTPUT
-          
-      - name: Show Final Helm Command
-        run: |
-          echo "🚀 FINAL HELM COMMAND THAT WOULD BE EXECUTED:"
-          echo "============================================="
-          echo "helm upgrade --install ${{ inputs.chart-name }}-dev oci://${{ env.CONTAINER_REGISTRY }}/${{ github.repository_owner }}/charts/${{ inputs.chart-name }} \\"
-          echo "  --version ${{ needs.version.outputs.version }} \\"
-          echo "  --namespace ${{ inputs.development-namespace }} \\"
-          echo "  --set ${{ steps.helm-values.outputs.values }} \\"
-          echo "  --timeout 10m"
-          echo ""
-          echo "📋 Breakdown:"
-          echo "- Chart: ${{ inputs.chart-name }}"
-          echo "- Version: ${{ needs.version.outputs.version }}"
-          echo "- Namespace: ${{ inputs.development-namespace }}"
-          echo "- Values: ${{ steps.helm-values.outputs.values }}"
-          
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
         with:
@@ -291,5 +239,7 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          set-values: ${{ steps.helm-values.outputs.values }}
+          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_NAME }}
+          image-tag: ${{ needs.version.outputs.version }}
+          set-values: ${{ inputs.helm-set-values }}
           timeout: '10m'
