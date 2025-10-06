@@ -4,14 +4,349 @@ This repository hosts reusable GitHub Actions workflows for Simplify9 projects.
 
 ## Workflows Overview
 
-1. build-deploy (ci-docker.yaml)
-   Builds and pushes a Docker image using dynamic profile-based registry credentials.
-2. helm-deploy (ci-helm.yaml)
-   Deploys (upgrade --install) a Helm chart with dynamic profile-based kubeconfig secret resolution.
+1. **sw-cicd.yml** - Complete CI/CD pipeline for .NET applications with Docker, Helm, and Kubernetes deployment
+2. **ci-docker.yaml** - Build and push Docker images using dynamic profile-based registry credentials
+3. **ci-helm.yaml** - Deploy Helm charts with dynamic profile-based kubeconfig secret resolution
 
 ---
 
-## 1. build-deploy (ci-docker.yaml)
+## 1. sw-cicd.yml - Complete CI/CD Pipeline
+
+Reusable workflow name: `Reusable SW CI/CD Pipeline`
+
+### Overview
+
+A comprehensive CI/CD pipeline that handles the complete application lifecycle:
+- Semantic versioning and Git tagging
+- .NET project building and testing
+- NuGet package publishing (optional)
+- Docker image building and pushing
+- Helm chart packaging and publishing
+- Kubernetes deployment with database connection string support
+
+### Invocation
+
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: my-app
+      helm-set-values: 'ingress.enabled=true,replicas=2,database.connectionString="${{ secrets.DATABASE_CONNECTION_STRING }}"'
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      DATABASE_CONNECTION_STRING: ${{ secrets.DATABASE_CONNECTION_STRING }}
+```
+
+### Inputs
+
+| Input | Required | Default | Type | Description |
+|-------|----------|---------|------|-------------|
+| `major-version` | false | `'1'` | string | Major version number for semantic versioning |
+| `minor-version` | false | `'0'` | string | Minor version number for semantic versioning |
+| `dotnet-version` | false | `'8.0.x'` | string | .NET SDK version to use |
+| `nuget-projects` | false | `''` | string | NuGet projects to pack and push (glob pattern). Leave empty to skip NuGet publishing |
+| `test-projects` | false | `'**/*UnitTests/*.csproj'` | string | Test projects to run (glob pattern) |
+| `run-tests` | false | `'false'` | string | Whether to run tests during build |
+| `dockerfile-path` | false | `'./Dockerfile'` | string | Path to Dockerfile |
+| `docker-context` | false | `'.'` | string | Docker build context |
+| `docker-platforms` | false | `'linux/amd64'` | string | Target platforms for Docker build |
+| `chart-path` | false | `'./chart'` | string | Path to Helm chart directory |
+| `chart-name` | true | — | string | Helm chart name (required) |
+| `deploy-to-development` | false | `true` | boolean | Deploy to development environment |
+| `development-namespace` | false | `'development'` | string | Kubernetes namespace for development |
+| `container-registry` | false | `'ghcr.io'` | string | Container registry (docker.io, ghcr.io, etc.) |
+| `image-name` | false | — | string | Docker image name (defaults to repository name) |
+| `helm-set-values` | false | — | string | Helm values as comma-separated key=value pairs. Supports secrets with format: `database.password="${{ secrets.DB_PASSWORD }}"` |
+
+### Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `nuget-api-key` | false | NuGet API key for package publishing |
+| `nuget-source` | false | NuGet source URL (defaults to nuget.org) |
+| `registry-username` | false | Container registry username (defaults to github.actor) |
+| `registry-password` | false | Container registry password/token (defaults to GITHUB_TOKEN) |
+| `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
+| `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
+| `*` | false | **Any application secrets** - Pass secrets directly through `helm-set-values` using `"${{ secrets.YOUR_SECRET }}"` syntax |
+
+### Secret Handling
+
+**Solution**: Use environment variable syntax `${SECRET_NAME}` within `helm-set-values`. The workflow automatically substitutes any secrets you pass.
+
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      helm-set-values: |
+        ingress.enabled=true,
+        replicas=1,
+        ingress.hosts={surl.sf9.io},
+        environment="Staging",
+        ingress.path="/api",
+        db="${DBCS_ESCAPED}"
+    secrets:
+      DBCS_ESCAPED: ${{ secrets.DBCS_ESCAPED }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+**Key Points:**
+- Use `${SECRET_NAME}` syntax in `helm-set-values` for any secret
+- Pass the secret in the `secrets` section with any name you want
+- The workflow automatically finds and substitutes all secrets
+- **No predefined secret names required** - completely generic!
+- Unknown secrets are left as-is (won't break the workflow)
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `version` | Generated semantic version |
+| `docker-image` | Built Docker image with tag |
+| `helm-chart` | Published Helm chart URL |
+
+### Examples
+
+#### Basic .NET Application (No Secrets)
+```yaml
+name: Deploy Application
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: my-api
+      helm-set-values: 'ingress.enabled=true,replicas=2,environment="Production"'
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+#### .NET Application with Database and API Key
+```yaml
+name: Deploy API with Secrets
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+### Usage Examples
+
+#### Simple Application (No Secrets)
+```yaml
+name: Deploy Simple App
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: simple-app
+      major-version: '1'
+      minor-version: '0'
+      helm-set-values: 'ingress.enabled=true,replicas=2,environment="production"'
+      deploy-to-development: true
+      development-namespace: prod
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+      registry-username: ${{ github.actor }}
+      registry-password: ${{ secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+#### Application with Database Secret (Your Exact Use Case)
+```yaml
+name: Deploy App with Database
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: surl-api
+      major-version: '2'
+      minor-version: '1'
+      helm-set-values: |
+        ingress.enabled=true,
+        replicas=1,
+        ingress.hosts={surl.sf9.io},
+        environment="Staging",
+        ingress.path="/api",
+        ingress.tls[0].secretName="surl-tls",
+        db="${DBCS_ESCAPED}"
+      deploy-to-development: true
+      development-namespace: staging
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      DBCS_ESCAPED: ${{ secrets.DBCS_ESCAPED }}
+```
+
+#### Complex Application with Multiple Secrets
+```yaml
+name: Deploy Enterprise Application
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: enterprise-app
+      helm-set-values: |
+        replicas=3,
+        environment="production",
+        ingress.enabled=true,
+        database.primary="${PRIMARY_DB}",
+        cache.redis="${REDIS_URL}",
+        storage.s3="${S3_ACCESS_KEY}",
+        email.smtp="${SMTP_PASSWORD}",
+        auth.jwt="${JWT_SECRET}"
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      PRIMARY_DB: ${{ secrets.PRIMARY_DATABASE_CONNECTION }}
+      REDIS_URL: ${{ secrets.REDIS_CONNECTION_STRING }}
+      S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+      SMTP_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      JWT_SECRET: ${{ secrets.JWT_SIGNING_KEY }}
+```
+
+#### NuGet Library Publishing
+```yaml
+name: Build and Publish Library
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: my-library
+      nuget-projects: 'src/**/*.csproj'
+      run-tests: 'true'
+      test-projects: 'tests/**/*Tests.csproj'
+      deploy-to-development: false
+    secrets:
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+```
+
+### Repository Secrets
+
+Set up these secrets in your repository:
+
+#### Required Secrets
+- **KUBECONFIG**: Base64 encoded kubeconfig for your Kubernetes cluster
+
+#### Optional Secrets (as needed by your application)
+- Any application secrets (database connections, API keys, etc.)
+- Pass them directly in `helm-set-values` using `${{ secrets.SECRET_NAME }}`
+
+#### NuGet Publishing (if applicable)
+- **NUGET_API_KEY**: API key for NuGet.org or private feed
+
+### Helm Chart Requirements
+
+Your Helm chart should support these standard values:
+- `image.repository`, `image.tag`: Container image settings (automatically set)
+- `ingress.enabled`, `ingress.hosts`, `ingress.tls`: Ingress configuration
+- `replicas`: Pod replica count
+- `environment`: Environment label
+
+#### Custom Values
+Any values passed through `helm-set-values` become available in your Helm templates:
+
+```yaml
+# values.yaml
+database:
+  connectionString: ""  # Set via helm-set-values
+api:
+  key: ""              # Set via helm-set-values
+replicas: 1            # Set via helm-set-values
+environment: "development"
+image:
+  repository: ""
+  tag: ""
+```
+
+#### Kubernetes Secret Creation
+Your Helm chart can create Kubernetes secrets from these values:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.fullname }}-secrets
+data:
+  {{- if .Values.database.connectionString }}
+  ConnectionStrings__DefaultConnection: {{ .Values.database.connectionString | b64enc }}
+  {{- end }}
+  {{- if .Values.api.key }}
+  ExternalApiKey: {{ .Values.api.key | b64enc }}
+  {{- end }}
+```
+
+### Quick Reference
+
+#### Basic Usage Pattern
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+    with:
+      chart-name: "your-app-name"
+      helm-set-values: |
+        key1=value1,
+        key2=value2,
+        secret.key="${SECRET_NAME}"
+    secrets:
+      SECRET_NAME: ${{ secrets.YOUR_SECRET }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+#### Common Patterns
+```yaml
+# Configuration only (no secrets)
+helm-set-values: 'replicas=3,environment="production",ingress.enabled=true'
+
+# Mixed configuration and secrets  
+helm-set-values: |
+  replicas=2,
+  ingress.enabled=true,
+  database.connectionString="${DATABASE_URL}",
+  api.key="${API_SECRET}"
+
+# Multiple secrets with any names you want
+helm-set-values: |
+  database.url="${MY_DB_SECRET}",
+  api.key="${MY_API_KEY}",
+  jwt.secret="${CUSTOM_JWT_SECRET}",
+  redis.url="${WHATEVER_NAME_I_WANT}"
+```
+
+#### Key Benefits
+- ✅ **Completely generic** - use any secret name you want
+- ✅ **No predefined mappings** - workflow automatically finds and substitutes
+- ✅ **Simple syntax** - just use `${SECRET_NAME}` in helm-set-values  
+- ✅ **Safe handling** - unknown secrets are left as-is
+- ✅ **Works with complex values** - database connection strings, JSON, etc.
+
+---
+
+## 2. ci-docker.yaml - Build and Deploy
+
+## 2. ci-docker.yaml - Build and Deploy
 
 Reusable workflow name: `build-deploy (reusable)`
 
@@ -81,7 +416,7 @@ jobs:
 
 ---
 
-## 2. helm-deploy (ci-helm.yaml)
+## 3. ci-helm.yaml - Helm Deploy
 
 Reusable workflow name: `helm-deploy (reusable)`
 
