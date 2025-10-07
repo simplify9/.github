@@ -156,36 +156,36 @@ runs:
         echo "Release name: ${{ inputs.release-name }}"
         echo "Namespace: ${{ inputs.namespace }}"
         
-        # Build helm command
-        HELM_CMD="helm upgrade --install ${{ inputs.release-name }} ${CHART_URL} --namespace ${{ inputs.namespace }}"
+        # Build helm command as array to properly handle arguments with spaces and special characters
+        HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_URL}" "--namespace" "${{ inputs.namespace }}")
         
         # Add timeout and wait options
         if [ "${{ inputs.wait }}" == "true" ]; then
-          HELM_CMD="${HELM_CMD} --wait"
+          HELM_ARGS+=("--wait")
         fi
-        HELM_CMD="${HELM_CMD} --timeout ${{ inputs.timeout }}"
+        HELM_ARGS+=("--timeout" "${{ inputs.timeout }}")
         
         # Add image repository and tag if provided
         if [ -n "${{ inputs.image-repository }}" ]; then
-          HELM_CMD="${HELM_CMD} --set image.repository=${{ inputs.image-repository }}"
+          HELM_ARGS+=("--set" "image.repository=${{ inputs.image-repository }}")
         fi
         if [ -n "${{ inputs.image-tag }}" ]; then
-          HELM_CMD="${HELM_CMD} --set image.tag=${{ inputs.image-tag }}"
+          HELM_ARGS+=("--set" "image.tag=${{ inputs.image-tag }}")
         fi
         
         # Add values file if provided
         if [ -n "${{ inputs.values-file }}" ]; then
-          HELM_CMD="${HELM_CMD} --values ${{ inputs.values-file }}"
+          HELM_ARGS+=("--values" "${{ inputs.values-file }}")
         fi
         if [ "${{ inputs.values }}" != "" ]; then
-          HELM_CMD="${HELM_CMD} --values /tmp/custom-values.yaml"
+          HELM_ARGS+=("--values" "/tmp/custom-values.yaml")
         fi
         
         # Add custom set values (regular values)
         if [ -n "${{ inputs.set-values }}" ]; then
           IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
           for value in "${VALUES[@]}"; do
-            HELM_CMD="${HELM_CMD} --set ${value}"
+            HELM_ARGS+=("--set" "${value}")
           done
         fi
         
@@ -193,12 +193,12 @@ runs:
         if [ -n "${{ inputs.set-string-values }}" ]; then
           IFS=',' read -ra STRING_VALUES <<< "${{ inputs.set-string-values }}"
           for value in "${STRING_VALUES[@]}"; do
-            HELM_CMD="${HELM_CMD} --set-string ${value}"
+            HELM_ARGS+=("--set-string" "${value}")
           done
         fi
         
-        echo "Executing: ${HELM_CMD}"
-        eval ${HELM_CMD}
+        echo "Executing: ${HELM_ARGS[*]}"
+        "${HELM_ARGS[@]}"
         
         echo "status=deployed" >> $GITHUB_OUTPUT
 
