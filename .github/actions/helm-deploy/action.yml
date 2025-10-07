@@ -4,20 +4,7 @@ author: 'Simplify9'
 
 inputs:
   chart-name:
-    desc        # Debug: Show what we received
-        echo "=== ACTION DEBUG: Received Values ==="
-        echo "set-values input: '${{ inputs.set-values }}'"
-        echo "set-string-values input: '${{ inputs.set-string-values }}'"
-        echo "SECRET_VALUES env: '$SECRET_VALUES'"
-        echo "SECRET_VALUES length: ${#SECRET_VALUES}"
-        if [ -n "$SECRET_VALUES" ]; then
-          echo "SECRET_VALUES hex dump:"
-          echo "$SECRET_VALUES" | hexdump -C | head -5
-          echo "Contains semicolons: $(echo "$SECRET_VALUES" | grep -c ';' || echo '0')"
-          echo "Contains equals: $(echo "$SECRET_VALUES" | grep -c '=' || echo '0')"
-          echo "Contains spaces: $(echo "$SECRET_VALUES" | grep -c ' ' || echo '0')"
-        fi
-        echo "======================================"n: 'Name of the Helm chart'
+    description: 'Name of the Helm chart'
     required: true
   chart-version:
     description: 'Version of the Helm chart to deploy'
