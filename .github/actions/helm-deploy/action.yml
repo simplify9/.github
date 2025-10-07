@@ -191,10 +191,19 @@ runs:
         
         # Add custom set-string values (secret values)
         if [ -n "${{ inputs.set-string-values }}" ]; then
-          IFS=',' read -ra STRING_VALUES <<< "${{ inputs.set-string-values }}"
-          for value in "${STRING_VALUES[@]}"; do
-            HELM_ARGS+=("--set-string" "${value}")
+          # Split on comma without shell interpretation using parameter expansion
+          string_values="${{ inputs.set-string-values }}"
+          while [[ "$string_values" == *","* ]]; do
+            value="${string_values%%,*}"
+            if [ -n "$value" ]; then
+              HELM_ARGS+=("--set-string" "$value")
+            fi
+            string_values="${string_values#*,}"
           done
+          # Handle the last value (or only value if no commas)
+          if [ -n "$string_values" ]; then
+            HELM_ARGS+=("--set-string" "$string_values")
+          fi
         fi
         
         echo "Executing: ${HELM_ARGS[*]}"
