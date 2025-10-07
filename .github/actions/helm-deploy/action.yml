@@ -191,8 +191,13 @@ runs:
         
         # Add custom set-string values (secret values)
         if [ -n "${{ inputs.set-string-values }}" ]; then
-          # Split on comma without shell interpretation using parameter expansion
-          string_values="${{ inputs.set-string-values }}"
+          # Write the values to a file to avoid shell interpretation during variable assignment
+          cat > /tmp/string_values << 'STRINGEOF'
+        ${{ inputs.set-string-values }}
+        STRINGEOF
+          
+          # Read from file and process safely
+          string_values=$(cat /tmp/string_values | tr -d '\n')
           while [[ "$string_values" == *","* ]]; do
             value="${string_values%%,*}"
             if [ -n "$value" ]; then
@@ -204,6 +209,8 @@ runs:
           if [ -n "$string_values" ]; then
             HELM_ARGS+=("--set-string" "$string_values")
           fi
+          
+          rm -f /tmp/string_values
         fi
         
         echo "Executing: ${HELM_ARGS[*]}"
