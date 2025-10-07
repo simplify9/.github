@@ -156,6 +156,12 @@ runs:
         echo "Release name: ${{ inputs.release-name }}"
         echo "Namespace: ${{ inputs.namespace }}"
         
+        # Debug: Show what we received
+        echo "=== DEBUG: Received Values ==="
+        echo "set-values input: '${{ inputs.set-values }}'"
+        echo "set-string-values input: '${{ inputs.set-string-values }}'"
+        echo "=========================="
+        
         # Build helm command as array to properly handle arguments with spaces and special characters
         HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_URL}" "--namespace" "${{ inputs.namespace }}")
         
@@ -191,6 +197,7 @@ runs:
         
         # Add custom set-string values (secret values)
         if [ -n "${{ inputs.set-string-values }}" ]; then
+          echo "Processing secret values..."
           # Write the values to a file to avoid shell interpretation during variable assignment
           cat > /tmp/string_values << 'STRINGEOF'
         ${{ inputs.set-string-values }}
@@ -198,19 +205,29 @@ runs:
           
           # Read from file and process safely
           string_values=$(cat /tmp/string_values | tr -d '\n')
-          while [[ "$string_values" == *","* ]]; do
-            value="${string_values%%,*}"
-            if [ -n "$value" ]; then
-              HELM_ARGS+=("--set-string" "$value")
+          
+          # Only process if we have actual content (not just whitespace)
+          if [ -n "$(echo "$string_values" | tr -d '[:space:]')" ]; then
+            while [[ "$string_values" == *","* ]]; do
+              value="${string_values%%,*}"
+              if [ -n "$value" ]; then
+                echo "Adding --set-string: $value"
+                HELM_ARGS+=("--set-string" "$value")
+              fi
+              string_values="${string_values#*,}"
+            done
+            # Handle the last value (or only value if no commas)
+            if [ -n "$string_values" ]; then
+              echo "Adding --set-string: $string_values"
+              HELM_ARGS+=("--set-string" "$string_values")
             fi
-            string_values="${string_values#*,}"
-          done
-          # Handle the last value (or only value if no commas)
-          if [ -n "$string_values" ]; then
-            HELM_ARGS+=("--set-string" "$string_values")
+          else
+            echo "No secret values to process"
           fi
           
           rm -f /tmp/string_values
+        else
+          echo "No set-string-values input provided"
         fi
         
         echo "Executing: ${HELM_ARGS[*]}"
