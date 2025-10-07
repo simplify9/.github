@@ -242,17 +242,11 @@ jobs:
           VALUES='${{ inputs.helm-set-values || '' }}'
           SECRET_VALUES='${{ secrets.helm-set-secret-values || '' }}'
           
-          if [[ -n "$VALUES" && -n "$SECRET_VALUES" ]]; then
-            COMBINED_VALUES="${VALUES},${SECRET_VALUES}"
-          elif [[ -n "$VALUES" ]]; then
-            COMBINED_VALUES="$VALUES"
-          elif [[ -n "$SECRET_VALUES" ]]; then
-            COMBINED_VALUES="$SECRET_VALUES"
-          else
-            COMBINED_VALUES=""
-          fi
+          # Output regular values for --set
+          echo "set-values=$VALUES" >> $GITHUB_OUTPUT
           
-          echo "values=$COMBINED_VALUES" >> $GITHUB_OUTPUT
+          # Output secret values for --set-string
+          echo "set-string-values=$SECRET_VALUES" >> $GITHUB_OUTPUT
 
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
@@ -266,5 +260,6 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          set-values: ${{ steps.helm-values.outputs.values }}
+          set-values: ${{ steps.helm-values.outputs.set-values }}
+          set-string-values: ${{ steps.helm-values.outputs.set-string-values }}
           timeout: '1m'

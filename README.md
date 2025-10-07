@@ -98,9 +98,10 @@ jobs:
       minor-version: '0'
       development-namespace: 'playground'
       nuget-projects: 'SW.Surl.Sdk/SW.Surl.Sdk.csproj'
-      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls",db="${{ secrets.DBCS }}"'
+      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
     secrets:
       kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
+      helm-set-secret-values: db=${{ toJSON(secrets.DBCS) }}
       DBCS: ${{ secrets.DBCS }}
       nuget-api-key: ${{ secrets.SWNUGETKEY }}
 ```
@@ -124,7 +125,7 @@ jobs:
 | `development-namespace` | false | `'development'` | string | Kubernetes namespace for development |
 | `container-registry` | false | `'ghcr.io'` | string | Container registry (docker.io, ghcr.io, etc.) |
 | `image-name` | false | — | string | Docker image name (defaults to repository name) |
-| `helm-set-values` | false | — | string | Helm values as comma-separated key=value pairs. Supports secrets with format: `database.password="${{ secrets.DB_PASSWORD }}"` |
+| `helm-set-values` | false | — | string | Regular Helm values as comma-separated key=value pairs for configuration (uses `--set`). Example: `ingress.enabled=true,replicas=2,environment="Production"` |
 
 ### Secrets
 
@@ -136,46 +137,46 @@ jobs:
 | `registry-password` | false | Container registry password/token (defaults to GITHUB_TOKEN) |
 | `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
 | `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
-| `*` | false | **Any application secrets** - Pass secrets directly through `helm-set-values` using `"${{ secrets.YOUR_SECRET }}"` syntax |
+| `helm-set-secret-values` | false | Secret values as comma-separated key=value pairs (uses `--set-string`). Example: `db=${{ toJSON(secrets.DBCS) }},api.key=${{ secrets.API_KEY }}` |
 
 ### Secret Handling
 
-**Solution**: Use direct GitHub Actions secret syntax `"${{ secrets.SECRET_NAME }}"` within `helm-set-values`. The workflow passes secrets directly to the `helm-deploy` action, which handles them correctly without any preprocessing.
+**Two-Input Approach**: The workflow uses separate inputs for regular configuration and secrets to ensure proper Helm handling:
+
+1. **`helm-set-values`** (input) → Regular configuration values → `--set` (shell-parsed)
+2. **`helm-set-secret-values`** (secret) → Secret values → `--set-string` (literal strings)
 
 **Architecture**:
-1. **Your workflow** → calls `sw-cicd.yml` with secrets in `helm-set-values`
-2. **sw-cicd.yml** → passes values to `helm-deploy` action
-3. **helm-deploy action** → processes secrets and deploys to Kubernetes
+1. **Your workflow** → calls `sw-cicd.yml` with values and secrets separated
+2. **sw-cicd.yml** → passes values to `helm-deploy` action with proper parameter separation
+3. **helm-deploy action** → uses `--set` for config and `--set-string` for secrets
 
 **Key Features**:
-- ✅ **Direct secret interpolation** - GitHub Actions processes `${{ secrets.NAME }}` before reaching helm
+- ✅ **Proper secret handling** - `--set-string` prevents shell parsing of secret values with special characters
+- ✅ **Separation of concerns** - Regular config vs secrets handled differently
+- ✅ **Connection string safe** - Avoids "SSL: command not found" errors with database connection strings
 - ✅ **Repository name lowercasing** - Automatically converts image repository names to lowercase
 - ✅ **Fixed Helm version** - Uses Helm 3.14.0 for consistency
-- ✅ **Proper kubeconfig handling** - Base64 decoding and secure file permissions
 
 ```yaml
 jobs:
   deploy:
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
     with:
-      helm-set-values: |
-        ingress.enabled=true,
-        replicas=1,
-        ingress.hosts={surl.sf9.io},
-        environment="Staging",
-        ingress.path="/api",
-        db=${{ secrets.DBCS }}
+      # Regular configuration values (--set)
+      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
     secrets:
-      DBCS: ${{ secrets.DBCS }}
       kubeconfig: ${{ secrets.KUBECONFIG }}
+      # Secret values (--set-string) - handles connection strings with special characters
+      helm-set-secret-values: db=${{ toJSON(secrets.DBCS) }}
 ```
 
 **Key Points:**
-- Use `${{ secrets.SECRET_NAME }}` syntax in `helm-set-values` for any secret
-- Pass the secret in the `secrets` section with the same name
-- The workflow passes secrets directly to Helm without preprocessing
-- **Clean and simple** - direct GitHub Actions secret interpolation
-- Matches the proven pattern from your working deployment
+- **Regular config**: Use `helm-set-values` input for non-sensitive configuration
+- **Secrets**: Use `helm-set-secret-values` secret for sensitive data like connection strings
+- **Connection strings**: Use `${{ toJSON(secrets.NAME) }}` to properly escape complex connection strings
+- **Shell-safe**: `--set-string` prevents shell parsing issues with spaces and special characters
+- **Clean separation** - No mixing of config and secrets in the same parameter
 
 ### Outputs
 

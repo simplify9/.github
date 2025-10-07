@@ -48,6 +48,9 @@ inputs:
   set-values:
     description: 'Additional --set values (comma-separated: key1=value1,key2=value2)'
     required: false
+  set-string-values:
+    description: 'Additional --set-string values (comma-separated: key1=value1,key2=value2)'
+    required: false
   timeout:
     description: 'Helm deployment timeout'
     required: false
@@ -178,11 +181,19 @@ runs:
           HELM_CMD="${HELM_CMD} --values /tmp/custom-values.yaml"
         fi
         
-        # Add custom set values
+        # Add custom set values (regular values)
         if [ -n "${{ inputs.set-values }}" ]; then
           IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
           for value in "${VALUES[@]}"; do
             HELM_CMD="${HELM_CMD} --set ${value}"
+          done
+        fi
+        
+        # Add custom set-string values (secret values)
+        if [ -n "${{ inputs.set-string-values }}" ]; then
+          IFS=',' read -ra STRING_VALUES <<< "${{ inputs.set-string-values }}"
+          for value in "${STRING_VALUES[@]}"; do
+            HELM_CMD="${HELM_CMD} --set-string ${value}"
           done
         fi
         
