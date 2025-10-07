@@ -236,10 +236,19 @@ jobs:
     if: ${{ inputs.deploy-to-development }}
     environment: development
     steps:
+      - name: Debug secret values in workflow template
+        run: |
+          echo "=== WORKFLOW TEMPLATE DEBUG ==="
+          echo "Raw secret length: ${#SECRET_VAL}"
+          echo "Raw secret value: '$SECRET_VAL'"
+          echo "============================"
+        env:
+          SECRET_VAL: "${{ secrets.helm-set-secret-values }}"
+      
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
         env:
-          HELM_SECRET_VALUES: ${{ secrets.helm-set-secret-values }}
+          SECRET_VALUES: "${{ secrets.helm-set-secret-values }}"
         with:
           chart-name: ${{ inputs.chart-name }}
           chart-version: ${{ needs.version.outputs.version }}
@@ -251,5 +260,4 @@ jobs:
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
           set-values: ${{ inputs.helm-set-values }}
-          set-string-values: ${{ env.HELM_SECRET_VALUES }}
           timeout: '1m'
