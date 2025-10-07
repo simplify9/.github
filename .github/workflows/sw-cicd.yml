@@ -238,6 +238,8 @@ jobs:
     steps:
       - name: Deploy to Development
         uses: simplify9/.github/.github/actions/helm-deploy@main
+        env:
+          HELM_SECRET_VALUES: ${{ secrets.helm-set-secret-values }}
         with:
           chart-name: ${{ inputs.chart-name }}
           chart-version: ${{ needs.version.outputs.version }}
@@ -249,5 +251,5 @@ jobs:
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
           set-values: ${{ inputs.helm-set-values }}
-          set-string-values: ${{ secrets.helm-set-secret-values }}
+          set-string-values: ${{ env.HELM_SECRET_VALUES }}
           timeout: '1m'
