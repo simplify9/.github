@@ -1,0 +1,304 @@
+name: 'API CI/CD Pipeline (reusable)'
+
+on:
+  workflow_call:
+    inputs:
+      # Version configuration (for version job)
+      major-version:
+        description: 'Major version number'
+        required: false
+        default: '1'
+        type: string
+      minor-version:
+        description: 'Minor version number'
+        required: false
+        default: '0'
+        type: string
+      
+      # Docker configuration (for build job)
+      dockerfile-path:
+        description: 'Path to Dockerfile'
+        required: false
+        default: './Dockerfile'
+        type: string
+      docker-context:
+        description: 'Docker build context'
+        required: false
+        default: '.'
+        type: string
+      docker-platforms:
+        description: 'Target platforms for Docker build'
+        required: false
+        default: 'linux/amd64'
+        type: string
+      
+      # Helm configuration (for build job)
+      chart-path:
+        description: 'Path to Helm chart directory'
+        required: false
+        default: './chart'
+        type: string
+      chart-name:
+        description: 'Helm chart name'
+        required: true
+        type: string
+      
+      # Registry configuration (for build job)
+      container-registry:
+        description: 'Container registry (docker.io, ghcr.io, etc.)'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      image-name:
+        description: 'Docker image name (will use repository name if not provided)'
+        required: false
+        type: string
+      
+      # Development deployment configuration (for deploy-development job)
+      deploy-to-development:
+        description: 'Deploy to development environment'
+        required: false
+        default: true
+        type: boolean
+      development-namespace:
+        description: 'Kubernetes namespace for development'
+        required: false
+        default: 'development'
+        type: string
+      development-helm-set-values:
+        description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
+        required: false
+        type: string
+      development-branch-pattern:
+        description: 'Regex pattern for branches that should deploy to development'
+        required: false
+        default: '^(main|master|develop|development|feature/.+|bugfix/.+|hotfix/.+)$'
+        type: string
+      
+      # Staging deployment configuration (for deploy-staging job)
+      deploy-to-staging:
+        description: 'Deploy to staging environment'
+        required: false
+        default: false
+        type: boolean
+      staging-namespace:
+        description: 'Kubernetes namespace for staging'
+        required: false
+        default: 'staging'
+        type: string
+      staging-helm-set-values:
+        description: 'Staging Helm set values (comma-separated: key1=value1,key2=value2)'
+        required: false
+        type: string
+      staging-branch-pattern:
+        description: 'Regex pattern for branches that should deploy to staging'
+        required: false
+        default: '^(main|master|release/.+|staging/.+)$'
+        type: string
+      
+      # Production deployment configuration (for deploy-production job)
+      deploy-to-production:
+        description: 'Deploy to production environment'
+        required: false
+        default: false
+        type: boolean
+      production-namespace:
+        description: 'Kubernetes namespace for production'
+        required: false
+        default: 'production'
+        type: string
+      production-helm-set-values:
+        description: 'Production Helm set values (comma-separated: key1=value1,key2=value2)'
+        required: false
+        type: string
+      production-branch-pattern:
+        description: 'Regex pattern for branches that should deploy to production'
+        required: false
+        default: '^(main|master|release/.+|v[0-9]+\\.[0-9]+\\.[0-9]+.*)$'
+        type: string
+
+    secrets:
+      # Container registry secrets
+      registry-username:
+        description: 'Container registry username'
+        required: false
+      registry-password:
+        description: 'Container registry password/token'
+        required: false
+      
+      # Kubernetes secrets
+      kubeconfig:
+        description: 'Base64 encoded kubeconfig'
+        required: false
+      
+      # GitHub token for tagging
+      github-token:
+        description: 'GitHub token for tagging'
+        required: false
+      
+      # Secret deployment values (ordered by deployment stages)
+      development-helm-set-secret-values:
+        description: 'Development Helm set secret values (comma-separated: key1=value1,key2=value2)'
+        required: false
+      staging-helm-set-secret-values:
+        description: 'Staging Helm set secret values (comma-separated: key1=value1,key2=value2)'
+        required: false
+      production-helm-set-secret-values:
+        description: 'Production Helm set secret values (comma-separated: key1=value1,key2=value2)'
+        required: false
+
+    outputs:
+      version:
+        description: 'Generated semantic version'
+        value: ${{ jobs.version.outputs.version }}
+      docker-image:
+        description: 'Built Docker image with tag'
+        value: ${{ jobs.build.outputs.docker-image }}
+      helm-chart:
+        description: 'Published Helm chart URL'
+        value: ${{ jobs.build.outputs.helm-chart }}
+
+env:
+  # Set default registry and image name
+  CONTAINER_REGISTRY: ${{ inputs.container-registry }}
+  IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: ${{ inputs.major-version }}
+          minor: ${{ inputs.minor-version }}
+ 
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ steps.semver.outputs.version }}
+          sha: ${{ github.sha }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: version
+    outputs:
+      docker-image: ${{ steps.docker.outputs.image-tags }}
+      helm-chart: ${{ steps.helm.outputs.chart-url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and push Docker image
+        id: docker
+        uses: simplify9/.github/.github/actions/docker-build-push@main
+        with:
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          image-name: ${{ env.IMAGE_NAME }}
+          version: ${{ needs.version.outputs.version }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          dockerfile: ${{ inputs.dockerfile-path }}
+          context: ${{ inputs.docker-context }}
+          platforms: ${{ inputs.docker-platforms }}
+
+      - name: Package and push Helm chart
+        id: helm
+        uses: simplify9/.github/.github/actions/helm-package-push@main
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-path: ${{ inputs.chart-path }}
+          version: ${{ needs.version.outputs.version }}
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          repository: ${{ github.repository_owner }}/charts
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
+          image-tag: ${{ needs.version.outputs.version }}
+          update-image-values: 'true'
+
+  deploy-development:
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    if: |
+      inputs.deploy-to-development && 
+      github.event_name == 'push' && 
+      contains(fromJSON('["true"]'), toJSON(github.ref_name == 'main' || github.ref_name == 'master' || github.ref_name == 'develop' || github.ref_name == 'development' || startsWith(github.ref_name, 'feature/') || startsWith(github.ref_name, 'bugfix/') || startsWith(github.ref_name, 'hotfix/')))
+    environment: development
+    steps:
+      - name: Deploy to Development
+        uses: simplify9/.github/.github/actions/helm-deploy@main
+        env:
+          SECRET_VALUES: ${{ secrets.development-helm-set-secret-values }}
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-version: ${{ needs.version.outputs.version }}
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          repository: ${{ github.repository_owner }}/charts
+          registry-username: ${{ secrets.registry-username || github.actor }}
+          registry-password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          kubeconfig: ${{ secrets.kubeconfig }}
+          release-name: ${{ inputs.chart-name }}-dev
+          namespace: ${{ inputs.development-namespace }}
+          set-values: ${{ inputs.development-helm-set-values }}
+          timeout: '5m'
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [version, build, deploy-development]
+    if: |
+      inputs.deploy-to-staging && 
+      github.event_name == 'push' && 
+      (github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref_name, 'release/') || startsWith(github.ref_name, 'staging/'))
+    environment: staging
+    steps:
+      - name: Deploy to Staging
+        uses: simplify9/.github/.github/actions/helm-deploy@main
+        env:
+          SECRET_VALUES: ${{ secrets.staging-helm-set-secret-values }}
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-version: ${{ needs.version.outputs.version }}
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          repository: ${{ github.repository_owner }}/charts
+          registry-username: ${{ secrets.registry-username || github.actor }}
+          registry-password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          kubeconfig: ${{ secrets.kubeconfig }}
+          release-name: ${{ inputs.chart-name }}-staging
+          namespace: ${{ inputs.staging-namespace }}
+          set-values: ${{ inputs.staging-helm-set-values }}
+          timeout: '5m'
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [version, build, deploy-staging]
+    if: |
+      inputs.deploy-to-production && 
+      github.event_name == 'push' && 
+      (github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref_name, 'release/') || startsWith(github.ref_name, 'v'))
+    environment: production
+    steps:
+      - name: Deploy to Production
+        uses: simplify9/.github/.github/actions/helm-deploy@main
+        env:
+          SECRET_VALUES: ${{ secrets.production-helm-set-secret-values }}
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-version: ${{ needs.version.outputs.version }}
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          repository: ${{ github.repository_owner }}/charts
+          registry-username: ${{ secrets.registry-username || github.actor }}
+          registry-password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          kubeconfig: ${{ secrets.kubeconfig }}
+          release-name: ${{ inputs.chart-name }}-prod
+          namespace: ${{ inputs.production-namespace }}
+          set-values: ${{ inputs.production-helm-set-values }}
+          timeout: '5m'
