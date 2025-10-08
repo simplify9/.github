@@ -8,14 +8,14 @@ This guide shows how to use the `api-cicd.yml` reusable workflow template for yo
 
 Here's what inputs you need to pass for deployment:
 
-### Required Inputs
+### Required Inputs for Your Calling Workflow
 ```yaml
 jobs:
   deploy:
     uses: simplify9/.github/.github/workflows/api-cicd.yml@main
     with:
       # Required
-      chart-name: "my-api"                    # Your application name
+      chart-name: "jibli-api"                    # Your application name
       
       # Enable deployments (all false by default)
       deploy-to-development: true             # Deploy from 'development' branch
@@ -24,7 +24,10 @@ jobs:
       
       # Registry configuration
       container-registry: "registry.digitalocean.com"  # Your container registry
-      image-name: "sf9cr/my-api"             # Your image name
+      image-name: "sf9cr/jibli-api"             # Your image name
+      
+      # 🎯 IMPORTANT: Helm image configuration
+      helm-image-repo: "registry.digitalocean.com/sf9cr"  # Registry path for Helm values
       
     secrets:
       # Required for deployment
@@ -33,19 +36,32 @@ jobs:
       registry-password: ${{ secrets.REGISTRY_PASSWORD }}
 ```
 
-### Optional Helm Image Configuration
-For custom Helm charts with specific image structure:
+### Why `helm-image-repo` is Important
+
+Your Helm chart template expects this structure:
+```yaml
+image: "{{ .Values.image.repo }}/{{ .Values.image.overrideName | default .Values.app.name }}:{{ .Values.image.overrideVersion | default .Values.app.version }}"
+```
+
+The template automatically sets these values:
+- `image.repo` = `"registry.digitalocean.com/sf9cr"` (from your `helm-image-repo`)
+- `app.name` = `"jibli-api"` (from your `chart-name`)
+- `app.version` = `"1.0.17"` (from semantic version)
+- `image.overrideVersion` = `"1.0.17"` (ensures version is used)
+
+**Final Image Result**: `registry.digitalocean.com/sf9cr/jibli-api:1.0.17` ✅
+
+### Optional Helm Customization
 ```yaml
 with:
-  # ... other inputs ...
+  # ... above inputs ...
   
-  # Optional: Override default image configuration
-  helm-image-repo: "registry.digitalocean.com/sf9cr"  # Custom image.repo value
-  helm-app-name: "jibli-api"                          # Custom app.name value
+  # Optional: Override app name in image path
+  helm-app-name: "custom-app-name"           # Custom app.name value
   
-  # Optional: Custom Helm values per environment
+  # Optional: Environment-specific Helm values
   development-helm-set-values: "replicas=1,debug=true"
-  staging-helm-set-values: "replicas=2,debug=false"
+  staging-helm-set-values: "replicas=2"  
   production-helm-set-values: "replicas=3,resources.requests.memory=512Mi"
 ```
 
@@ -173,7 +189,68 @@ debug-branch:
         echo "Deploy to production: ${{ inputs.deploy-to-production }}"
 ```
 
-### 🚀 **Quick Fix Checklist** action!Hub Actions UI clean. You must explicitly enable the deployments you need.
+### � **Issue 10**: Pod shows wrong image or missing version tag
+
+**Problem**: Pod deployment shows incorrect image path or missing version
+
+**Common Symptoms:**
+```bash
+# ❌ Wrong image structure
+Image: registry.digitalocean.com/sf9cr/simplify9/Jibli-api/jibli-api:
+
+# ❌ Missing version tag
+Image: registry.digitalocean.com/sf9cr/jibli-api:
+
+# ✅ Correct image structure
+Image: registry.digitalocean.com/sf9cr/jibli-api:1.0.17
+```
+
+**Root Cause**: Missing or incorrect `helm-image-repo` input
+
+**✅ Solution**: Explicitly provide `helm-image-repo` in your calling workflow
+
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "jibli-api"
+      container-registry: "registry.digitalocean.com"
+      image-name: "sf9cr/jibli-api"
+      
+      # 🎯 CRITICAL: Add this line for proper image path
+      helm-image-repo: "registry.digitalocean.com/sf9cr"
+      
+      deploy-to-development: true
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+```
+
+**How it works:**
+- Template sets `image.repo` = `"registry.digitalocean.com/sf9cr"`
+- Template sets `app.name` = `"jibli-api"`
+- Template sets `app.version` = `"1.0.17"` (semantic version)
+- Template sets `image.overrideVersion` = `"1.0.17"` (ensures version is used)
+- Your Helm chart combines them: `registry.digitalocean.com/sf9cr/jibli-api:1.0.17`
+
+**For Different Registry Patterns:**
+```yaml
+# DigitalOcean
+helm-image-repo: "registry.digitalocean.com/namespace"
+
+# Docker Hub
+helm-image-repo: "docker.io/username"
+
+# GitHub Container Registry  
+helm-image-repo: "ghcr.io/owner"
+
+# AWS ECR
+helm-image-repo: "123456789.dkr.ecr.region.amazonaws.com"
+```
+
+### �🚀 **Quick Fix Checklist** action!Hub Actions UI clean. You must explicitly enable the deployments you need.
 
 ## Input Parameters Reference
 
@@ -573,13 +650,15 @@ jobs:
 
 | Input | Required | Description | Default | Example |
 |-------|----------|-------------|---------|---------|
-| `helm-image-repo` | No | Custom image repository path | `{container-registry}/{repository}` | `"registry.digitalocean.com/sf9cr"` |
+| `helm-image-repo` | **Recommended** | Registry path for `image.repo` value | Uses fallback logic | `"registry.digitalocean.com/sf9cr"` |
 | `helm-app-name` | No | Custom app name for image | `{chart-name}` | `"jibli-api"` |
+
+**⚠️ Important**: While `helm-image-repo` is technically optional, you should **always provide it** for reliable deployments. The fallback logic may not match your registry structure.
 
 ### Version Synchronization
 
-- **`app.version`** is **automatically** set to the semantic version from `determine-semver`
-- Version flows: Git commits → Semantic version → Docker tag → Helm app.version → Pod image
+- **`app.version`** and **`image.overrideVersion`** are **automatically** set to the semantic version from `determine-semver`
+- Version flows: Git commits → Semantic version → Docker tag → Helm values → Pod image
 - **No manual version management needed** - everything stays in sync
 
 ### Required Inputs Summary
@@ -603,9 +682,8 @@ jobs:
       container-registry: "your-registry.com" # Your container registry
       image-name: "your-org/your-app"         # Your image name
       
-      # Optional: Helm image customization
-      helm-image-repo: "custom-registry/path" # Override default image.repo
-      helm-app-name: "custom-app-name"        # Override default app.name
+      # 🎯 IMPORTANT: Helm image configuration  
+      helm-image-repo: "your-registry.com/namespace" # Registry path for Helm values
       
     secrets:
       # Required for deployment

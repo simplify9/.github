@@ -376,9 +376,10 @@ jobs:
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, github.repository) }},
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, 'sf9cr') }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
-            app.version=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format(',{0}', inputs.development-helm-set-values) || '' }}
+            app.version=${{ needs.version.outputs.version }},
+            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format(',{0}', inputs.development-helm-set-values) || '' }}
           timeout: '5m'
 
   deploy-staging:
@@ -405,9 +406,10 @@ jobs:
           release-name: ${{ inputs.chart-name }}-staging
           namespace: ${{ inputs.staging-namespace }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, github.repository) }},
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, 'sf9cr') }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
-            app.version=${{ needs.version.outputs.version }}${{ inputs.staging-helm-set-values && format(',{0}', inputs.staging-helm-set-values) || '' }}
+            app.version=${{ needs.version.outputs.version }},
+            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.staging-helm-set-values && format(',{0}', inputs.staging-helm-set-values) || '' }}
           timeout: '5m'
 
   deploy-production:
@@ -434,7 +436,8 @@ jobs:
           release-name: ${{ inputs.chart-name }}-prod
           namespace: ${{ inputs.production-namespace }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, github.repository) }},
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, 'sf9cr') }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
-            app.version=${{ needs.version.outputs.version }}${{ inputs.production-helm-set-values && format(',{0}', inputs.production-helm-set-values) || '' }}
+            app.version=${{ needs.version.outputs.version }},
+            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.production-helm-set-values && format(',{0}', inputs.production-helm-set-values) || '' }}
           timeout: '5m'
