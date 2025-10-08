@@ -2,7 +2,15 @@
 
 This guide shows how to use the `api-cicd.yml` reusable workflow template for your API projects. 
 
-**Important**: All deployment stages are **disabled by default** to keep your GitHub Actions UI clean. You must explicitly enable the deployments you need.
+**Important**: All deployment stages are **disabled by default** to keep**How it works** (unified artifact approach):
+1. 📥 **Repository**: Adds the chart repository URL to Helm (for external charts)
+2. 📦 **Pull**: Pulls the `source-chart-name` chart from the repository (for external charts)
+3. ✏️ **Rename**: Renames the chart to your `chart-name` (for external charts)
+4. ✏️ **Repackage**: Updates Chart.yaml with your app name and version
+5. 💾 **Artifact**: Saves the chart as a GitHub Actions artifact (both local and external)
+6. 🚀 **Deploy**: Modified helm-deploy action deploys directly from artifact
+
+**Unified Deployment**: Both local and external charts are deployed using the same artifact-based approach through the enhanced helm-deploy action!Hub Actions UI clean. You must explicitly enable the deployments you need.
 
 ## Input Parameters Reference
 
@@ -203,13 +211,15 @@ jobs:
       kubeconfig: ${{ secrets.KUBECONFIG }}
 ```
 
-**How it works** (matching Azure Pipelines pattern):
-1. � **Repository**: Adds the chart repository URL to Helm  
-2. � **Pull**: Pulls the `source-chart-name` chart from the repository
+**How it works** (simplified approach):
+1. 📥 **Repository**: Adds the chart repository URL to Helm  
+2. 📦 **Pull**: Pulls the `source-chart-name` chart from the repository
 3. ✏️ **Rename**: Renames the chart to your `chart-name` 
 4. ✏️ **Repackage**: Updates Chart.yaml with your app name and version
-5. 📦 **Push**: Pushes the customized chart to your registry  
-6. 🚀 **Deploy**: Deploys with your app name visible in Kubernetes
+5. � **Artifact**: Saves the repackaged chart as a GitHub Actions artifact
+6. 🚀 **Deploy**: Deploys directly using Helm with your app name visible in Kubernetes
+
+**No Registry Required**: External charts are pulled, repackaged locally, and deployed directly - no need to publish to any Helm repository!
 
 ## Full Pipeline - All Environments
 
@@ -561,15 +571,17 @@ The template uses an intelligent repackaging approach to ensure your application
 
 **Benefits**:
 - ✅ **Proper identification**: Your application appears with YOUR name in Kubernetes
-- ✅ **No more generic names**: Never see "s9genericchart" in your cluster
+- ✅ **No more generic names**: Never see "s9genericchart" in your cluster  
 - ✅ **Consistent experience**: Local and external charts work identically
 - ✅ **Zero configuration**: Automatically handled by the template
+- ✅ **Unified deployment**: Single helm-deploy action handles both local and external charts
+- ✅ **Artifact-based**: All charts are deployed from GitHub Actions artifacts for consistency
 
 **Example**: With `chart-name: "payment-api"` and `chart-path: "https://charts.sf9.io"`:
 1. Template pulls `s9genericchart` from sf9 repository
 2. Renames it to `payment-api` in Chart.yaml  
-3. Repackages and pushes as `payment-api:1.0.0`
-4. Deploys with app name `payment-api` in your cluster
+3. Saves as GitHub Actions artifact
+4. Enhanced helm-deploy action deploys directly from artifact with app name `payment-api` in your cluster
 
 ## Fixing Common Calling Workflow Issues
 

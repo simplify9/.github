@@ -9,19 +9,22 @@ inputs:
   chart-version:
     description: 'Version of the Helm chart to deploy'
     required: true
+  chart-path:
+    description: 'Local path to chart directory (for artifact-based deployment). If provided, will deploy from local chart instead of OCI registry.'
+    required: false
   registry:
-    description: 'OCI registry URL where the chart is stored'
+    description: 'OCI registry URL where the chart is stored (ignored if chart-path is provided)'
     required: false
     default: 'docker.io'
   repository:
-    description: 'Repository path in the registry'
-    required: true
+    description: 'Repository path in the registry (ignored if chart-path is provided)'
+    required: false
   registry-username:
-    description: 'Registry username for authentication'
-    required: true
+    description: 'Registry username for authentication (ignored if chart-path is provided)'
+    required: false
   registry-password:
-    description: 'Registry password or token for authentication'
-    required: true
+    description: 'Registry password or token for authentication (ignored if chart-path is provided)'
+    required: false
   kubeconfig:
     description: 'Base64 encoded kubeconfig for cluster access'
     required: true
@@ -86,6 +89,28 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.chart-path }}" ]; then
+          # OCI registry deployment - validate required inputs
+          if [ -z "${{ inputs.repository }}" ]; then
+            echo "Error: 'repository' is required when deploying from OCI registry (chart-path not provided)"
+            exit 1
+          fi
+          if [ -z "${{ inputs.registry-username }}" ]; then
+            echo "Error: 'registry-username' is required when deploying from OCI registry (chart-path not provided)"
+            exit 1
+          fi
+          if [ -z "${{ inputs.registry-password }}" ]; then
+            echo "Error: 'registry-password' is required when deploying from OCI registry (chart-path not provided)"
+            exit 1
+          fi
+          echo "Validation passed: OCI registry deployment"
+        else
+          echo "Validation passed: Local chart deployment from ${{ inputs.chart-path }}"
+        fi
+
     - name: Set up Helm
       uses: azure/setup-helm@v4
       with:
@@ -118,6 +143,7 @@ runs:
         kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Configure Helm registry authentication
+      if: inputs.chart-path == ''
       shell: bash
       run: |
         echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
@@ -142,17 +168,45 @@ runs:
       id: deploy
       shell: bash
       run: |
-        # Construct chart URL
-        if [ "${{ inputs.registry }}" != "docker.io" ]; then
-          CHART_URL="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+        # Determine chart source and construct deployment command
+        if [ -n "${{ inputs.chart-path }}" ]; then
+          # Deploy from local chart path (artifact-based deployment)
+          CHART_SOURCE="${{ inputs.chart-path }}"
+          echo "Deploying from local chart: ${CHART_SOURCE}"
+          
+          # Verify chart exists
+          if [ ! -d "${CHART_SOURCE}" ]; then
+            echo "Error: Chart directory not found: ${CHART_SOURCE}"
+            ls -la .
+            exit 1
+          fi
+          
+          if [ ! -f "${CHART_SOURCE}/Chart.yaml" ]; then
+            echo "Error: Chart.yaml not found in: ${CHART_SOURCE}"
+            ls -la "${CHART_SOURCE}"
+            exit 1
+          fi
+          
+          echo "Chart directory contents:"
+          ls -la "${CHART_SOURCE}"
+          echo "Chart.yaml:"
+          cat "${CHART_SOURCE}/Chart.yaml"
+          
+          echo "chart-url=local:${CHART_SOURCE}" >> $GITHUB_OUTPUT
         else
-          CHART_URL="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          # Deploy from OCI registry (original behavior)
+          if [ "${{ inputs.registry }}" != "docker.io" ]; then
+            CHART_SOURCE="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          else
+            CHART_SOURCE="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          fi
+          
+          echo "Deploying from OCI registry: ${CHART_SOURCE}"
+          echo "chart-url=${CHART_SOURCE}" >> $GITHUB_OUTPUT
         fi
         
-        echo "chart-url=${CHART_URL}" >> $GITHUB_OUTPUT
-        
         echo "Deploying Helm chart..."
-        echo "Chart URL: ${CHART_URL}"
+        echo "Chart Source: ${CHART_SOURCE}"
         echo "Release name: ${{ inputs.release-name }}"
         echo "Namespace: ${{ inputs.namespace }}"
         
@@ -172,7 +226,7 @@ runs:
         echo "======================================"
         
         # Build helm command as array to properly handle arguments with spaces and special characters
-        HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_URL}" "--namespace" "${{ inputs.namespace }}")
+        HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_SOURCE}" "--namespace" "${{ inputs.namespace }}")
         
         # Add timeout and wait options
         if [ "${{ inputs.wait }}" == "true" ]; then
@@ -272,8 +326,14 @@ runs:
         echo "- **Release:** ${{ inputs.release-name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Namespace:** ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Chart:** ${{ inputs.chart-name }}:${{ inputs.chart-version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -n "${{ inputs.chart-path }}" ]; then
+          echo "- **Source:** Local chart artifact (${{ inputs.chart-path }})" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        
         if [ -n "${{ inputs.image-repository }}" ] && [ -n "${{ inputs.image-tag }}" ]; then
           echo "- **Image:** ${{ inputs.image-repository }}:${{ inputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
         fi
