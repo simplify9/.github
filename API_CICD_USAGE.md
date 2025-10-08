@@ -190,6 +190,13 @@ chart-version: "latest"                # Version to pull
 | `container-registry` | false | `'ghcr.io'` | Container registry URL |
 | `image-name` | false | `github.repository` | Docker image name |
 
+### Helm Image Configuration
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `helm-image-repo` | false | `container-registry/image-name` | Helm image.repo value (custom registry/repo path) |
+| `helm-app-name` | false | `chart-name` | Helm app.name value (custom app name in image) |
+
 ### Deployment Configuration
 
 | Input | Required | Default | Description |
@@ -247,6 +254,36 @@ jobs:
       development-helm-set-secret-values: ${{ secrets.DEV_HELM_SECRETS }}
 ```
 
+### Example: Custom Registry Configuration
+```yaml
+name: Deploy to Custom Registry
+on:
+  push:
+    branches: [development, staging, main]
+
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "backend-api"
+      
+      # Custom registry configuration
+      container-registry: "docker.io"
+      image-name: "mycompany/backend"
+      helm-image-repo: "docker.io/mycompany"
+      helm-app-name: "api-service"
+      
+      # Enable deployments
+      deploy-to-development: true
+      deploy-to-staging: true
+      
+    secrets:
+      registry-username: ${{ secrets.DOCKER_USERNAME }}
+      registry-password: ${{ secrets.DOCKER_PASSWORD }}
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+**Result**: Image will be `docker.io/mycompany/api-service:1.0.123`
+
 ## Using External Charts
 
 **Smart Repackaging**: The template automatically pulls external charts, repackages them with your application name, and deploys them as local charts. This works with **any** Helm repository URL.
@@ -262,6 +299,10 @@ jobs:
       chart-path: "https://charts.sf9.io"     # Repository URL  
       source-chart-name: "s9genericchart"     # Chart to pull from repo
       chart-version: "1.2.3"                  # Version to pull
+      
+      # Helm image configuration (for custom registries/repos)
+      helm-image-repo: "ghcr.io/my-org"       # Custom registry/repo path (optional)
+      helm-app-name: "backend-service"        # Custom app name (optional - defaults to chart-name)
       
       # Enable deployments
       deploy-to-development: true
@@ -408,6 +449,92 @@ jobs:
       staging-helm-set-secret-values: ${{ secrets.STAGING_API_SECRETS }}
       production-helm-set-secret-values: ${{ secrets.PROD_API_SECRETS }}
 ```
+
+## 🎯 Helm Image Configuration
+
+The template supports custom Helm image configurations for charts that use specific image structure patterns. This is particularly useful when your Helm chart expects specific value paths for image configuration.
+
+### Your Helm Chart Structure
+
+If your Helm chart uses this image pattern:
+```yaml
+# In your chart's deployment.yaml
+image: "{{ .Values.image.repo }}/{{ .Values.image.overrideName | default .Values.app.name }}:{{ .Values.image.overrideVersion | default .Values.app.version }}"
+```
+
+### Automatic Values Configuration
+
+The template automatically sets these values:
+```yaml
+# Always set by template:
+image.repo: "ghcr.io/your-org/your-repo"  # From container-registry/image-name
+app.name: "my-api"                         # From chart-name
+app.version: "1.0.123"                     # From semantic version (auto-generated)
+```
+
+### Custom Configuration Examples
+
+**Default behavior** (using repository settings):
+```yaml
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      deploy-to-development: true
+    # Results in image: "ghcr.io/your-org/your-repo/my-api:1.0.123"
+```
+
+**Custom registry/repository path**:
+```yaml
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      helm-image-repo: "docker.io/mycompany"  # Custom registry path
+      deploy-to-development: true
+    # Results in image: "docker.io/mycompany/my-api:1.0.123"
+```
+
+**Custom app name in image**:
+```yaml
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"                    # Chart/release name
+      helm-app-name: "backend-service"        # Different app name in image
+      deploy-to-development: true
+    # Results in image: "ghcr.io/your-org/your-repo/backend-service:1.0.123"
+```
+
+**Complete custom configuration**:
+```yaml
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      helm-image-repo: "registry.company.com/backend"
+      helm-app-name: "api-service"
+      deploy-to-development: true
+      deploy-to-production: true
+    # Results in image: "registry.company.com/backend/api-service:1.0.123"
+```
+
+### Available Helm Inputs
+
+| Input | Required | Description | Example |
+|-------|----------|-------------|---------|
+| `helm-image-repo` | No | Custom image repository path | `"docker.io/mycompany"` |
+| `helm-app-name` | No | Custom app name (defaults to chart-name) | `"backend-service"` |
+
+### Version Handling
+
+- **`app.version`** is **always** set to the semantic version from `determine-semver`
+- Version is automatically synchronized across Docker image and Helm values
+- No manual version override needed - use your chart's override features if required
 
 ## Required Repository Secrets
 
