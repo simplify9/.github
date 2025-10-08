@@ -375,10 +375,8 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
-          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
-          image-tag: ${{ needs.version.outputs.version }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, github.repository) }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
             app.version=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format(',{0}', inputs.development-helm-set-values) || '' }}
           timeout: '5m'
@@ -406,10 +404,8 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-staging
           namespace: ${{ inputs.staging-namespace }}
-          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
-          image-tag: ${{ needs.version.outputs.version }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, github.repository) }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
             app.version=${{ needs.version.outputs.version }}${{ inputs.staging-helm-set-values && format(',{0}', inputs.staging-helm-set-values) || '' }}
           timeout: '5m'
@@ -437,10 +433,8 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-prod
           namespace: ${{ inputs.production-namespace }}
-          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
-          image-tag: ${{ needs.version.outputs.version }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, github.repository) }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
             app.version=${{ needs.version.outputs.version }}${{ inputs.production-helm-set-values && format(',{0}', inputs.production-helm-set-values) || '' }}
           timeout: '5m'

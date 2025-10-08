@@ -2,7 +2,56 @@
 
 This guide shows how to use the `api-cicd.yml` reusable workflow template for your API projects. 
 
-**Important**: All deployment stages are **disabled by default** to keep**How it works** (unified artifact approach):
+**Important**: All deployment stages are **disabled by default** to keep your workflow secure and explicit.
+
+## 🚀 Quick Start
+
+Here's what inputs you need to pass for deployment:
+
+### Required Inputs
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      # Required
+      chart-name: "my-api"                    # Your application name
+      
+      # Enable deployments (all false by default)
+      deploy-to-development: true             # Deploy from 'development' branch
+      deploy-to-staging: true                 # Deploy from 'staging' branch
+      deploy-to-production: true              # Deploy from 'main'/'master' branch
+      
+      # Registry configuration
+      container-registry: "registry.digitalocean.com"  # Your container registry
+      image-name: "sf9cr/my-api"             # Your image name
+      
+    secrets:
+      # Required for deployment
+      kubeconfig: ${{ secrets.KUBECONFIG }}  # Base64 encoded kubeconfig
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+```
+
+### Optional Helm Image Configuration
+For custom Helm charts with specific image structure:
+```yaml
+with:
+  # ... other inputs ...
+  
+  # Optional: Override default image configuration
+  helm-image-repo: "registry.digitalocean.com/sf9cr"  # Custom image.repo value
+  helm-app-name: "jibli-api"                          # Custom app.name value
+  
+  # Optional: Custom Helm values per environment
+  development-helm-set-values: "replicas=1,debug=true"
+  staging-helm-set-values: "replicas=2,debug=false"
+  production-helm-set-values: "replicas=3,resources.requests.memory=512Mi"
+```
+
+## 📋 Complete Input Reference
+
+### Core Configuration**How it works** (unified artifact approach):
 1. 📥 **Repository**: Adds the chart repository URL to Helm (for external charts)
 2. 📦 **Pull**: Pulls the `source-chart-name` chart from the repository (for external charts)
 3. ✏️ **Rename**: Renames the chart to your `chart-name` (for external charts)
@@ -452,89 +501,118 @@ jobs:
 
 ## 🎯 Helm Image Configuration
 
-The template supports custom Helm image configurations for charts that use specific image structure patterns. This is particularly useful when your Helm chart expects specific value paths for image configuration.
+The template automatically configures Helm values to match your chart's image structure. This ensures proper image deployment with semantic versioning.
 
 ### Your Helm Chart Structure
 
-If your Helm chart uses this image pattern:
+If your Helm chart uses this modern image pattern:
 ```yaml
 # In your chart's deployment.yaml
-image: "{{ .Values.image.repo }}/{{ .Values.image.overrideName | default .Values.app.name }}:{{ .Values.image.overrideVersion | default .Values.app.version }}"
+spec:
+  containers:
+    - name: {{ .Values.app.name }}
+      image: "{{ .Values.image.repo }}/{{ .Values.image.overrideName | default .Values.app.name }}:{{ .Values.image.overrideVersion | default .Values.app.version }}"
+      imagePullPolicy: IfNotPresent
 ```
 
 ### Automatic Values Configuration
 
-The template automatically sets these values:
+The template automatically sets these values during deployment:
 ```yaml
-# Always set by template:
-image.repo: "ghcr.io/your-org/your-repo"  # From container-registry/image-name
-app.name: "my-api"                         # From chart-name
-app.version: "1.0.123"                     # From semantic version (auto-generated)
+# Values set by the template:
+image.repo: "registry.digitalocean.com/sf9cr"  # From helm-image-repo or container-registry/repository
+app.name: "jibli-api"                          # From helm-app-name or chart-name  
+app.version: "1.0.123"                         # From semantic version (auto-generated)
 ```
 
-### Custom Configuration Examples
+**Final Image Result**: `registry.digitalocean.com/sf9cr/jibli-api:1.0.123`
 
-**Default behavior** (using repository settings):
+### Configuration Examples
+
+**✅ Minimal Setup** (recommended):
+```yaml
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "jibli-api"
+      container-registry: "registry.digitalocean.com"
+      image-name: "sf9cr/jibli-api"
+      deploy-to-development: true
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+```
+
+**🎯 Custom Registry Path**:
 ```yaml
 jobs:
   api-pipeline:
     uses: simplify9/.github/.github/workflows/api-cicd.yml@main
     with:
       chart-name: "my-api"
+      helm-image-repo: "docker.io/mycompany"     # Custom registry path
       deploy-to-development: true
-    # Results in image: "ghcr.io/your-org/your-repo/my-api:1.0.123"
+    # Results in: docker.io/mycompany/my-api:1.0.123
 ```
 
-**Custom registry/repository path**:
+**🎯 Custom App Name**:
 ```yaml
 jobs:
   api-pipeline:
     uses: simplify9/.github/.github/workflows/api-cicd.yml@main
     with:
-      chart-name: "my-api"
-      helm-image-repo: "docker.io/mycompany"  # Custom registry path
+      chart-name: "my-api"                       # Chart/release name
+      helm-app-name: "backend-service"           # Different app name in image
       deploy-to-development: true
-    # Results in image: "docker.io/mycompany/my-api:1.0.123"
+    # Results in: ghcr.io/owner/repo/backend-service:1.0.123
 ```
 
-**Custom app name in image**:
+### Input Reference for Helm Image Configuration
+
+| Input | Required | Description | Default | Example |
+|-------|----------|-------------|---------|---------|
+| `helm-image-repo` | No | Custom image repository path | `{container-registry}/{repository}` | `"registry.digitalocean.com/sf9cr"` |
+| `helm-app-name` | No | Custom app name for image | `{chart-name}` | `"jibli-api"` |
+
+### Version Synchronization
+
+- **`app.version`** is **automatically** set to the semantic version from `determine-semver`
+- Version flows: Git commits → Semantic version → Docker tag → Helm app.version → Pod image
+- **No manual version management needed** - everything stays in sync
+
+### Required Inputs Summary
+
+For successful deployment, you need these inputs in your calling workflow:
+
 ```yaml
 jobs:
-  api-pipeline:
+  deploy:
     uses: simplify9/.github/.github/workflows/api-cicd.yml@main
     with:
-      chart-name: "my-api"                    # Chart/release name
-      helm-app-name: "backend-service"        # Different app name in image
-      deploy-to-development: true
-    # Results in image: "ghcr.io/your-org/your-repo/backend-service:1.0.123"
+      # Required
+      chart-name: "your-app-name"              # Your application name
+      
+      # Enable deployments (choose what you need)
+      deploy-to-development: true              # Deploy from 'development' branch
+      deploy-to-staging: true                  # Deploy from 'staging' branch  
+      deploy-to-production: true               # Deploy from 'main'/'master' branch
+      
+      # Registry configuration
+      container-registry: "your-registry.com" # Your container registry
+      image-name: "your-org/your-app"         # Your image name
+      
+      # Optional: Helm image customization
+      helm-image-repo: "custom-registry/path" # Override default image.repo
+      helm-app-name: "custom-app-name"        # Override default app.name
+      
+    secrets:
+      # Required for deployment
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}
 ```
-
-**Complete custom configuration**:
-```yaml
-jobs:
-  api-pipeline:
-    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
-    with:
-      chart-name: "my-api"
-      helm-image-repo: "registry.company.com/backend"
-      helm-app-name: "api-service"
-      deploy-to-development: true
-      deploy-to-production: true
-    # Results in image: "registry.company.com/backend/api-service:1.0.123"
-```
-
-### Available Helm Inputs
-
-| Input | Required | Description | Example |
-|-------|----------|-------------|---------|
-| `helm-image-repo` | No | Custom image repository path | `"docker.io/mycompany"` |
-| `helm-app-name` | No | Custom app name (defaults to chart-name) | `"backend-service"` |
-
-### Version Handling
-
-- **`app.version`** is **always** set to the semantic version from `determine-semver`
-- Version is automatically synchronized across Docker image and Helm values
-- No manual version override needed - use your chart's override features if required
 
 ## Required Repository Secrets
 
