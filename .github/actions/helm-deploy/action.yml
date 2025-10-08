@@ -85,6 +85,9 @@ outputs:
   namespace:
     description: 'Namespace where the release was deployed'
     value: ${{ inputs.namespace }}
+  deployed-image:
+    description: 'Container image reference (best-effort repo/name:tag) actually applied'
+    value: ${{ steps.deploy.outputs.deployed-image }}
 
 runs:
   using: 'composite'
@@ -254,7 +257,11 @@ runs:
         if [ -n "${{ inputs.set-values }}" ]; then
           IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
           for value in "${VALUES[@]}"; do
-            HELM_ARGS+=("--set" "${value}")
+            # Trim leading/trailing whitespace
+            trimmed="$(echo "$value" | xargs)"
+            if [ -n "$trimmed" ]; then
+              HELM_ARGS+=("--set" "$trimmed")
+            fi
           done
         fi
         
@@ -299,6 +306,39 @@ runs:
         fi
         
         echo "Executing: ${HELM_ARGS[*]}"
+
+        # Extra debug & output: attempt to reconstruct image reference from inputs or provided set-values
+        DEPLOY_IMAGE=""
+        if [ -n "${{ inputs.image-repository }}" ] && [ -n "${{ inputs.image-tag }}" ]; then
+          DEPLOY_IMAGE="${{ inputs.image-repository }}:${{ inputs.image-tag }}"
+          echo "Resolved image from explicit inputs: $DEPLOY_IMAGE"
+        else
+          RECON_SET_VALUES="${{ inputs.set-values }}"
+          PARSED=$(echo "$RECON_SET_VALUES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          get_val() { echo "$PARSED" | grep -E "^$1=" | head -1 | cut -d'=' -f2-; }
+          IMG_REPO=$(get_val "image.repo")
+            IMG_OVERRIDE_NAME=$(get_val "image.overrideName")
+          IMG_OVERRIDE_VERSION=$(get_val "image.overrideVersion")
+          APP_NAME_VAL=$(get_val "app.name")
+          APP_VERSION_VAL=$(get_val "app.version")
+          [ -z "$IMG_OVERRIDE_NAME" ] && IMG_OVERRIDE_NAME="$APP_NAME_VAL"
+          [ -z "$IMG_OVERRIDE_VERSION" ] && IMG_OVERRIDE_VERSION="$APP_VERSION_VAL"
+          if [ -n "$IMG_REPO" ] && [ -n "$IMG_OVERRIDE_VERSION" ]; then
+            DEPLOY_IMAGE="${IMG_REPO}/${IMG_OVERRIDE_NAME}:${IMG_OVERRIDE_VERSION}"
+            echo "Resolved image (best-effort from set-values): ${DEPLOY_IMAGE}" 
+          else
+            echo "Could not fully resolve image reference (missing repo or version in set-values)." 
+          fi
+        fi
+
+        if [ -n "$DEPLOY_IMAGE" ]; then
+          echo "deployed-image=$DEPLOY_IMAGE" >> $GITHUB_OUTPUT
+        fi
+
+        echo "\nFull Helm command (args on separate lines for readability):"
+        for i in "${!HELM_ARGS[@]}"; do
+          printf '  %q\n' "${HELM_ARGS[$i]}"
+        done
         "${HELM_ARGS[@]}"
         
         echo "status=deployed" >> $GITHUB_OUTPUT
@@ -334,8 +374,8 @@ runs:
           echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
         fi
         
-        if [ -n "${{ inputs.image-repository }}" ] && [ -n "${{ inputs.image-tag }}" ]; then
-          echo "- **Image:** ${{ inputs.image-repository }}:${{ inputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ steps.deploy.outputs.deployed-image }}" ]; then
+          echo "- **Image:** ${{ steps.deploy.outputs.deployed-image }}" >> $GITHUB_STEP_SUMMARY
         fi
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Management Commands:**" >> $GITHUB_STEP_SUMMARY
