@@ -80,9 +80,9 @@ chart-version: "latest"                # Version to pull
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `deploy-to-development` | false | `false` | Enable development deployment |
-| `deploy-to-staging` | false | `false` | Enable staging deployment |
-| `deploy-to-production` | false | `false` | Enable production deployment |
+| `deploy-to-development` | false | `false` | Enable development deployment (only runs on `development` branch) |
+| `deploy-to-staging` | false | `false` | Enable staging deployment (only runs on `staging` branch) |
+| `deploy-to-production` | false | `false` | Enable production deployment (only runs on `main` or `master` branch) |
 | `development-namespace` | false | `'development'` | Kubernetes namespace for development |
 | `staging-namespace` | false | `'staging'` | Kubernetes namespace for staging |
 | `production-namespace` | false | `'production'` | Kubernetes namespace for production |
@@ -326,30 +326,54 @@ Set these secrets in your repository settings:
 ### Optional
 - `GITHUB_TOKEN`: For GitHub release tagging (defaults to automatic token)
 
-## Branch-Based Deployment
+## Branch-Based Deployment (Simple)
 
-The template automatically deploys based on branch patterns:
+The template uses **simple branch name matching** for deployments:
 
-### Development Deployment
-Default triggers on pushes to:
-- `main`, `master`, `develop`, `development` 
-- `feature/*`, `bugfix/*`, `hotfix/*`
+### Deployment Triggers
+- **Development**: Only deploys from `development` branch
+- **Staging**: Only deploys from `staging` branch  
+- **Production**: Only deploys from `main` or `master` branch
 
-### Staging Deployment  
-Default triggers on pushes to:
-- `main`, `master`
-- `release/*`, `staging/*` branches
+### How It Works
+```yaml
+# Push to 'development' branch
+git push origin development  # ✅ Triggers development deployment (if enabled)
 
-### Production Deployment  
-Default triggers on pushes to:
-- `main`, `master`
-- `release/*` branches
-- Version tags starting with `v`
+# Push to 'staging' branch  
+git push origin staging      # ✅ Triggers staging deployment (if enabled)
+
+# Push to 'main' or 'master' branch
+git push origin main         # ✅ Triggers production deployment (if enabled)
+
+# Push to any other branch
+git push origin feature/xyz  # ⏭️  No deployments triggered
+```
+
+### Example Usage
+```yaml
+jobs:
+  api-pipeline:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      
+      # Enable deployments - but they only run on matching branches
+      deploy-to-development: true   # Only runs on 'development' branch
+      deploy-to-staging: true       # Only runs on 'staging' branch  
+      deploy-to-production: true    # Only runs on 'main' or 'master' branch
+```
+
+### Typical Workflow
+1. **Feature Development**: Work on feature branches, no automatic deployments
+2. **Development Testing**: Merge/push to `development` branch → deploys to dev environment
+3. **Staging Testing**: Merge/push to `staging` branch → deploys to staging environment  
+4. **Production Release**: Merge/push to `main` branch → deploys to production environment
 
 **Deployment Dependencies:**
-- Staging deployment depends on successful development deployment (if development is enabled)
-- Production deployment depends on successful staging deployment (if staging is enabled)
-- If staging is disabled, production deployment depends on development deployment
+- All deployment jobs depend only on successful build job completion
+- Deployments run independently - if one environment is skipped, others can still run
+- Each deployment checks its own branch pattern and enable flag independently
 
 ## Workflow Jobs
 

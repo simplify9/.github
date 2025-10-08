@@ -79,11 +79,6 @@ on:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
-      development-branch-pattern:
-        description: 'Regex pattern for branches that should deploy to development'
-        required: false
-        default: '^(main|master|develop|development|feature/.+|bugfix/.+|hotfix/.+)$'
-        type: string
       
       # Staging deployment configuration (for deploy-staging job)
       deploy-to-staging:
@@ -100,11 +95,6 @@ on:
         description: 'Staging Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
-      staging-branch-pattern:
-        description: 'Regex pattern for branches that should deploy to staging'
-        required: false
-        default: '^(main|master|release/.+|staging/.+)$'
-        type: string
       
       # Production deployment configuration (for deploy-production job)
       deploy-to-production:
@@ -120,11 +110,6 @@ on:
       production-helm-set-values:
         description: 'Production Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
-        type: string
-      production-branch-pattern:
-        description: 'Regex pattern for branches that should deploy to production'
-        required: false
-        default: '^(main|master|release/.+|v[0-9]+\\.[0-9]+\\.[0-9]+.*)$'
         type: string
 
     secrets:
@@ -321,12 +306,11 @@ jobs:
           echo "Source: $SOURCE_CHART_NAME from $CHART_URL"
           echo "Target: $TARGET_CHART_NAME (your app name)"
 
-      - name: Upload repackaged chart as artifact
-        if: steps.detect-chart.outputs.chart-source == 'external'
+      - name: Upload chart artifact (unified for both local and external)
         uses: actions/upload-artifact@v4
         with:
-          name: repackaged-chart-${{ inputs.chart-name }}
-          path: ${{ inputs.chart-name }}/
+          name: helm-chart-${{ inputs.chart-name }}
+          path: ${{ steps.detect-chart.outputs.chart-source == 'external' && inputs.chart-name || format('{0}-artifact', inputs.chart-name) }}/
           retention-days: 1
 
       - name: Package and push Helm chart (local charts only)
@@ -368,10 +352,7 @@ jobs:
   deploy-development:
     runs-on: ubuntu-latest
     needs: [version, build]
-    if: |
-      inputs.deploy-to-development && 
-      github.event_name == 'push' && 
-      contains(fromJSON('["true"]'), toJSON(github.ref_name == 'main' || github.ref_name == 'master' || github.ref_name == 'develop' || github.ref_name == 'development' || startsWith(github.ref_name, 'feature/') || startsWith(github.ref_name, 'bugfix/') || startsWith(github.ref_name, 'hotfix/')))
+    if: inputs.deploy-to-development && github.event_name == 'push' && github.ref_name == 'development'
     environment: development
     steps:
       - name: Download chart artifact
@@ -398,11 +379,8 @@ jobs:
 
   deploy-staging:
     runs-on: ubuntu-latest
-    needs: [version, build, deploy-development]
-    if: |
-      inputs.deploy-to-staging && 
-      github.event_name == 'push' && 
-      (github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref_name, 'release/') || startsWith(github.ref_name, 'staging/'))
+    needs: [version, build]
+    if: inputs.deploy-to-staging && github.event_name == 'push' && github.ref_name == 'staging'
     environment: staging
     steps:
       - name: Download chart artifact
@@ -429,11 +407,8 @@ jobs:
 
   deploy-production:
     runs-on: ubuntu-latest
-    needs: [version, build, deploy-staging]
-    if: |
-      inputs.deploy-to-production && 
-      github.event_name == 'push' && 
-      (github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref_name, 'release/') || startsWith(github.ref_name, 'v'))
+    needs: [version, build]
+    if: inputs.deploy-to-production && github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
     environment: production
     steps:
       - name: Download chart artifact
