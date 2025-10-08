@@ -342,17 +342,10 @@ jobs:
           
           echo "Local chart prepared for artifact deployment"
 
-      - name: Upload chart artifact (unified for both local and external)
-        uses: actions/upload-artifact@v4
-        with:
-          name: helm-chart-${{ inputs.chart-name }}
-          path: ${{ steps.detect-chart.outputs.chart-source == 'external' && inputs.chart-name || format('{0}-artifact', inputs.chart-name) }}/
-          retention-days: 1
-
   deploy-development:
     runs-on: ubuntu-latest
     needs: [version, build]
-    if: inputs.deploy-to-development && github.event_name == 'push' && github.ref_name == 'development'
+    if: inputs.deploy-to-development && github.ref_name == 'development'
     environment: development
     steps:
       - name: Download chart artifact
@@ -380,7 +373,7 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     needs: [version, build]
-    if: inputs.deploy-to-staging && github.event_name == 'push' && github.ref_name == 'staging'
+    if: inputs.deploy-to-staging && github.ref_name == 'staging'
     environment: staging
     steps:
       - name: Download chart artifact
@@ -408,7 +401,7 @@ jobs:
   deploy-production:
     runs-on: ubuntu-latest
     needs: [version, build]
-    if: inputs.deploy-to-production && github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
+    if: inputs.deploy-to-production && (github.ref_name == 'main' || github.ref_name == 'master')
     environment: production
     steps:
       - name: Download chart artifact

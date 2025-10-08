@@ -10,7 +10,121 @@ This guide shows how to use the `api-cicd.yml` reusable workflow template for yo
 5. 💾 **Artifact**: Saves the chart as a GitHub Actions artifact (both local and external)
 6. 🚀 **Deploy**: Modified helm-deploy action deploys directly from artifact
 
-**Unified Deployment**: Both local and external charts are deployed using the same artifact-based approach through the enhanced helm-deploy action!Hub Actions UI clean. You must explicitly enable the deployments you need.
+**Unified Deployment**: Both local and external charts are deployed using the same artifact-based approach through the enhanced helm-deplo### 🔧 **Issue 8**: "Invalid input, *-branch-pattern is not defined" error
+
+**Problem**: Using old branch pattern inputs that were removed in v2.0
+```yaml
+# ❌ Broken calling workflow using old inputs
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      development-branch-pattern: "^(develop|feature/.+)$"  # ❌ No longer exists
+      staging-branch-pattern: "^(main|release/.+)$"        # ❌ No longer exists
+      production-branch-pattern: "^(main|v[0-9]+)$"        # ❌ No longer exists
+```
+
+**Solution**: Remove branch pattern inputs and use the simple branch logic
+```yaml
+# ✅ Fixed calling workflow with simple branch logic
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      deploy-to-development: true    # Deploys from 'development' branch
+      deploy-to-staging: true        # Deploys from 'staging' branch  
+      deploy-to-production: true     # Deploys from 'main'/'master' branch
+      # No branch patterns needed!
+```
+
+**Migration**: 
+- Remove all `*-branch-pattern` inputs
+- Use branch names: `development`, `staging`, `main`/`master`
+- Much simpler and more predictable!
+
+### 🔧 **Issue 9**: Deployment jobs are being skipped
+
+**Problem**: Deployment jobs show as "skipped" even though build succeeded
+
+**Most Common Causes:**
+
+1. **❌ Missing deployment enable flag**
+```yaml
+# Problem: deploy-to-* inputs are false by default
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      # Missing: deploy-to-development: true
+```
+
+2. **❌ Wrong branch name**
+```yaml
+# Problem: You're on 'develop' branch but template expects 'development'
+# Current branch: develop
+# Template expects: development, staging, main, or master
+```
+
+3. **❌ Missing required secrets**
+```yaml
+# Problem: Missing kubeconfig secret for deployment
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      deploy-to-development: true
+    secrets:
+      # Missing: kubeconfig: ${{ secrets.KUBECONFIG }}
+```
+
+**✅ Solution Checklist:**
+
+**Step 1: Enable the deployment you want**
+```yaml
+with:
+  chart-name: "my-api"
+  deploy-to-development: true    # ✅ Enable dev deployment
+  deploy-to-staging: true        # ✅ Enable staging deployment  
+  deploy-to-production: true     # ✅ Enable production deployment
+```
+
+**Step 2: Use correct branch names**
+- For development deployment: Push to `development` branch
+- For staging deployment: Push to `staging` branch
+- For production deployment: Push to `main` or `master` branch
+
+**Step 3: Provide required secrets**
+```yaml
+secrets:
+  kubeconfig: ${{ secrets.KUBECONFIG }}              # ✅ Required for all deployments
+  registry-username: ${{ secrets.REGISTRY_USERNAME }} # ✅ Required for image access
+  registry-password: ${{ secrets.REGISTRY_PASSWORD }} # ✅ Required for image access
+```
+
+**Step 4: Check workflow run details**
+- Look at the "Jobs" section in your GitHub workflow run
+- Check the condition next to skipped jobs: `deploy-to-development && github.ref_name == 'development'`
+- If `deploy-to-development` is `false` OR `github.ref_name` is not `'development'`, the job will be skipped
+
+**Debug Information:**
+```yaml
+# Add this temporary job to debug branch conditions
+debug-branch:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Debug branch info
+      run: |
+        echo "Branch name: ${{ github.ref_name }}"
+        echo "Deploy to dev: ${{ inputs.deploy-to-development }}"
+        echo "Deploy to staging: ${{ inputs.deploy-to-staging }}"
+        echo "Deploy to production: ${{ inputs.deploy-to-production }}"
+```
+
+### 🚀 **Quick Fix Checklist** action!Hub Actions UI clean. You must explicitly enable the deployments you need.
 
 ## Input Parameters Reference
 
@@ -325,6 +439,35 @@ Set these secrets in your repository settings:
 
 ### Optional
 - `GITHUB_TOKEN`: For GitHub release tagging (defaults to automatic token)
+
+## ⚠️ **Breaking Change Notice**
+
+**Version 2.0** simplified branch logic. If you get errors about undefined inputs:
+
+### **Error:**
+```
+Invalid input, staging-branch-pattern is not defined in the referenced workflow
+Invalid input, production-branch-pattern is not defined in the referenced workflow  
+Invalid input, development-branch-pattern is not defined in the referenced workflow
+```
+
+### **Fix:**
+Remove these inputs from your calling workflow:
+```yaml
+# ❌ Remove these lines from your calling workflow
+development-branch-pattern: "^(develop|feature/.+)$"
+staging-branch-pattern: "^(main|release/.+)$"  
+production-branch-pattern: "^(main|v[0-9]+)$"
+```
+
+### **New Simple Logic:**
+- **Development**: Only deploys from `development` branch
+- **Staging**: Only deploys from `staging` branch  
+- **Production**: Only deploys from `main` or `master` branch
+
+No configuration needed - just use the right branch names!
+
+---
 
 ## Branch-Based Deployment (Simple)
 
@@ -819,7 +962,41 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}  # For release tagging
 ```
 
-### 🚀 **Quick Fix Checklist**
+### � **Issue 8**: "Invalid input, *-branch-pattern is not defined" error
+
+**Problem**: Using old branch pattern inputs that were removed in v2.0
+```yaml
+# ❌ Broken calling workflow using old inputs
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      development-branch-pattern: "^(develop|feature/.+)$"  # ❌ No longer exists
+      staging-branch-pattern: "^(main|release/.+)$"        # ❌ No longer exists
+      production-branch-pattern: "^(main|v[0-9]+)$"        # ❌ No longer exists
+```
+
+**Solution**: Remove branch pattern inputs and use the simple branch logic
+```yaml
+# ✅ Fixed calling workflow with simple branch logic
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
+    with:
+      chart-name: "my-api"
+      deploy-to-development: true    # Deploys from 'development' branch
+      deploy-to-staging: true        # Deploys from 'staging' branch  
+      deploy-to-production: true     # Deploys from 'main'/'master' branch
+      # No branch patterns needed!
+```
+
+**Migration**: 
+- Remove all `*-branch-pattern` inputs
+- Use branch names: `development`, `staging`, `main`/`master`
+- Much simpler and more predictable!
+
+### �🚀 **Quick Fix Checklist**
 
 When your calling workflow fails, check these in order:
 
