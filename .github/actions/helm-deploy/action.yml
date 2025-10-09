@@ -364,8 +364,38 @@ runs:
         for i in "${!HELM_ARGS[@]}"; do
           printf '  %q\n' "${HELM_ARGS[$i]}"
         done
-        "${HELM_ARGS[@]}"
-        
+        # Preflight: attempt helm pull for OCI charts to surface clearer errors early
+        if [[ "${CHART_SOURCE}" == oci://* ]]; then
+          echo "[helm-deploy] Preflight: pulling chart ${CHART_SOURCE} to verify accessibility..."
+          set +e
+          helm pull "${CHART_SOURCE%:*}" --version "${{ inputs.chart-version }}" --untar --untardir /tmp/preflight-chart 2>&1 | tee /tmp/helm_preflight.log
+          PREFLIGHT_CODE=${PIPESTATUS[0]}
+          if [ $PREFLIGHT_CODE -ne 0 ]; then
+            echo "[helm-deploy] Preflight chart pull FAILED (exit $PREFLIGHT_CODE). Raw output:" >&2
+            sed 's/'"${{ inputs.registry-password }}"'/****/g' /tmp/helm_preflight.log || true
+            echo "[helm-deploy] Aborting before upgrade due to inaccessible chart." >&2
+            exit $PREFLIGHT_CODE
+          else
+            echo "[helm-deploy] Preflight chart pull succeeded. Proceeding with upgrade/install."
+          fi
+          set -e
+        fi
+
+        echo "[helm-deploy] Starting helm upgrade/install..."
+        set +e
+        "${HELM_ARGS[@]}" 2>&1 | tee /tmp/helm_upgrade.log
+        HELM_CODE=${PIPESTATUS[0]}
+        set -e
+        echo "[helm-deploy] Helm exit code: ${HELM_CODE}"
+        if [ ${HELM_CODE} -ne 0 ]; then
+          echo "[helm-deploy] Helm upgrade failed. Showing last 60 lines of output:" >&2
+          tail -60 /tmp/helm_upgrade.log >&2 || true
+          echo "[helm-deploy] Attempting to gather cluster diagnostics (pods & events)" >&2
+          kubectl get pods -n "${{ inputs.namespace }}" || true
+          kubectl get events -n "${{ inputs.namespace }}" --sort-by=.lastTimestamp | tail -30 || true
+          exit ${HELM_CODE}
+        fi
+
         echo "status=deployed" >> $GITHUB_OUTPUT
 
     - name: Verify deployment
