@@ -109,9 +109,9 @@ runs:
             echo "Error: 'registry-password' is required when deploying from OCI registry (chart-path not provided)"
             exit 1
           fi
-          echo "Validation passed: OCI registry deployment"
+          echo "[helm-deploy] Validation passed: MODE=OCI (chart-path NOT provided)"
         else
-          echo "Validation passed: Local chart deployment from ${{ inputs.chart-path }}"
+          echo "[helm-deploy] Validation passed: MODE=LOCAL (chart-path='${{ inputs.chart-path }}')"
         fi
 
     - name: Set up Helm
@@ -155,6 +155,7 @@ runs:
         else
           helm registry login -u ${{ inputs.registry-username }} -p ${{ inputs.registry-password }}
         fi
+        echo "[helm-deploy] Registry authentication succeeded for ${{ inputs.registry }} (repository='${{ inputs.repository }}')"
 
     - name: Prepare values file
       if: inputs.values != ''
@@ -176,6 +177,7 @@ runs:
           # Deploy from local chart path (artifact-based deployment)
           CHART_SOURCE="${{ inputs.chart-path }}"
           echo "Deploying from local chart: ${CHART_SOURCE}"
+          echo "[helm-deploy] Decision: using LOCAL chart directory '${CHART_SOURCE}'"
           
           # Verify chart exists
           if [ ! -d "${CHART_SOURCE}" ]; then
@@ -206,6 +208,7 @@ runs:
           
           echo "Deploying from OCI registry: ${CHART_SOURCE}"
           echo "chart-url=${CHART_SOURCE}" >> $GITHUB_OUTPUT
+          echo "[helm-deploy] Decision: using OCI chart '${CHART_SOURCE}'"
         fi
         
         echo "Deploying Helm chart..."
@@ -234,6 +237,13 @@ runs:
         # Add timeout and wait options
         if [ "${{ inputs.wait }}" == "true" ]; then
           HELM_ARGS+=("--wait")
+          echo "[helm-deploy] Wait enabled: Helm will wait for resources to become Ready"
+        else
+          echo "[helm-deploy] Wait disabled: Helm will return after install/upgrade is submitted"
+        fi
+        echo "[helm-deploy] Requested timeout: ${{ inputs.timeout }}"
+        if [[ ! "${{ inputs.timeout }}" =~ ^[0-9]+[smh]$ ]]; then
+          echo "[helm-deploy] WARNING: Timeout format '${{ inputs.timeout }}' may be invalid (expected e.g. 60s, 3m, 1h)"
         fi
         HELM_ARGS+=("--timeout" "${{ inputs.timeout }}")
         
@@ -256,11 +266,13 @@ runs:
         # Add custom set values (regular values)
         if [ -n "${{ inputs.set-values }}" ]; then
           IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
+          echo "[helm-deploy] Processing regular --set values (count=${#VALUES[@]})"
           for value in "${VALUES[@]}"; do
             # Trim leading/trailing whitespace
             trimmed="$(echo "$value" | xargs)"
             if [ -n "$trimmed" ]; then
               HELM_ARGS+=("--set" "$trimmed")
+              echo "[helm-deploy]   --set $trimmed"
             fi
           done
         fi
@@ -290,6 +302,7 @@ runs:
               if [ -n "$value" ]; then
                 echo "Adding --set-string: $value"
                 HELM_ARGS+=("--set-string" "$value")
+                echo "[helm-deploy]   --set-string $value"
               fi
               secret_values="${secret_values#*,}"
             done
@@ -297,6 +310,7 @@ runs:
             if [ -n "$secret_values" ]; then
               echo "Adding --set-string: $secret_values"
               HELM_ARGS+=("--set-string" "$secret_values")
+              echo "[helm-deploy]   --set-string $secret_values"
             fi
           else
             echo "No secret values to process"
@@ -306,6 +320,7 @@ runs:
         fi
         
         echo "Executing: ${HELM_ARGS[*]}"
+        echo "[helm-deploy] Final Helm argument count: ${#HELM_ARGS[@]}"
 
         # Extra debug & output: attempt to reconstruct image reference from inputs or provided set-values
         DEPLOY_IMAGE=""
@@ -317,7 +332,7 @@ runs:
           PARSED=$(echo "$RECON_SET_VALUES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           get_val() { echo "$PARSED" | grep -E "^$1=" | head -1 | cut -d'=' -f2-; }
           IMG_REPO=$(get_val "image.repo")
-            IMG_OVERRIDE_NAME=$(get_val "image.overrideName")
+          IMG_OVERRIDE_NAME=$(get_val "image.overrideName")
           IMG_OVERRIDE_VERSION=$(get_val "image.overrideVersion")
           APP_NAME_VAL=$(get_val "app.name")
           APP_VERSION_VAL=$(get_val "app.version")
@@ -325,9 +340,9 @@ runs:
           [ -z "$IMG_OVERRIDE_VERSION" ] && IMG_OVERRIDE_VERSION="$APP_VERSION_VAL"
           if [ -n "$IMG_REPO" ] && [ -n "$IMG_OVERRIDE_VERSION" ]; then
             DEPLOY_IMAGE="${IMG_REPO}/${IMG_OVERRIDE_NAME}:${IMG_OVERRIDE_VERSION}"
-            echo "Resolved image (best-effort from set-values): ${DEPLOY_IMAGE}" 
+            echo "Resolved image (best-effort from set-values): ${DEPLOY_IMAGE}"
           else
-            echo "Could not fully resolve image reference (missing repo or version in set-values)." 
+            echo "Could not fully resolve image reference (missing repo or version in set-values)."
           fi
         fi
 
