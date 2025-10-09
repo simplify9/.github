@@ -74,6 +74,10 @@ inputs:
     description: 'kubectl version to install'
     required: false
     default: 'latest'
+  debug:
+    description: 'Enable Helm --debug and extra tracing output'
+    required: false
+    default: 'false'
 
 outputs:
   release-status:
@@ -233,6 +237,10 @@ runs:
         
         # Build helm command as array to properly handle arguments with spaces and special characters
         HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_SOURCE}" "--namespace" "${{ inputs.namespace }}")
+        if [ "${{ inputs.debug }}" = "true" ]; then
+          HELM_ARGS+=("--debug")
+          echo "[helm-deploy] Debug mode enabled (--debug)."
+        fi
         
         # Add timeout and wait options
         if [ "${{ inputs.wait }}" == "true" ]; then
@@ -268,7 +276,6 @@ runs:
           IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
           echo "[helm-deploy] Processing regular --set values (count=${#VALUES[@]})"
           for value in "${VALUES[@]}"; do
-            # Trim leading/trailing whitespace
             trimmed="$(echo "$value" | xargs)"
             if [ -n "$trimmed" ]; then
               HELM_ARGS+=("--set" "$trimmed")
@@ -306,7 +313,6 @@ runs:
               fi
               secret_values="${secret_values#*,}"
             done
-            # Handle the last value (or only value if no commas)
             if [ -n "$secret_values" ]; then
               echo "Adding --set-string: $secret_values"
               HELM_ARGS+=("--set-string" "$secret_values")
@@ -321,6 +327,10 @@ runs:
         
         echo "Executing: ${HELM_ARGS[*]}"
         echo "[helm-deploy] Final Helm argument count: ${#HELM_ARGS[@]}"
+        if [ "${{ inputs.debug }}" = "true" ]; then
+          echo "[helm-deploy] Printing environment variables relevant to Helm (sanitized):"
+          env | grep -E 'HELM_|KUBECONFIG' || true
+        fi
 
         # Extra debug & output: attempt to reconstruct image reference from inputs or provided set-values
         DEPLOY_IMAGE=""
