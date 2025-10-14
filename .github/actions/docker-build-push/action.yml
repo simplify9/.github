@@ -70,8 +70,10 @@ runs:
         images: |
           ${{ inputs.registry != 'docker.io' && format('{0}/{1}', inputs.registry, inputs.image-name) || inputs.image-name }}
         tags: |
-          type=raw,value=latest
           type=raw,value=${{ inputs.version }}
+          type=raw,value=latest
+        flavor: |
+          latest=false
 
     - name: Build and push Docker image
       id: build
@@ -85,6 +87,8 @@ runs:
         platforms: ${{ inputs.platforms }}
         cache-from: ${{ inputs.cache == 'true' && 'type=gha' || '' }}
         cache-to: ${{ inputs.cache == 'true' && 'type=gha,mode=max' || '' }}
+        provenance: false
+        sbom: false
 
     - name: Output image information
       shell: bash
