@@ -1,0 +1,131 @@
+name: 'Setup Cloudflare Pages Custom Domain'
+description: 'Adds a custom domain to a Cloudflare Pages project'
+author: 'simplify9'
+
+inputs:
+  api-token:
+    description: 'Cloudflare API token'
+    required: true
+  account-id:
+    description: 'Cloudflare account ID'
+    required: true
+  project-name:
+    description: 'Name of the Cloudflare Pages project'
+    required: true
+  domain-name:
+    description: 'Custom domain name to add'
+    required: true
+  fail-on-error:
+    description: 'Whether to fail the action if domain setup fails'
+    required: false
+    default: 'false'
+
+outputs:
+  domain-added:
+    description: 'Whether the domain was successfully added'
+    value: ${{ steps.add-domain.outputs.success }}
+  domain-status:
+    description: 'Status of the domain configuration'
+    value: ${{ steps.add-domain.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install jq for JSON parsing
+      shell: bash
+      run: |
+        if ! command -v jq &> /dev/null; then
+          sudo apt-get update && sudo apt-get install -y jq
+        fi
+
+    - name: Check if domain already exists
+      id: check-domain
+      shell: bash
+      run: |
+        echo "Checking if domain '${{ inputs.domain-name }}' is already configured..."
+        
+        RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/pages/projects/${{ inputs.project-name }}/domains" \
+          -H "Authorization: Bearer ${{ inputs.api-token }}" \
+          -H "Content-Type: application/json")
+        
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+        
+        if [ "$SUCCESS" = "true" ]; then
+          DOMAIN_EXISTS=$(echo "$RESPONSE" | jq -r --arg domain "${{ inputs.domain-name }}" '.result[] | select(.name == $domain) | .name')
+          
+          if [ -n "$DOMAIN_EXISTS" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Domain '${{ inputs.domain-name }}' is already configured"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "📝 Domain '${{ inputs.domain-name }}' is not configured"
+          fi
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "⚠️ Could not check existing domains, will attempt to add"
+        fi
+
+    - name: Add custom domain
+      id: add-domain
+      if: steps.check-domain.outputs.exists != 'true'
+      shell: bash
+      run: |
+        echo "Adding custom domain '${{ inputs.domain-name }}' to project '${{ inputs.project-name }}'..."
+        
+        RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/pages/projects/${{ inputs.project-name }}/domains" \
+          -H "Authorization: Bearer ${{ inputs.api-token }}" \
+          -H "Content-Type: application/json" \
+          --data '{"name":"${{ inputs.domain-name }}"}')
+        
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+        
+        if [ "$SUCCESS" = "true" ]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "status=added" >> $GITHUB_OUTPUT
+          echo "✅ Custom domain '${{ inputs.domain-name }}' added successfully"
+          
+          # Get domain status
+          DOMAIN_STATUS=$(echo "$RESPONSE" | jq -r '.result.status // "unknown"')
+          echo "🔍 Domain status: $DOMAIN_STATUS"
+          
+          if [ "$DOMAIN_STATUS" = "pending" ]; then
+            echo "📋 Please configure your DNS to point '${{ inputs.domain-name }}' to your Cloudflare Pages project"
+          fi
+        else
+          ERROR_MSG=$(echo "$RESPONSE" | jq -r '.errors[0].message // "Unknown error"')
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "status=failed" >> $GITHUB_OUTPUT
+          
+          # Check if domain already exists error
+          if [[ "$ERROR_MSG" == *"already exists"* ]] || [[ "$ERROR_MSG" == *"already configured"* ]]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "status=exists" >> $GITHUB_OUTPUT
+            echo "✅ Domain '${{ inputs.domain-name }}' is already configured"
+          else
+            echo "❌ Failed to add custom domain: $ERROR_MSG"
+            echo "Response: $RESPONSE"
+            
+            if [ "${{ inputs.fail-on-error }}" = "true" ]; then
+              exit 1
+            else
+              echo "⚠️ Continuing despite domain setup failure (fail-on-error=false)"
+            fi
+          fi
+        fi
+
+    - name: Domain setup complete
+      if: steps.check-domain.outputs.exists == 'true'
+      shell: bash
+      run: |
+        echo "success=true" >> $GITHUB_OUTPUT
+        echo "status=already-configured" >> $GITHUB_OUTPUT
+        echo "✅ Domain '${{ inputs.domain-name }}' was already configured"
+
+    - name: Domain configuration summary
+      shell: bash
+      run: |
+        if [ "${{ steps.add-domain.outputs.success }}" = "true" ] || [ "${{ steps.check-domain.outputs.exists }}" = "true" ]; then
+          echo "✅ Domain configuration completed for: ${{ inputs.domain-name }}"
+        else
+          echo "❌ Domain configuration failed for: ${{ inputs.domain-name }}"
+        fi

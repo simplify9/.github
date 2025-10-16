@@ -1,0 +1,214 @@
+name: Deploy Vite App to Cloudflare Pages
+
+on:
+  workflow_call:
+    inputs:
+      # Project Configuration
+      project-name:
+        description: 'Base Cloudflare project name (without suffix)'
+        required: true
+        type: string
+      
+      # Environment Configuration
+      environment:
+        description: 'Environment to deploy to (e.g., development, staging, production)'
+        required: false
+        type: string
+        default: 'development'
+      
+      # Branch Configuration
+      target-branch:
+        description: 'Target branch for deployment'
+        required: false
+        type: string
+        default: 'development'
+      
+      # Node.js Configuration
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '18'
+      
+      package-manager:
+        description: 'Package manager to use (npm, yarn, pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+      
+      # Build Configuration
+      build-command:
+        description: 'Build command to run'
+        required: false
+        type: string
+        default: 'npm run build'
+      
+      build-directory:
+        description: 'Directory where build output is located'
+        required: false
+        type: string
+        default: 'build'
+      
+      # Cloudflare Configuration
+      project-name-suffix:
+        description: 'Suffix to add to project name (e.g., -dev, -staging)'
+        required: false
+        type: string
+        default: ''
+      
+      custom-domain:
+        description: 'Custom domain to configure (optional)'
+        required: false
+        type: string
+        default: ''
+      
+      fail-on-domain-error:
+        description: 'Whether to fail deployment if custom domain setup fails'
+        required: false
+        type: boolean
+        default: false
+      
+      # Additional Options
+      run-tests:
+        description: 'Whether to run tests before deployment'
+        required: false
+        type: boolean
+        default: true
+      
+      test-command:
+        description: 'Test command to run'
+        required: false
+        type: string
+        default: 'npm test'
+    
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: 'Cloudflare API token (optional - uses organization secret if not provided)'
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        description: 'Cloudflare account ID (optional - uses organization secret if not provided)'
+        required: false
+
+    outputs:
+      deployment-url:
+        description: 'URL of the deployed application'
+        value: ${{ jobs.deploy.outputs.url }}
+      project-name:
+        description: 'Full project name used for deployment'
+        value: ${{ jobs.deploy.outputs.project-name }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Cloudflare Pages (${{ inputs.environment }})
+    
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+      project-name: ${{ env.FULL_PROJECT_NAME }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Set project name
+        run: |
+          FULL_NAME="${{ inputs.project-name }}${{ inputs.project-name-suffix }}"
+          echo "FULL_PROJECT_NAME=$FULL_NAME" >> $GITHUB_ENV
+          echo "🏷️ Using project name: $FULL_NAME"
+
+      - name: Install dependencies
+        run: |
+          case "${{ inputs.package-manager }}" in
+            npm)
+              npm ci
+              ;;
+            yarn)
+              yarn install --frozen-lockfile
+              ;;
+            pnpm)
+              pnpm install --frozen-lockfile
+              ;;
+            *)
+              echo "❌ Unsupported package manager: ${{ inputs.package-manager }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Run tests
+        if: inputs.run-tests == true
+        run: ${{ inputs.test-command }}
+
+      - name: Build application
+        run: ${{ inputs.build-command }}
+
+      - name: Verify build output
+        run: |
+          if [ ! -d "${{ inputs.build-directory }}" ]; then
+            echo "❌ Build directory '${{ inputs.build-directory }}' not found!"
+            echo "Contents of current directory:"
+            ls -la
+            exit 1
+          fi
+          echo "✅ Build directory found, contents:"
+          ls -la ${{ inputs.build-directory }}/
+
+      - name: Setup Cloudflare Pages project
+        uses: ./.github/actions/setup-cloudflare-project
+        with:
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          project-name: ${{ env.FULL_PROJECT_NAME }}
+          production-branch: ${{ inputs.target-branch }}
+          build-command: ${{ inputs.build-command }}
+          destination-dir: ${{ inputs.build-directory }}
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ env.FULL_PROJECT_NAME }}
+          directory: ${{ inputs.build-directory }}
+          # Optional: Uncomment the line below to enable GitHub integration
+          # gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          NODE_ENV: ${{ inputs.environment }}
+          ENVIRONMENT: ${{ inputs.environment }}
+
+      - name: Setup custom domain
+        if: inputs.custom-domain != ''
+        uses: ./.github/actions/setup-cloudflare-domain
+        with:
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          project-name: ${{ env.FULL_PROJECT_NAME }}
+          domain-name: ${{ inputs.custom-domain }}
+          fail-on-error: ${{ inputs.fail-on-domain-error }}
+
+      - name: Deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: ${{ env.FULL_PROJECT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Directory**: ${{ inputs.build-directory }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ steps.deploy.outputs.url }}" ]; then
+            echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ inputs.custom-domain }}" ]; then
+            echo "- **Custom Domain**: ${{ inputs.custom-domain }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY

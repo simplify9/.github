@@ -1,0 +1,111 @@
+name: 'Setup Cloudflare Pages Project'
+description: 'Creates or verifies a Cloudflare Pages project exists with the specified configuration'
+author: 'simplify9'
+
+inputs:
+  api-token:
+    description: 'Cloudflare API token'
+    required: true
+  account-id:
+    description: 'Cloudflare account ID'
+    required: true
+  project-name:
+    description: 'Name of the Cloudflare Pages project'
+    required: true
+  production-branch:
+    description: 'Production branch for the project'
+    required: false
+    default: 'main'
+  build-command:
+    description: 'Build command for the project'
+    required: false
+    default: 'npm run build'
+  destination-dir:
+    description: 'Build output directory'
+    required: false
+    default: 'build'
+  root-dir:
+    description: 'Root directory for the project'
+    required: false
+    default: ''
+
+outputs:
+  project-exists:
+    description: 'Whether the project already existed'
+    value: ${{ steps.check-project.outputs.exists }}
+  project-url:
+    description: 'URL of the created/existing project'
+    value: ${{ steps.create-project.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install jq for JSON parsing
+      shell: bash
+      run: |
+        if ! command -v jq &> /dev/null; then
+          sudo apt-get update && sudo apt-get install -y jq
+        fi
+
+    - name: Check if Cloudflare Pages project exists
+      id: check-project
+      shell: bash
+      run: |
+        echo "Checking if project '${{ inputs.project-name }}' exists..."
+        
+        RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/pages/projects/${{ inputs.project-name }}" \
+          -H "Authorization: Bearer ${{ inputs.api-token }}" \
+          -H "Content-Type: application/json")
+        
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+        
+        if [ "$SUCCESS" = "true" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "✅ Project '${{ inputs.project-name }}' already exists"
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "📝 Project '${{ inputs.project-name }}' does not exist"
+        fi
+
+    - name: Create Cloudflare Pages project
+      id: create-project
+      if: steps.check-project.outputs.exists == 'false'
+      shell: bash
+      run: |
+        echo "Creating Cloudflare Pages project '${{ inputs.project-name }}'..."
+        
+        RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/pages/projects" \
+          -H "Authorization: Bearer ${{ inputs.api-token }}" \
+          -H "Content-Type: application/json" \
+          --data '{
+            "name": "${{ inputs.project-name }}",
+            "production_branch": "${{ inputs.production-branch }}",
+            "build_config": {
+              "build_command": "${{ inputs.build-command }}",
+              "destination_dir": "${{ inputs.destination-dir }}",
+              "root_dir": "${{ inputs.root-dir }}"
+            }
+          }')
+        
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+        
+        if [ "$SUCCESS" = "true" ]; then
+          PROJECT_URL=$(echo "$RESPONSE" | jq -r '.result.subdomain')
+          echo "url=https://${PROJECT_URL}.pages.dev" >> $GITHUB_OUTPUT
+          echo "✅ Project '${{ inputs.project-name }}' created successfully"
+          echo "🌐 Project URL: https://${PROJECT_URL}.pages.dev"
+        else
+          ERROR_MSG=$(echo "$RESPONSE" | jq -r '.errors[0].message // "Unknown error"')
+          echo "❌ Failed to create project: $ERROR_MSG"
+          echo "Response: $RESPONSE"
+          exit 1
+        fi
+
+    - name: Project setup complete
+      shell: bash
+      run: |
+        if [ "${{ steps.check-project.outputs.exists }}" = "true" ]; then
+          echo "✅ Using existing Cloudflare Pages project: ${{ inputs.project-name }}"
+        else
+          echo "✅ Created new Cloudflare Pages project: ${{ inputs.project-name }}"
+        fi

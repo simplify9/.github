@@ -1,24 +1,226 @@
-# Reusable CI Workflows
+# Reusable CI/CD Workflows and Templates
 
-This repository hosts reusable GitHub Actions workflows for Simplify9 projects.
+This repository hosts reusable GitHub Actions workflows and composite actions for Simplify9 projects.
 
-## Workflows Overview
+## 🚀 **Quick Start - Cloudflare Pages for Vite Apps**
 
-1. **sw-cicd.yml** - Complete CI/CD pipeline for .NET applications with Docker, Helm, and Kubernetes deployment
-2. **ci-docker.yaml** - Build and push Docker images using dynamic profile-based registry credentials
-3. **ci-helm.yaml** - Deploy Helm charts with dynamic profile-based kubeconfig secret resolution
+**Most popular template!** Deploy React, Vue, Svelte, or any Vite app to Cloudflare Pages.
+
+### **Complete Documentation**
+👉 **[QUICK_START_README.md](./QUICK_START_README.md)** - Complete guide with copy-paste examples  
+👉 **[CHEAT_SHEET.md](./CHEAT_SHEET.md)** - One-page reference for quick lookup
+
+### **30-Second Setup:**
+1. Check [QUICK_START_README.md](./QUICK_START_README.md) for copy-paste examples
+2. Change `project-name` to your actual app name
+3. Set `build-directory: dist` (for Vite) or `build-directory: build` (for CRA)
+4. Push to `development` or `main` - done! 🎉
+
+**What you get:**
+- `development` branch → `your-app-dev` (auto-deployed)
+- `main` branch → `your-app` (auto-deployed with tests)
+- Automatic Cloudflare project creation
+- Optional custom domain setup
+
+---
+
+## 📁 Repository Structure
+
+```
+.github/
+├── actions/
+│   ├── setup-cloudflare-project/    # Cloudflare Pages project setup
+│   ├── setup-cloudflare-domain/     # Cloudflare custom domain configuration
+│   └── helm-deploy/                 # Helm deployment action
+└── workflows/
+    ├── sw-cicd.yml                  # Complete .NET CI/CD pipeline
+    ├── ci-docker.yaml              # Docker build and push
+    ├── ci-helm.yaml                 # Helm chart deployment
+    ├── deploy-vite-cloudflare.yml   # Vite to Cloudflare Pages deployment
+    └── example-deploy.yml           # Example Cloudflare deployment
+```
+
+## 🚀 Available Templates
+
+### 1. **sw-cicd.yml** - Complete .NET CI/CD Pipeline ⭐
+
+Reusable workflow name: `Reusable SW CI/CD Pipeline`
+
+A production-ready CI/CD pipeline for .NET applications with Docker, Helm, and Kubernetes deployment.
+
+**Features:**
+- ✅ Semantic versioning and Git tagging
+- ✅ .NET project building and testing
+- ✅ NuGet package publishing (optional)
+- ✅ Docker image building and pushing
+- ✅ Helm chart packaging and publishing
+- ✅ Kubernetes deployment using the `helm-deploy` action
+
+### 2. **deploy-vite-cloudflare.yml** - Vite to Cloudflare Pages 🆕
+
+Reusable workflow name: `Deploy Vite App to Cloudflare Pages`
+
+A flexible template for deploying Vite applications to Cloudflare Pages with automated project and domain management.
+
+**Features:**
+- ✅ Multi-environment support (dev, staging, production)
+- ✅ Automated Cloudflare Pages project creation
+- ✅ Custom domain configuration
+- ✅ Support for npm, yarn, and pnpm
+- ✅ Comprehensive error handling and logging
+- ✅ Modular composite actions
+
+**Complex logic is separated into reusable composite actions:**
+- `setup-cloudflare-project` - Handles project creation and configuration
+- `setup-cloudflare-domain` - Manages custom domain setup
+
+---
+
+## 📖 Cloudflare Pages Deployment Guide
+
+### Quick Start
+
+1. **Set up Organization Secrets (Recommended):**
+   ```
+   CLOUDFLARE_API_TOKEN     # Cloudflare API token with Pages permissions
+   CLOUDFLARE_ACCOUNT_ID    # Your Cloudflare account ID
+   ```
+   
+   ℹ️ *Set these as **Organization secrets** for automatic inheritance across all repositories*
+
+2. **Create your deployment workflow:**
+   ```yaml
+   name: Deploy to Cloudflare Pages
+   
+   on:
+     push:
+       branches: [development, main]
+   
+   jobs:
+     # Uses organization secrets automatically
+     deploy-dev:
+       if: github.ref == 'refs/heads/development'
+       uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+       with:
+         project-name: my-awesome-app
+         environment: development
+         project-name-suffix: -dev
+         custom-domain: dev.yoursite.com
+   
+     # Override with different Cloudflare account if needed
+     deploy-prod:
+       if: github.ref == 'refs/heads/main'
+       uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+       with:
+         project-name: my-awesome-app
+         environment: production
+         custom-domain: yoursite.com
+         fail-on-domain-error: true
+       secrets:
+         CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
+         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PROD_CLOUDFLARE_ACCOUNT_ID }}
+   ```
+
+### Configuration Options
+
+| Input | Description | Default | Required |
+|-------|-------------|---------|----------|
+| `project-name` | Base Cloudflare project name | - | **Yes** |
+| `environment` | Environment name | `development` | No |
+| `target-branch` | Target branch for deployment | `development` | No |
+| `node-version` | Node.js version | `18` | No |
+| `package-manager` | Package manager (npm/yarn/pnpm) | `npm` | No |
+| `build-command` | Build command | `npm run build` | No |
+| `build-directory` | Build output directory | `build` | No |
+| `project-name-suffix` | Project name suffix | `''` | No |
+| `custom-domain` | Custom domain to configure | `''` | No |
+| `fail-on-domain-error` | Fail if domain setup fails | `false` | No |
+| `run-tests` | Whether to run tests | `true` | No |
+| `test-command` | Test command | `npm test` | No |
+
+### Usage Examples
+
+**Multi-environment deployment:**
+```yaml
+jobs:
+  deploy-dev:
+    if: github.ref == 'refs/heads/development'
+    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    with:
+      project-name: my-awesome-app
+      environment: development
+      project-name-suffix: -dev
+      custom-domain: dev.yoursite.com
+
+  deploy-staging:
+    if: github.ref == 'refs/heads/staging'
+    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    with:
+      project-name: my-awesome-app
+      environment: staging
+      project-name-suffix: -staging
+      custom-domain: staging.yoursite.com
+      fail-on-domain-error: true
+
+  deploy-prod:
+    if: github.ref == 'refs/heads/main'
+    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    with:
+      project-name: my-awesome-app
+      environment: production
+      custom-domain: yoursite.com
+      fail-on-domain-error: true
+      run-tests: true
+    # Optional: Override with different Cloudflare account
+    # secrets:
+    #   CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
+    #   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PROD_CLOUDFLARE_ACCOUNT_ID }}
+```
+
+**Using different package managers:**
+```yaml
+# Yarn
+deploy-yarn:
+  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  with:
+    project-name: my-app
+    package-manager: yarn
+    build-command: yarn build
+    test-command: yarn test
+
+# pnpm
+deploy-pnpm:
+  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  with:
+    project-name: my-app
+    package-manager: pnpm
+    build-command: pnpm build
+    test-command: pnpm test
+```
+
+---
+
+## 🔧 Composite Actions
+
+### Cloudflare Pages Actions
+
+#### `setup-cloudflare-project`
+Handles Cloudflare Pages project creation and configuration with comprehensive error handling.
+
+#### `setup-cloudflare-domain`
+Manages custom domain setup with graceful conflict resolution and optional failure modes.
 
 ---
 
 ## ✅ **Ready for Production Use!**
 
-Both the `helm-deploy` action and `sw-cicd.yml` template are now fully aligned with your proven working deployment pattern and ready for immediate use.
+All workflows and actions are production-ready and follow best practices for security, maintainability, and reusability.
 
 ---
 
-## 1. sw-cicd.yml - Complete CI/CD Pipeline ⭐
+## 📋 Legacy Workflows Documentation
 
-Reusable workflow name: `Reusable SW CI/CD Pipeline`
+### 1. sw-cicd.yml - Complete CI/CD Pipeline
 
 ### Overview
 
