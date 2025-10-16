@@ -17,7 +17,7 @@ on:
 jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: YOUR_APP_NAME          # 👈 CHANGE THIS
       environment: development
@@ -26,7 +26,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: YOUR_APP_NAME          # 👈 SAME NAME
       environment: production
@@ -52,7 +52,7 @@ fail-on-domain-error: true              # Fail if domain setup fails
 ```yaml
 deploy-staging:
   if: github.ref == 'refs/heads/staging'
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: YOUR_APP_NAME
     environment: staging

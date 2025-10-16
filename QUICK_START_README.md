@@ -25,7 +25,7 @@ on:
 jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app        # 👈 CHANGE THIS
       environment: development
@@ -34,7 +34,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app        # 👈 SAME NAME
       environment: production
@@ -69,7 +69,7 @@ on:
 jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: customer-portal
       environment: development
@@ -78,7 +78,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: customer-portal
       environment: production
@@ -104,7 +104,7 @@ on:
 jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: admin-dashboard
       environment: development
@@ -113,7 +113,7 @@ jobs:
 
   deploy-staging:
     if: github.ref == 'refs/heads/staging'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: admin-dashboard
       environment: staging
@@ -123,7 +123,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: admin-dashboard
       environment: production
@@ -146,7 +146,7 @@ jobs:
 jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: client-app
       environment: development
@@ -156,7 +156,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: client-app
       environment: production
@@ -172,7 +172,7 @@ jobs:
 
 ```yaml
 deploy-dev:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     environment: development

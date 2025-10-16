@@ -36,8 +36,7 @@ This repository hosts reusable GitHub Actions workflows and composite actions fo
     ├── sw-cicd.yml                  # Complete .NET CI/CD pipeline
     ├── ci-docker.yaml              # Docker build and push
     ├── ci-helm.yaml                 # Helm chart deployment
-    ├── deploy-vite-cloudflare.yml   # Vite to Cloudflare Pages deployment
-    └── example-deploy.yml           # Example Cloudflare deployment
+    └── vite-ci.yml                  # Vite to Cloudflare Pages deployment
 ```
 
 ## 🚀 Available Templates
@@ -56,7 +55,7 @@ A production-ready CI/CD pipeline for .NET applications with Docker, Helm, and K
 - ✅ Helm chart packaging and publishing
 - ✅ Kubernetes deployment using the `helm-deploy` action
 
-### 2. **deploy-vite-cloudflare.yml** - Vite to Cloudflare Pages 🆕
+### 2. **vite-ci.yml** - Vite to Cloudflare Pages 🆕
 
 Reusable workflow name: `Deploy Vite App to Cloudflare Pages`
 
@@ -100,7 +99,7 @@ A flexible template for deploying Vite applications to Cloudflare Pages with aut
      # Uses organization secrets automatically
      deploy-dev:
        if: github.ref == 'refs/heads/development'
-       uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+       uses: simplify9/.github/.github/workflows/vite-ci.yml@main
        with:
          project-name: my-awesome-app
          environment: development
@@ -110,7 +109,7 @@ A flexible template for deploying Vite applications to Cloudflare Pages with aut
      # Override with different Cloudflare account if needed
      deploy-prod:
        if: github.ref == 'refs/heads/main'
-       uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+       uses: simplify9/.github/.github/workflows/vite-ci.yml@main
        with:
          project-name: my-awesome-app
          environment: production
@@ -145,7 +144,7 @@ A flexible template for deploying Vite applications to Cloudflare Pages with aut
 jobs:
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: development
@@ -154,7 +153,7 @@ jobs:
 
   deploy-staging:
     if: github.ref == 'refs/heads/staging'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: staging
@@ -164,7 +163,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: production
@@ -181,7 +180,7 @@ jobs:
 ```yaml
 # Yarn
 deploy-yarn:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     package-manager: yarn
@@ -190,7 +189,7 @@ deploy-yarn:
 
 # pnpm
 deploy-pnpm:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     package-manager: pnpm

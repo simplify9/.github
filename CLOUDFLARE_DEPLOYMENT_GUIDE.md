@@ -62,7 +62,7 @@ jobs:
   # Uses organization secrets automatically
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: development
@@ -72,7 +72,7 @@ jobs:
   # Override with different account if needed
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: production
@@ -196,7 +196,7 @@ jobs:
   # Uses organization secrets - no secret management needed
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: development
@@ -205,7 +205,7 @@ jobs:
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: production
@@ -220,7 +220,7 @@ jobs:
   # Development - uses organization account
   deploy-dev:
     if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: development
@@ -230,7 +230,7 @@ jobs:
   # Production - uses dedicated production account
   deploy-prod:
     if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
     with:
       project-name: my-awesome-app
       environment: production
@@ -247,7 +247,7 @@ jobs:
 ```yaml
 # Using Yarn
 deploy-with-yarn:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     package-manager: yarn
@@ -256,7 +256,7 @@ deploy-with-yarn:
 
 # Using pnpm
 deploy-with-pnpm:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     package-manager: pnpm
@@ -269,7 +269,7 @@ deploy-with-pnpm:
 ```yaml
 # Custom build output directory
 deploy-dist:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     build-command: npm run build:prod
@@ -277,7 +277,7 @@ deploy-dist:
 
 # Skip tests for hotfixes
 deploy-hotfix:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     run-tests: false
@@ -377,7 +377,7 @@ After deployment, verify:
 
 ```yaml
 deploy-with-env:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     environment: production
@@ -391,7 +391,7 @@ deploy-with-env:
 ```yaml
 deploy-manual:
   if: github.event_name == 'workflow_dispatch'
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     environment: ${{ github.event.inputs.environment }}
@@ -402,7 +402,7 @@ deploy-manual:
 
 ```yaml
 deploy-with-notifications:
-  uses: simplify9/.github/.github/workflows/deploy-vite-cloudflare.yml@main
+  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
   with:
     project-name: my-app
     environment: production
