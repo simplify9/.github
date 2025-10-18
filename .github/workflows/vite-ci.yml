@@ -159,7 +159,7 @@ jobs:
           ls -la ${{ inputs.build-directory }}/
 
       - name: Setup Cloudflare Pages project
-        uses: ./.github/actions/setup-cloudflare-project
+        uses: simplify9/.github/.github/actions/setup-cloudflare-project@main
         with:
           api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -184,7 +184,7 @@ jobs:
 
       - name: Setup custom domain
         if: inputs.custom-domain != ''
-        uses: ./.github/actions/setup-cloudflare-domain
+        uses: simplify9/.github/.github/actions/setup-cloudflare-domain@main
         with:
           api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
