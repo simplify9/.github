@@ -1,0 +1,102 @@
+name: 'Setup Next.js for Cloudflare'
+description: 'Validates and prepares Next.js application for Cloudflare Pages deployment'
+author: 'simplify9'
+
+inputs:
+  package-manager:
+    description: 'Package manager to use (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  validate-config:
+    description: 'Whether to validate Next.js configuration'
+    required: false
+    default: 'true'
+
+outputs:
+  dependencies-installed:
+    description: 'Whether required dependencies were installed'
+    value: ${{ steps.check-deps.outputs.installed }}
+  config-valid:
+    description: 'Whether Next.js configuration is valid'
+    value: ${{ steps.validate-config.outputs.valid }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for required Cloudflare dependencies
+      id: check-deps
+      shell: bash
+      run: |
+        echo "🔍 Checking for @cloudflare/next-on-pages..."
+        
+        # Check if @cloudflare/next-on-pages is installed
+        if ! ${{ inputs.package-manager }} list @cloudflare/next-on-pages >/dev/null 2>&1; then
+          echo "❌ @cloudflare/next-on-pages is not installed!"
+          echo "Please install it with: ${{ inputs.package-manager }} install --save-dev @cloudflare/next-on-pages"
+          echo "See: https://github.com/cloudflare/next-on-pages"
+          echo "installed=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        # Check for wrangler
+        if ! ${{ inputs.package-manager }} list wrangler >/dev/null 2>&1; then
+          echo "⚠️ wrangler is not installed, installing..."
+          case "${{ inputs.package-manager }}" in
+            npm)
+              npm install --save-dev wrangler
+              ;;
+            yarn)
+              yarn add --dev wrangler
+              ;;
+            pnpm)
+              pnpm add --save-dev wrangler
+              ;;
+          esac
+        fi
+        
+        echo "✅ Cloudflare Next.js dependencies verified"
+        echo "installed=true" >> $GITHUB_OUTPUT
+
+    - name: Validate Next.js configuration
+      id: validate-config
+      if: inputs.validate-config == 'true'
+      shell: bash
+      run: |
+        echo "🔧 Validating Next.js configuration for Cloudflare compatibility..."
+        
+        if [ -f "next.config.js" ] || [ -f "next.config.mjs" ] || [ -f "next.config.ts" ]; then
+          echo "✅ Next.js config file found"
+          
+          # Check for output: 'export' which is incompatible with SSR
+          if grep -r "output.*['\"]export['\"]" next.config.* 2>/dev/null; then
+            echo "❌ Found 'output: export' in Next.js config. This is for static sites only!"
+            echo "For SSR on Cloudflare, remove 'output: export' or set it to 'standalone'"
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Next.js configuration appears compatible with SSR"
+          echo "valid=true" >> $GITHUB_OUTPUT
+        else
+          echo "ℹ️ No Next.js config file found (using defaults)"
+          echo "valid=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Verify package.json scripts
+      shell: bash
+      run: |
+        echo "📋 Checking package.json scripts..."
+        
+        if [ -f "package.json" ]; then
+          # Check if pages:build script exists
+          if ! grep -q '"pages:build"' package.json; then
+            echo "⚠️ 'pages:build' script not found in package.json"
+            echo "💡 Recommended: Add this script to package.json:"
+            echo '   "pages:build": "next-on-pages"'
+          else
+            echo "✅ Found 'pages:build' script in package.json"
+          fi
+        else
+          echo "❌ package.json not found!"
+          exit 1
+        fi

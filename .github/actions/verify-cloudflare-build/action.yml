@@ -1,0 +1,92 @@
+name: 'Verify Cloudflare Build Output'
+description: 'Validates the build output from @cloudflare/next-on-pages'
+author: 'simplify9'
+
+inputs:
+  build-directory:
+    description: 'Directory where build output should be located'
+    required: false
+    default: '.vercel/output/static'
+
+outputs:
+  build-valid:
+    description: 'Whether the build output is valid'
+    value: ${{ steps.verify-output.outputs.valid }}
+  has-functions:
+    description: 'Whether Functions were generated'
+    value: ${{ steps.verify-output.outputs.has-functions }}
+  static-files-count:
+    description: 'Number of static files generated'
+    value: ${{ steps.verify-output.outputs.static-files }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify Cloudflare build output
+      id: verify-output
+      shell: bash
+      run: |
+        echo "🔍 Checking Cloudflare Pages build output..."
+        
+        # Check for .vercel/output structure (created by @cloudflare/next-on-pages)
+        if [ ! -d ".vercel/output" ]; then
+          echo "❌ .vercel/output directory not found!"
+          echo "This suggests @cloudflare/next-on-pages didn't run properly."
+          echo "Current directory contents:"
+          ls -la
+          echo ""
+          echo "Expected structure after @cloudflare/next-on-pages build:"
+          echo "  .vercel/output/static/    <- Static assets"
+          echo "  .vercel/output/functions/ <- Server functions (if any)"
+          echo "valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "✅ Cloudflare build structure found:"
+        ls -la .vercel/output/
+        
+        # Check static directory
+        if [ -d ".vercel/output/static" ]; then
+          echo "📁 Static assets directory found:"
+          STATIC_COUNT=$(find .vercel/output/static -type f | wc -l)
+          echo "   Found $STATIC_COUNT static files"
+          echo "static-files=$STATIC_COUNT" >> $GITHUB_OUTPUT
+          
+          # Show first few files for debugging
+          echo "📄 Sample static files:"
+          find .vercel/output/static -type f | head -10 | while read file; do
+            echo "   $file"
+          done
+        else
+          echo "❌ Static assets directory not found!"
+          echo "valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        # Check for Functions
+        if [ -d ".vercel/output/functions" ]; then
+          echo "⚡ Functions directory found:"
+          FUNCTION_COUNT=$(find .vercel/output/functions -name "*.js" | wc -l)
+          echo "   Found $FUNCTION_COUNT function files"
+          echo "has-functions=true" >> $GITHUB_OUTPUT
+          
+          # Show function files
+          if [ $FUNCTION_COUNT -gt 0 ]; then
+            echo "🔧 Function files:"
+            find .vercel/output/functions -name "*.js" | head -5 | while read file; do
+              echo "   $file"
+            done
+          fi
+        else
+          echo "ℹ️ No Functions directory found (static-only build)"
+          echo "has-functions=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Check for config.json
+        if [ -f ".vercel/output/config.json" ]; then
+          echo "⚙️ Build configuration found:"
+          echo "$(cat .vercel/output/config.json | head -10)"
+        fi
+        
+        echo "valid=true" >> $GITHUB_OUTPUT
+        echo "✅ Build output validation completed successfully"
