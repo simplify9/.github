@@ -75,12 +75,6 @@ on:
         type: boolean
         default: false
       
-      compatibility-date:
-        description: 'Cloudflare Workers compatibility date'
-        required: false
-        type: string
-        default: '2024-10-20'
-      
       # Additional Options
       run-tests:
         description: 'Whether to run tests before deployment'
@@ -259,9 +253,6 @@ jobs:
           production-branch: ${{ inputs.target-branch }}
           build-command: ${{ inputs.build-command }}
           destination-dir: ${{ inputs.build-directory }}
-          compatibility-date: ${{ inputs.compatibility-date }}
-          # Enable Functions for SSR
-          functions-enabled: true
 
       - name: Deploy to Cloudflare Pages with Functions
         id: deploy
@@ -310,7 +301,6 @@ jobs:
           echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Compatibility Date**: ${{ inputs.compatibility-date }}" >> $GITHUB_STEP_SUMMARY
           
           if [ -n "${{ steps.deploy.outputs.url }}" ]; then
             echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
