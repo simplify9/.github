@@ -120,12 +120,19 @@ runs:
     - name: Configure Helm registry authentication
       shell: bash
       run: |
-        echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
-        if [ "${{ inputs.registry }}" != "docker.io" ]; then
-          helm registry login ${{ inputs.registry }} -u ${{ inputs.registry-username }} -p ${{ inputs.registry-password }}
-        else
-          helm registry login -u ${{ inputs.registry-username }} -p ${{ inputs.registry-password }}
+        set -euo pipefail
+        REG="${{ inputs.registry }}"
+        # Normalize Docker Hub for Helm OCI
+        if [ "$REG" = "docker.io" ] || [ "$REG" = "index.docker.io" ]; then
+          REG="registry-1.docker.io"
         fi
+
+        echo "Configuring Helm registry authentication for $REG"
+
+        echo "${{ inputs.registry-password }}" | helm registry login "$REG" \
+          -u "${{ inputs.registry-username }}" \
+          --password-stdin
+
 
     - name: Prepare values file
       if: inputs.values != ''
