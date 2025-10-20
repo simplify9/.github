@@ -375,6 +375,7 @@ jobs:
           kubeconfig: ${{ secrets.kubeconfig }}
           release-name: ${{ inputs.chart-name }}-dev
           namespace: ${{ inputs.development-namespace }}
+          registry: ${{ env.CONTAINER_REGISTRY }}
           set-values: >-
             image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
