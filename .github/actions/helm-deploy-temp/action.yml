@@ -117,21 +117,21 @@ runs:
         echo "Creating namespace: ${{ inputs.namespace }}"
         kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Configure Helm registry authentication
-      shell: bash
-      run: |
-        set -euo pipefail
-        REG="${{ inputs.registry }}"
-        # Normalize Docker Hub for Helm OCI
-        if [ "$REG" = "docker.io" ] || [ "$REG" = "index.docker.io" ]; then
-          REG="registry-1.docker.io"
-        fi
+    # - name: Configure Helm registry authentication
+    #   shell: bash
+    #   run: |
+    #     set -euo pipefail
+    #     REG="${{ inputs.registry }}"
+    #     # Normalize Docker Hub for Helm OCI
+    #     if [ "$REG" = "docker.io" ] || [ "$REG" = "index.docker.io" ]; then
+    #       REG="registry-1.docker.io"
+    #     fi
 
-        echo "Configuring Helm registry authentication for $REG"
+    #     echo "Configuring Helm registry authentication for $REG"
 
-        echo "${{ inputs.registry-password }}" | helm registry login "$REG" \
-          -u "${{ inputs.registry-username }}" \
-          --password-stdin
+    #     echo "${{ inputs.registry-password }}" | helm registry login "$REG" \
+    #       -u "${{ inputs.registry-username }}" \
+    #       --password-stdin
 
 
     - name: Prepare values file
