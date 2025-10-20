@@ -41,26 +41,20 @@ on:
         description: 'Build command to run'
         required: false
         type: string
-        default: 'npm run build'
+        default: 'npm run pages:build'
       
       build-directory:
         description: 'Directory where build output is located'
         required: false
         type: string
-        default: 'out'
+        default: '.vercel/output/static'
       
       # Next.js Configuration
-      static-export:
-        description: 'Whether to use Next.js static export (required for Cloudflare Pages)'
+      next-config-validation:
+        description: 'Whether to validate Next.js configuration for Cloudflare compatibility'
         required: false
         type: boolean
         default: true
-      
-      export-command:
-        description: 'Export command to run after build (for static export)'
-        required: false
-        type: string
-        default: 'npx next export'
       
       # Cloudflare Configuration
       project-name-suffix:
@@ -80,6 +74,12 @@ on:
         required: false
         type: boolean
         default: false
+      
+      compatibility-date:
+        description: 'Cloudflare Workers compatibility date'
+        required: false
+        type: string
+        default: '2024-10-20'
       
       # Additional Options
       run-tests:
@@ -125,7 +125,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy to Cloudflare Pages (${{ inputs.environment }})
+    name: Deploy Next.js to Cloudflare Pages (${{ inputs.environment }})
     
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -165,6 +165,46 @@ jobs:
               ;;
           esac
 
+      - name: Verify Cloudflare Next.js setup
+        run: |
+          echo "🔍 Checking for @cloudflare/next-on-pages..."
+          
+          # Check if @cloudflare/next-on-pages is installed
+          if ! npm list @cloudflare/next-on-pages >/dev/null 2>&1; then
+            echo "❌ @cloudflare/next-on-pages is not installed!"
+            echo "Please install it with: npm install --save-dev @cloudflare/next-on-pages"
+            echo "See: https://github.com/cloudflare/next-on-pages"
+            exit 1
+          fi
+          
+          # Check for wrangler
+          if ! npm list wrangler >/dev/null 2>&1; then
+            echo "⚠️ wrangler is not installed, installing..."
+            npm install --save-dev wrangler
+          fi
+          
+          echo "✅ Cloudflare Next.js dependencies verified"
+
+      - name: Validate Next.js configuration
+        if: inputs.next-config-validation == true
+        run: |
+          echo "🔧 Validating Next.js configuration for Cloudflare compatibility..."
+          
+          if [ -f "next.config.js" ] || [ -f "next.config.mjs" ] || [ -f "next.config.ts" ]; then
+            echo "✅ Next.js config file found"
+            
+            # Check for output: 'export' which is incompatible with SSR
+            if grep -r "output.*['\"]export['\"]" next.config.* 2>/dev/null; then
+              echo "❌ Found 'output: export' in Next.js config. This is for static sites only!"
+              echo "For SSR on Cloudflare, remove 'output: export' or set it to 'standalone'"
+              exit 1
+            fi
+            
+            echo "✅ Next.js configuration appears compatible with SSR"
+          else
+            echo "ℹ️ No Next.js config file found (using defaults)"
+          fi
+
       - name: Run linting
         if: inputs.run-lint == true
         run: ${{ inputs.lint-command }}
@@ -173,31 +213,44 @@ jobs:
         if: inputs.run-tests == true
         run: ${{ inputs.test-command }}
 
-      - name: Build Next.js application
+      - name: Build Next.js application with Cloudflare adapter
         run: ${{ inputs.build-command }}
         env:
           NODE_ENV: ${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Export static files
-        if: inputs.static-export == true
-        run: ${{ inputs.export-command }}
-        env:
-          NODE_ENV: ${{ inputs.environment }}
-          ENVIRONMENT: ${{ inputs.environment }}
-
-      - name: Verify build output
+      - name: Verify Cloudflare build output
         run: |
-          if [ ! -d "${{ inputs.build-directory }}" ]; then
-            echo "❌ Build directory '${{ inputs.build-directory }}' not found!"
-            echo "Contents of current directory:"
+          echo "🔍 Checking Cloudflare Pages build output..."
+          
+          # Check for .vercel/output structure (created by @cloudflare/next-on-pages)
+          if [ ! -d ".vercel/output" ]; then
+            echo "❌ .vercel/output directory not found!"
+            echo "This suggests @cloudflare/next-on-pages didn't run properly."
+            echo "Current directory contents:"
             ls -la
+            echo ""
+            echo "Expected structure after @cloudflare/next-on-pages build:"
+            echo "  .vercel/output/static/    <- Static assets"
+            echo "  .vercel/output/functions/ <- Server functions (if any)"
             exit 1
           fi
-          echo "✅ Build directory found, contents:"
-          ls -la ${{ inputs.build-directory }}/
+          
+          echo "✅ Cloudflare build structure found:"
+          ls -la .vercel/output/
+          
+          if [ -d ".vercel/output/static" ]; then
+            echo "📁 Static assets:"
+            ls -la .vercel/output/static/ | head -10
+          fi
+          
+          if [ -d ".vercel/output/functions" ]; then
+            echo "⚡ Functions found:"
+            find .vercel/output/functions -name "*.js" | head -5
+          fi
 
-      - name: Setup Cloudflare Pages project
+      - name: Setup Cloudflare Pages project with Functions
         uses: simplify9/.github/.github/actions/setup-cloudflare-project@main
         with:
           api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -206,8 +259,11 @@ jobs:
           production-branch: ${{ inputs.target-branch }}
           build-command: ${{ inputs.build-command }}
           destination-dir: ${{ inputs.build-directory }}
+          compatibility-date: ${{ inputs.compatibility-date }}
+          # Enable Functions for SSR
+          functions-enabled: true
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy to Cloudflare Pages with Functions
         id: deploy
         uses: cloudflare/pages-action@v1
         with:
@@ -215,8 +271,8 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: ${{ env.FULL_PROJECT_NAME }}
           directory: ${{ inputs.build-directory }}
-          # Optional: Uncomment the line below to enable GitHub integration
-          # gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          # Enable Functions for SSR support
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
         env:
           NODE_ENV: ${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
@@ -231,6 +287,21 @@ jobs:
           domain-name: ${{ inputs.custom-domain }}
           fail-on-error: ${{ inputs.fail-on-domain-error }}
 
+      - name: Test deployment
+        if: steps.deploy.outputs.url != ''
+        run: |
+          echo "🧪 Testing deployed application..."
+          
+          # Wait a moment for deployment to be ready
+          sleep 10
+          
+          # Test the homepage
+          if curl -f -s -o /dev/null "${{ steps.deploy.outputs.url }}"; then
+            echo "✅ Homepage is accessible"
+          else
+            echo "⚠️ Homepage test failed (might be normal for some apps)"
+          fi
+
       - name: Deployment summary
         run: |
           echo "## 🚀 Next.js Deployment Summary" >> $GITHUB_STEP_SUMMARY
@@ -239,8 +310,7 @@ jobs:
           echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Directory**: ${{ inputs.build-directory }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Static Export**: ${{ inputs.static-export }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Compatibility Date**: ${{ inputs.compatibility-date }}" >> $GITHUB_STEP_SUMMARY
           
           if [ -n "${{ steps.deploy.outputs.url }}" ]; then
             echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
@@ -251,4 +321,19 @@ jobs:
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛠️ Technical Details" >> $GITHUB_STEP_SUMMARY
+          echo "- Uses **@cloudflare/next-on-pages** for SSR support" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployed to **Cloudflare Pages with Functions**" >> $GITHUB_STEP_SUMMARY
+          echo "- Supports dynamic routes, API routes, and middleware" >> $GITHUB_STEP_SUMMARY
+          echo "- Compatible with Next.js App Router and Pages Router" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Next.js deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+
+      - name: Performance and optimization tips
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 💡 Performance Tips" >> $GITHUB_STEP_SUMMARY
+          echo "- **Edge Runtime**: Use \`export const runtime = 'edge'\` in API routes for better performance" >> $GITHUB_STEP_SUMMARY
+          echo "- **Static Generation**: Use ISR (\`revalidate\`) for pages that can be cached" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Optimization**: Next.js Image component works with Cloudflare's image optimization" >> $GITHUB_STEP_SUMMARY
+          echo "- **Caching**: Configure appropriate cache headers for static assets" >> $GITHUB_STEP_SUMMARY

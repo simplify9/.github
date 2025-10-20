@@ -5,7 +5,16 @@ Ask DevOps to set these **Organization secrets**:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-## **Template File**
+## **Choose Your Template**
+
+| App Type | Template | Use Case |
+|----------|----------|----------|
+| **Static Sites** (Vite/CRA) | `vite-ci.yml` | React, Vue, Svelte, vanilla JS |
+| **Next.js Apps** | `next-ci.yml` | Next.js with SSR, API routes, static sites |
+
+---
+
+## **Template 1: Static Sites (Most Common)**
 Copy to your project: `.github/workflows/deploy.yml`
 
 ```yaml
@@ -74,6 +83,81 @@ test-command: yarn test                 # or 'pnpm test'
 | `development` | `your-app-dev` | Auto-generated + custom domain |
 | `staging` | `your-app-staging` | Auto-generated + custom domain |
 | `main` | `your-app` | Auto-generated + custom domain |
+
+---
+
+## **Quick Decision Guide**
+
+### **Static Sites** → Use `vite-ci.yml`
+- ✅ React, Vue, Svelte apps
+- ✅ No server-side rendering needed
+- ✅ Build output is just HTML/CSS/JS files
+- ✅ Examples: Portfolio sites, dashboards, SPAs
+
+### **Next.js Apps** → Use `next-ci.yml`
+- ✅ Next.js with API routes
+- ✅ Server-side rendering (SSR)
+- ✅ Dynamic routes (`[id].js`)
+- ✅ Middleware or authentication
+- ✅ Static generation (SSG/ISR)
+- ✅ Examples: E-commerce, blogs, web apps, static sites
+
+---
+
+## **Template 2: Next.js Applications**
+
+**Setup:** Install dependencies first:
+```bash
+npm install --save-dev @cloudflare/next-on-pages wrangler
+```
+
+**Package.json:** Add build script:
+```json
+{
+  "scripts": {
+    "pages:build": "next-on-pages"
+  }
+}
+```
+
+**Workflow:** `.github/workflows/deploy.yml`
+```yaml
+name: Deploy Next.js SSR to Cloudflare
+on:
+  push:
+    branches: [development, main]
+
+jobs:
+  deploy-dev:
+    if: github.ref == 'refs/heads/development'
+    uses: simplify9/.github/.github/workflows/next-ci.yml@main
+    with:
+      project-name: YOUR_NEXTJS_APP       # 👈 CHANGE THIS
+      environment: development
+      project-name-suffix: -dev
+      build-command: npm run pages:build  # 👈 Uses @cloudflare/next-on-pages
+
+  deploy-prod:
+    if: github.ref == 'refs/heads/main'
+    uses: simplify9/.github/.github/workflows/next-ci.yml@main
+    with:
+      project-name: YOUR_NEXTJS_APP
+      environment: production
+      build-command: npm run pages:build
+      custom-domain: yourapp.com
+```
+
+**Next.js Config:** Remove static export (if present):
+```javascript
+// next.config.js - Remove this line for SSR:
+// output: 'export', // ❌ Remove this!
+
+module.exports = {
+  // Your other config...
+}
+```
+
+---
 
 ## **Common Issues**
 
