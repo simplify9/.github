@@ -75,6 +75,12 @@ on:
         type: boolean
         default: false
       
+      compatibility-date:
+        description: 'Cloudflare Workers compatibility date'
+        required: false
+        type: string
+        default: '2024-10-20'
+      
       # Additional Options
       run-tests:
         description: 'Whether to run tests before deployment'
@@ -159,45 +165,11 @@ jobs:
               ;;
           esac
 
-      - name: Verify Cloudflare Next.js setup
-        run: |
-          echo "🔍 Checking for @cloudflare/next-on-pages..."
-          
-          # Check if @cloudflare/next-on-pages is installed
-          if ! npm list @cloudflare/next-on-pages >/dev/null 2>&1; then
-            echo "❌ @cloudflare/next-on-pages is not installed!"
-            echo "Please install it with: npm install --save-dev @cloudflare/next-on-pages"
-            echo "See: https://github.com/cloudflare/next-on-pages"
-            exit 1
-          fi
-          
-          # Check for wrangler
-          if ! npm list wrangler >/dev/null 2>&1; then
-            echo "⚠️ wrangler is not installed, installing..."
-            npm install --save-dev wrangler
-          fi
-          
-          echo "✅ Cloudflare Next.js dependencies verified"
-
-      - name: Validate Next.js configuration
-        if: inputs.next-config-validation == true
-        run: |
-          echo "🔧 Validating Next.js configuration for Cloudflare compatibility..."
-          
-          if [ -f "next.config.js" ] || [ -f "next.config.mjs" ] || [ -f "next.config.ts" ]; then
-            echo "✅ Next.js config file found"
-            
-            # Check for output: 'export' which is incompatible with SSR
-            if grep -r "output.*['\"]export['\"]" next.config.* 2>/dev/null; then
-              echo "❌ Found 'output: export' in Next.js config. This is for static sites only!"
-              echo "For SSR on Cloudflare, remove 'output: export' or set it to 'standalone'"
-              exit 1
-            fi
-            
-            echo "✅ Next.js configuration appears compatible with SSR"
-          else
-            echo "ℹ️ No Next.js config file found (using defaults)"
-          fi
+      - name: Setup Next.js for Cloudflare
+        uses: simplify9/.github/.github/actions/setup-nextjs-cloudflare@main
+        with:
+          package-manager: ${{ inputs.package-manager }}
+          validate-config: ${{ inputs.next-config-validation }}
 
       - name: Run linting
         if: inputs.run-lint == true
@@ -215,34 +187,9 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Verify Cloudflare build output
-        run: |
-          echo "🔍 Checking Cloudflare Pages build output..."
-          
-          # Check for .vercel/output structure (created by @cloudflare/next-on-pages)
-          if [ ! -d ".vercel/output" ]; then
-            echo "❌ .vercel/output directory not found!"
-            echo "This suggests @cloudflare/next-on-pages didn't run properly."
-            echo "Current directory contents:"
-            ls -la
-            echo ""
-            echo "Expected structure after @cloudflare/next-on-pages build:"
-            echo "  .vercel/output/static/    <- Static assets"
-            echo "  .vercel/output/functions/ <- Server functions (if any)"
-            exit 1
-          fi
-          
-          echo "✅ Cloudflare build structure found:"
-          ls -la .vercel/output/
-          
-          if [ -d ".vercel/output/static" ]; then
-            echo "📁 Static assets:"
-            ls -la .vercel/output/static/ | head -10
-          fi
-          
-          if [ -d ".vercel/output/functions" ]; then
-            echo "⚡ Functions found:"
-            find .vercel/output/functions -name "*.js" | head -5
-          fi
+        uses: simplify9/.github/.github/actions/verify-cloudflare-build@main
+        with:
+          build-directory: ${{ inputs.build-directory }}
 
       - name: Setup Cloudflare Pages project with Functions
         uses: simplify9/.github/.github/actions/setup-cloudflare-project@main
@@ -267,6 +214,15 @@ jobs:
         env:
           NODE_ENV: ${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
+
+      - name: Configure Next.js compatibility flags
+        uses: simplify9/.github/.github/actions/configure-cloudflare-compatibility@main
+        with:
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          project-name: ${{ env.FULL_PROJECT_NAME }}
+          compatibility-date: ${{ inputs.compatibility-date }}
+          compatibility-flags: nodejs_compat
 
       - name: Setup custom domain
         if: inputs.custom-domain != ''
@@ -301,6 +257,7 @@ jobs:
           echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Compatibility Date**: ${{ inputs.compatibility-date }}" >> $GITHUB_STEP_SUMMARY
           
           if [ -n "${{ steps.deploy.outputs.url }}" ]; then
             echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
