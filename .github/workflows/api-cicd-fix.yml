@@ -355,7 +355,7 @@ jobs:
   deploy-development:
     runs-on: ubuntu-latest
     needs: [version, build]
-    if: inputs.deploy-to-development && github.ref_name == 'pipeline-fix'
+    if: inputs.deploy-to-development
     environment: development
     steps:
       - name: Download chart artifact
