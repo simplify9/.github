@@ -41,7 +41,29 @@ This repository hosts reusable GitHub Actions workflows and composite actions fo
 
 ## 🚀 Available Templates
 
-### 1. **sw-cicd.yml** - Complete .NET CI/CD Pipeline ⭐
+### 1. **vite-ci.yml** - Vite Apps to Cloudflare Pages ⭐
+
+Deploy React, Vue, Svelte, and other Vite-based static applications to Cloudflare Pages.
+
+**Best for:** Static React, Vue, Svelte, vanilla JS apps
+**Documentation:** [QUICK_START_README.md](./QUICK_START_README.md) | [CHEAT_SHEET.md](./CHEAT_SHEET.md)
+
+### 2. **next-ci.yml** - Next.js to Cloudflare Pages + Functions ⭐
+
+Deploy Next.js applications to Cloudflare Pages with Functions support for SSR, API routes, and dynamic features.
+
+**Best for:** Next.js apps with SSR, API routes, dynamic routes, middleware
+**Documentation:** [NEXT_SSR_DEPLOYMENT_GUIDE.md](./NEXT_SSR_DEPLOYMENT_GUIDE.md)
+
+**Key Features:**
+- ✅ Server-Side Rendering (SSR)
+- ✅ API Routes & Dynamic Routes  
+- ✅ App Router & Pages Router
+- ✅ Middleware support
+- ✅ Uses @cloudflare/next-on-pages
+- ✅ Supports both SSR and static generation
+
+### 4. **sw-cicd.yml** - Complete .NET CI/CD Pipeline
 
 Reusable workflow name: `Reusable SW CI/CD Pipeline`
 
