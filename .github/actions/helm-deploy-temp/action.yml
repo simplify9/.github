@@ -150,10 +150,18 @@ runs:
       shell: bash
       run: |
         # Construct chart URL
-        if [ "${{ inputs.registry }}" != "docker.io" ]; then
-          CHART_URL="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+        # Allow user to pass a full chart reference (http(s):// or oci:// or a .tgz URL)
+        # If chart-name already looks like a full reference, use it verbatim and ignore other pieces.
+        if [[ "${{ inputs.chart-name }}" =~ ^https?:// ]] || [[ "${{ inputs.chart-name }}" =~ ^oci:// ]] || [[ "${{ inputs.chart-name }}" == *.tgz ]]; then
+          CHART_URL="${{ inputs.chart-name }}"
+          echo "Detected explicit chart reference, using as-is: $CHART_URL"
         else
-          CHART_URL="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          # Existing OCI construction logic
+          if [ "${{ inputs.registry }}" != "docker.io" ]; then
+            CHART_URL="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          else
+            CHART_URL="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          fi
         fi
         
         echo "chart-url=${CHART_URL}" >> $GITHUB_OUTPUT
