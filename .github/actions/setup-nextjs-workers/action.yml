@@ -1,0 +1,93 @@
+name: 'Setup Next.js for Cloudflare Workers'
+description: 'Configures Next.js project for Cloudflare Workers deployment'
+author: 'Simplify9'
+
+inputs:
+  package-manager:
+    description: 'Package manager to use (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  
+  workers-sdk-version:
+    description: 'Version of @cloudflare/workers-sdk to install'
+    required: false
+    default: 'latest'
+
+outputs:
+  setup-status:
+    description: 'Status of the setup process'
+    value: ${{ steps.setup.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Cloudflare Workers SDK
+      shell: bash
+      run: |
+        echo "📦 Installing Cloudflare Workers SDK..."
+        
+        case "${{ inputs.package-manager }}" in
+          npm)
+            npm install --save-dev @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}
+            ;;
+          yarn)
+            yarn add --dev @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}
+            ;;
+          pnpm)
+            pnpm add --save-dev @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}
+            ;;
+          *)
+            echo "❌ Unsupported package manager: ${{ inputs.package-manager }}"
+            exit 1
+            ;;
+        esac
+        
+        echo "✅ Cloudflare Workers SDK installed successfully"
+
+    - name: Validate Next.js configuration for Workers
+      shell: bash
+      id: setup
+      run: |
+        echo "🔧 Validating Next.js configuration for Cloudflare Workers..."
+        
+        # Check if next.config.js/mjs exists
+        if [ -f "next.config.js" ] || [ -f "next.config.mjs" ] || [ -f "next.config.ts" ]; then
+          echo "✅ Next.js config file found"
+        else
+          echo "⚠️ No Next.js config file found, creating basic configuration..."
+          cat > next.config.js << 'EOF'
+        /** @type {import('next').NextConfig} */
+        const nextConfig = {
+          experimental: {
+            runtime: 'edge',
+          },
+          // Optimize for Cloudflare Workers
+          swcMinify: true,
+          output: 'standalone',
+        }
+        
+        module.exports = nextConfig
+        EOF
+          echo "✅ Created basic next.config.js for Workers"
+        fi
+        
+        # Check package.json for required scripts
+        if ! grep -q '"build"' package.json; then
+          echo "⚠️ No build script found in package.json"
+        fi
+        
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "✅ Next.js setup for Workers completed successfully"
+
+    - name: Display setup summary
+      shell: bash
+      run: |
+        echo "## 🔧 Next.js Workers Setup Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workers SDK**: @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Configuration**: Validated and optimized for Workers" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "- Build your Next.js application" >> $GITHUB_STEP_SUMMARY
+        echo "- Configure Wrangler for deployment" >> $GITHUB_STEP_SUMMARY
+        echo "- Deploy to Cloudflare Workers" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,205 @@
+name: 'Configure Cloudflare Workers Project'
+description: 'Generates wrangler.toml configuration and worker entry point for Next.js'
+author: 'Simplify9'
+
+inputs:
+  worker-name:
+    description: 'Name of the Cloudflare Worker'
+    required: true
+  
+  compatibility-date:
+    description: 'Cloudflare Workers compatibility date'
+    required: false
+    default: '2024-10-20'
+  
+  compatibility-flags:
+    description: 'Cloudflare Workers compatibility flags'
+    required: false
+    default: 'nodejs_compat'
+  
+  build-command:
+    description: 'Build command for the project'
+    required: false
+    default: 'npm run build'
+  
+  output-directory:
+    description: 'Next.js build output directory'
+    required: false
+    default: '.next'
+  
+  custom-routes:
+    description: 'Custom routes configuration (optional)'
+    required: false
+    default: ''
+  
+  environment:
+    description: 'Deployment environment'
+    required: false
+    default: 'development'
+
+outputs:
+  config-file:
+    description: 'Path to generated wrangler.toml file'
+    value: ${{ steps.generate.outputs.config-file }}
+  
+  entry-point:
+    description: 'Path to generated worker entry point'
+    value: ${{ steps.generate.outputs.entry-point }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate wrangler.toml configuration
+      shell: bash
+      id: generate
+      run: |
+        echo "📝 Generating wrangler.toml configuration..."
+        
+        # Create wrangler.toml
+        cat > wrangler.toml << EOF
+        name = "${{ inputs.worker-name }}"
+        main = ".next/server/worker.js"
+        compatibility_date = "${{ inputs.compatibility-date }}"
+        compatibility_flags = ["${{ inputs.compatibility-flags }}"]
+        
+        [build]
+        command = "${{ inputs.build-command }}"
+        cwd = "."
+        watch_dir = "src"
+        
+        # Default route pattern - will be updated based on domain configuration
+        [[routes]]
+        pattern = "*"
+        zone_name = ""
+        
+        # Environment-specific configurations
+        [env.production]
+        name = "${{ inputs.worker-name }}-prod"
+        
+        [env.production.vars]
+        NODE_ENV = "production"
+        ENVIRONMENT = "production"
+        
+        [env.staging]
+        name = "${{ inputs.worker-name }}-staging"
+        
+        [env.staging.vars]
+        NODE_ENV = "staging"
+        ENVIRONMENT = "staging"
+        
+        [env.development]
+        name = "${{ inputs.worker-name }}-dev"
+        
+        [env.development.vars]
+        NODE_ENV = "development"
+        ENVIRONMENT = "development"
+        EOF
+        
+        # Add custom routes if provided
+        if [ -n "${{ inputs.custom-routes }}" ]; then
+          echo "" >> wrangler.toml
+          echo "# Custom routes configuration" >> wrangler.toml
+          echo "${{ inputs.custom-routes }}" >> wrangler.toml
+        fi
+        
+        echo "config-file=wrangler.toml" >> $GITHUB_OUTPUT
+        echo "✅ Created wrangler.toml configuration"
+
+    - name: Create worker entry point
+      shell: bash
+      run: |
+        echo "🔨 Creating worker entry point..."
+        mkdir -p .next/server
+        
+        cat > .next/server/worker.js << 'EOF'
+        /**
+         * Cloudflare Workers entry point for Next.js application
+         * This file serves as the bridge between Cloudflare Workers runtime
+         * and the Next.js application built for edge runtime.
+         */
+        
+        import { createHandler } from '@cloudflare/next-on-pages/next-edge-handler';
+        
+        // Create the Next.js handler with build output
+        const handler = createHandler({
+          output: '${{ inputs.output-directory }}'
+        });
+        
+        export default {
+          /**
+           * Main fetch handler for the Cloudflare Worker
+           * @param {Request} request - The incoming request
+           * @param {Object} env - Environment variables and bindings
+           * @param {Object} ctx - Execution context
+           * @returns {Promise<Response>} The response
+           */
+          async fetch(request, env, ctx) {
+            try {
+              // Pass through to Next.js handler
+              return await handler(request, env, ctx);
+            } catch (error) {
+              console.error('Worker error:', error);
+              
+              // Return a friendly error response
+              return new Response(
+                JSON.stringify({
+                  error: 'Internal Server Error',
+                  message: 'An error occurred while processing your request.',
+                  timestamp: new Date().toISOString()
+                }),
+                {
+                  status: 500,
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Error-Source': 'cloudflare-worker'
+                  }
+                }
+              );
+            }
+          }
+        };
+        EOF
+        
+        echo "entry-point=.next/server/worker.js" >> $GITHUB_OUTPUT
+        echo "✅ Created worker entry point"
+
+    - name: Validate configuration
+      shell: bash
+      run: |
+        echo "🔍 Validating worker configuration..."
+        
+        # Check if wrangler.toml is valid
+        if wrangler config validate; then
+          echo "✅ wrangler.toml configuration is valid"
+        else
+          echo "❌ wrangler.toml configuration is invalid"
+          exit 1
+        fi
+        
+        # Check if entry point exists
+        if [ -f ".next/server/worker.js" ]; then
+          echo "✅ Worker entry point created successfully"
+        else
+          echo "❌ Failed to create worker entry point"
+          exit 1
+        fi
+
+    - name: Display configuration summary
+      shell: bash
+      run: |
+        echo "📋 Worker Configuration Summary:"
+        echo "- Worker Name: ${{ inputs.worker-name }}"
+        echo "- Environment: ${{ inputs.environment }}"
+        echo "- Compatibility Date: ${{ inputs.compatibility-date }}"
+        echo "- Compatibility Flags: ${{ inputs.compatibility-flags }}"
+        echo "- Entry Point: .next/server/worker.js"
+        echo ""
+        echo "Generated wrangler.toml:"
+        cat wrangler.toml
+        
+        echo "## ⚙️ Workers Project Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "- **Worker Name**: ${{ inputs.worker-name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Compatibility Date**: ${{ inputs.compatibility-date }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Entry Point**: .next/server/worker.js" >> $GITHUB_STEP_SUMMARY
+        echo "- **Configuration**: wrangler.toml ✅" >> $GITHUB_STEP_SUMMARY
