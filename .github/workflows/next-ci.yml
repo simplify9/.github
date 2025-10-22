@@ -199,6 +199,11 @@ jobs:
           NODE_ENV: ${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
 
+      - name: Convert Next.js build for Workers
+        run: |
+          npx @cloudflare/next-on-pages
+          echo "Conversion for Workers completed successfully"
+
       - name: Configure Workers project
         uses: simplify9/.github/.github/actions/configure-workers-project@main
         with:
