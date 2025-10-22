@@ -57,9 +57,9 @@ runs:
           exit 1
         fi
         
-        # Check if worker entry point exists
-        if [ ! -f ".next/server/worker.js" ]; then
-          echo "❌ Worker entry point not found. Please configure the worker project first."
+        # Check if worker entry point exists (will be created after build)
+        if [ ! -f "wrangler.toml" ]; then
+          echo "❌ wrangler.toml not found. Please configure the worker project first."
           exit 1
         fi
         

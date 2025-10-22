@@ -7,11 +7,6 @@ inputs:
     description: 'Package manager to use (npm, yarn, pnpm)'
     required: false
     default: 'npm'
-  
-  workers-sdk-version:
-    description: 'Version of @cloudflare/workers-sdk to install'
-    required: false
-    default: 'latest'
 
 outputs:
   setup-status:
@@ -21,28 +16,21 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install Cloudflare Workers SDK
+    - name: Install Wrangler CLI globally
       shell: bash
       run: |
-        echo "📦 Installing Cloudflare Workers SDK..."
+        echo "📦 Installing Wrangler CLI for Workers deployment..."
+        npm install -g wrangler
+        echo "✅ Wrangler CLI installed successfully"
+
+    - name: Setup Next.js for Workers
+      shell: bash
+      run: |
+        echo "🔧 Configuring Next.js for Cloudflare Workers..."
         
-        case "${{ inputs.package-manager }}" in
-          npm)
-            npm install --save-dev @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}
-            ;;
-          yarn)
-            yarn add --dev @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}
-            ;;
-          pnpm)
-            pnpm add --save-dev @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}
-            ;;
-          *)
-            echo "❌ Unsupported package manager: ${{ inputs.package-manager }}"
-            exit 1
-            ;;
-        esac
-        
-        echo "✅ Cloudflare Workers SDK installed successfully"
+        # We don't need any special packages for pure Workers deployment
+        # Next.js will be built normally and we'll create a custom worker entry point
+        echo "✅ Next.js Workers setup completed"
 
     - name: Validate Next.js configuration for Workers
       shell: bash
@@ -84,8 +72,9 @@ runs:
       run: |
         echo "## 🔧 Next.js Workers Setup Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Workers SDK**: @cloudflare/workers-sdk@${{ inputs.workers-sdk-version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Configuration**: Validated and optimized for Workers" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployment Type**: Pure Cloudflare Workers" >> $GITHUB_STEP_SUMMARY
+        echo "- **CLI Tool**: Wrangler (installed globally)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Configuration**: Pure Workers deployment (not Pages)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
         echo "- Build your Next.js application" >> $GITHUB_STEP_SUMMARY
