@@ -1,11 +1,11 @@
-name: Deploy Next.js App to Cloudflare Pages
+name: Deploy Next.js App to Cloudflare Workers
 
 on:
   workflow_call:
     inputs:
-      # Project Configuration
-      project-name:
-        description: 'Base Cloudflare project name (without suffix)'
+      # Worker Configuration
+      worker-name:
+        description: 'Cloudflare Worker name (without suffix)'
         required: true
         type: string
       
@@ -41,30 +41,51 @@ on:
         description: 'Build command to run'
         required: false
         type: string
-        default: 'npm run pages:build'
+        default: 'npm run build'
       
-      build-directory:
-        description: 'Directory where build output is located'
+      output-directory:
+        description: 'Directory where Next.js build output is located'
         required: false
         type: string
-        default: '.vercel/output/static'
+        default: '.next'
       
-      # Next.js Configuration
-      next-config-validation:
-        description: 'Whether to validate Next.js configuration for Cloudflare compatibility'
-        required: false
-        type: boolean
-        default: true
-      
-      # Cloudflare Configuration
-      project-name-suffix:
-        description: 'Suffix to add to project name (e.g., -dev, -staging)'
+      # Worker Configuration
+      worker-name-suffix:
+        description: 'Suffix to add to worker name (e.g., -dev, -staging)'
         required: false
         type: string
         default: ''
       
+      # Cloudflare Workers Configuration
+      compatibility-date:
+        description: 'Cloudflare Workers compatibility date'
+        required: false
+        type: string
+        default: '2024-10-20'
+      
+      compatibility-flags:
+        description: 'Cloudflare Workers compatibility flags'
+        required: false
+        type: string
+        default: 'nodejs_compat'
+      
+      # Custom Routes
+      custom-routes:
+        description: 'Custom routes configuration for the worker'
+        required: false
+        type: string
+        default: ''
+      
+      # Environment Variables
+      environment-variables:
+        description: 'Environment variables to set for the worker (JSON format)'
+        required: false
+        type: string
+        default: '{}'
+      
+      # Custom Domain Configuration
       custom-domain:
-        description: 'Custom domain to configure (optional)'
+        description: 'Custom domain to configure for the worker (optional)'
         required: false
         type: string
         default: ''
@@ -74,12 +95,6 @@ on:
         required: false
         type: boolean
         default: false
-      
-      compatibility-date:
-        description: 'Cloudflare Workers compatibility date'
-        required: false
-        type: string
-        default: '2024-10-20'
       
       # Additional Options
       run-tests:
@@ -116,20 +131,20 @@ on:
 
     outputs:
       deployment-url:
-        description: 'URL of the deployed application'
+        description: 'URL of the deployed worker'
         value: ${{ jobs.deploy.outputs.url }}
-      project-name:
-        description: 'Full project name used for deployment'
-        value: ${{ jobs.deploy.outputs.project-name }}
+      worker-name:
+        description: 'Full worker name used for deployment'
+        value: ${{ jobs.deploy.outputs.worker-name }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy Next.js to Cloudflare Pages (${{ inputs.environment }})
+    name: Deploy Next.js to Cloudflare Workers (${{ inputs.environment }})
     
     outputs:
       url: ${{ steps.deploy.outputs.url }}
-      project-name: ${{ env.FULL_PROJECT_NAME }}
+      worker-name: ${{ env.FULL_WORKER_NAME }}
     
     steps:
       - name: Checkout code
@@ -141,11 +156,11 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
 
-      - name: Set project name
+      - name: Set worker name
         run: |
-          FULL_NAME="${{ inputs.project-name }}${{ inputs.project-name-suffix }}"
-          echo "FULL_PROJECT_NAME=$FULL_NAME" >> $GITHUB_ENV
-          echo "🏷️ Using project name: $FULL_NAME"
+          FULL_NAME="${{ inputs.worker-name }}${{ inputs.worker-name-suffix }}"
+          echo "FULL_WORKER_NAME=$FULL_NAME" >> $GITHUB_ENV
+          echo "🏷️ Using worker name: $FULL_NAME"
 
       - name: Install dependencies
         run: |
@@ -165,11 +180,16 @@ jobs:
               ;;
           esac
 
-      - name: Setup Next.js for Cloudflare
-        uses: simplify9/.github/.github/actions/setup-nextjs-cloudflare@main
+      - name: Setup Next.js for Cloudflare Workers
+        uses: simplify9/.github/.github/actions/setup-nextjs-workers@main
         with:
           package-manager: ${{ inputs.package-manager }}
-          validate-config: ${{ inputs.next-config-validation }}
+
+      - name: Setup Wrangler CLI
+        uses: simplify9/.github/.github/actions/setup-wrangler@main
+        with:
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Run linting
         if: inputs.run-lint == true
@@ -179,50 +199,32 @@ jobs:
         if: inputs.run-tests == true
         run: ${{ inputs.test-command }}
 
-      - name: Build Next.js application with Cloudflare adapter
+      - name: Build Next.js application for Workers
         run: ${{ inputs.build-command }}
         env:
           NODE_ENV: ${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      - name: Verify Cloudflare build output
-        uses: simplify9/.github/.github/actions/verify-cloudflare-build@main
+      - name: Configure Workers project
+        uses: simplify9/.github/.github/actions/configure-workers-project@main
         with:
-          build-directory: ${{ inputs.build-directory }}
-
-      - name: Setup Cloudflare Pages project with Functions
-        uses: simplify9/.github/.github/actions/setup-cloudflare-project@main
-        with:
-          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          project-name: ${{ env.FULL_PROJECT_NAME }}
-          production-branch: ${{ inputs.target-branch }}
-          build-command: ${{ inputs.build-command }}
-          destination-dir: ${{ inputs.build-directory }}
-
-      - name: Deploy to Cloudflare Pages with Functions
-        id: deploy
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ env.FULL_PROJECT_NAME }}
-          directory: ${{ inputs.build-directory }}
-          # Enable Functions for SSR support
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-        env:
-          NODE_ENV: ${{ inputs.environment }}
-          ENVIRONMENT: ${{ inputs.environment }}
-
-      - name: Configure Next.js compatibility flags
-        uses: simplify9/.github/.github/actions/configure-cloudflare-compatibility@main
-        with:
-          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          project-name: ${{ env.FULL_PROJECT_NAME }}
+          worker-name: ${{ env.FULL_WORKER_NAME }}
           compatibility-date: ${{ inputs.compatibility-date }}
-          compatibility-flags: nodejs_compat
+          compatibility-flags: ${{ inputs.compatibility-flags }}
+          build-command: ${{ inputs.build-command }}
+          output-directory: ${{ inputs.output-directory }}
+          custom-routes: ${{ inputs.custom-routes }}
+          environment: ${{ inputs.environment }}
+
+      - name: Deploy to Cloudflare Workers
+        id: deploy
+        uses: simplify9/.github/.github/actions/deploy-to-workers@main
+        with:
+          worker-name: ${{ env.FULL_WORKER_NAME }}
+          environment: ${{ inputs.environment }}
+          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          environment-variables: ${{ inputs.environment-variables }}
 
       - name: Setup custom domain
         if: inputs.custom-domain != ''
@@ -230,34 +232,20 @@ jobs:
         with:
           api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          project-name: ${{ env.FULL_PROJECT_NAME }}
+          project-name: ${{ env.FULL_WORKER_NAME }}
           domain-name: ${{ inputs.custom-domain }}
           fail-on-error: ${{ inputs.fail-on-domain-error }}
 
-      - name: Test deployment
-        if: steps.deploy.outputs.url != ''
-        run: |
-          echo "🧪 Testing deployed application..."
-          
-          # Wait a moment for deployment to be ready
-          sleep 10
-          
-          # Test the homepage
-          if curl -f -s -o /dev/null "${{ steps.deploy.outputs.url }}"; then
-            echo "✅ Homepage is accessible"
-          else
-            echo "⚠️ Homepage test failed (might be normal for some apps)"
-          fi
-
       - name: Deployment summary
         run: |
-          echo "## 🚀 Next.js Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Next.js Workers Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Project**: ${{ env.FULL_PROJECT_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Worker**: ${{ env.FULL_WORKER_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Compatibility Date**: ${{ inputs.compatibility-date }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Compatibility Flags**: ${{ inputs.compatibility-flags }}" >> $GITHUB_STEP_SUMMARY
           
           if [ -n "${{ steps.deploy.outputs.url }}" ]; then
             echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
@@ -269,18 +257,21 @@ jobs:
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🛠️ Technical Details" >> $GITHUB_STEP_SUMMARY
-          echo "- Uses **@cloudflare/next-on-pages** for SSR support" >> $GITHUB_STEP_SUMMARY
-          echo "- Deployed to **Cloudflare Pages with Functions**" >> $GITHUB_STEP_SUMMARY
-          echo "- Supports dynamic routes, API routes, and middleware" >> $GITHUB_STEP_SUMMARY
+          echo "- Uses **Cloudflare Workers** for edge-side rendering" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployed using **Wrangler CLI**" >> $GITHUB_STEP_SUMMARY
+          echo "- Supports dynamic routes, API routes, and middleware at the edge" >> $GITHUB_STEP_SUMMARY
           echo "- Compatible with Next.js App Router and Pages Router" >> $GITHUB_STEP_SUMMARY
+          echo "- Edge runtime provides ultra-low latency globally" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Next.js deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Next.js Workers deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
 
       - name: Performance and optimization tips
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 💡 Performance Tips" >> $GITHUB_STEP_SUMMARY
-          echo "- **Edge Runtime**: Use \`export const runtime = 'edge'\` in API routes for better performance" >> $GITHUB_STEP_SUMMARY
-          echo "- **Static Generation**: Use ISR (\`revalidate\`) for pages that can be cached" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image Optimization**: Next.js Image component works with Cloudflare's image optimization" >> $GITHUB_STEP_SUMMARY
-          echo "- **Caching**: Configure appropriate cache headers for static assets" >> $GITHUB_STEP_SUMMARY
+          echo "### 💡 Workers Performance Tips" >> $GITHUB_STEP_SUMMARY
+          echo "- **Edge Runtime**: All code runs at the edge by default for minimal latency" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cold Start Optimization**: Keep bundle size small for faster cold starts" >> $GITHUB_STEP_SUMMARY
+          echo "- **Streaming**: Workers support streaming responses for better performance" >> $GITHUB_STEP_SUMMARY
+          echo "- **Caching**: Use Cloudflare Cache API for custom caching strategies" >> $GITHUB_STEP_SUMMARY
+          echo "- **KV Storage**: Use Cloudflare KV for persistent edge storage" >> $GITHUB_STEP_SUMMARY
+          echo "- **Durable Objects**: Use for stateful applications requiring consistency" >> $GITHUB_STEP_SUMMARY

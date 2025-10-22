@@ -10,7 +10,7 @@ Ask DevOps to set these **Organization secrets**:
 | App Type | Template | Use Case |
 |----------|----------|----------|
 | **Static Sites** (Vite/CRA) | `vite-ci.yml` | React, Vue, Svelte, vanilla JS |
-| **Next.js Apps** | `next-ci.yml` | Next.js with SSR, API routes, static sites |
+| **Next.js Apps** | `next-ci.yml` | Next.js with SSR, API routes deployed to Cloudflare Workers |
 
 ---
 
@@ -122,7 +122,7 @@ npm install --save-dev @cloudflare/next-on-pages wrangler
 
 **Workflow:** `.github/workflows/deploy.yml`
 ```yaml
-name: Deploy Next.js SSR to Cloudflare
+name: Deploy Next.js SSR to Cloudflare Workers
 on:
   push:
     branches: [development, main]
@@ -132,28 +132,30 @@ jobs:
     if: github.ref == 'refs/heads/development'
     uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
-      project-name: YOUR_NEXTJS_APP       # 👈 CHANGE THIS
+      worker-name: YOUR_NEXTJS_APP         # 👈 CHANGE THIS
       environment: development
-      project-name-suffix: -dev
-      build-command: npm run pages:build  # 👈 Uses @cloudflare/next-on-pages
+      worker-name-suffix: -dev
+      build-command: npm run build         # 👈 Standard Next.js build
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
     uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
-      project-name: YOUR_NEXTJS_APP
+      worker-name: YOUR_NEXTJS_APP
       environment: production
-      build-command: npm run pages:build
+      build-command: npm run build
       custom-domain: yourapp.com
 ```
 
-**Next.js Config:** Remove static export (if present):
+**Next.js Config for Workers:** Enable edge runtime:
 ```javascript
-// next.config.js - Remove this line for SSR:
-// output: 'export', // ❌ Remove this!
-
+// next.config.js - Optimized for Cloudflare Workers
 module.exports = {
-  // Your other config...
+  experimental: {
+    runtime: 'edge',  // ✅ Enable edge runtime
+  },
+  output: 'standalone',
+  swcMinify: true,
 }
 ```
 

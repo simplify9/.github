@@ -1,0 +1,81 @@
+name: 'Setup Wrangler CLI'
+description: 'Installs and configures Wrangler CLI for Cloudflare Workers deployment'
+author: 'Simplify9'
+
+inputs:
+  wrangler-version:
+    description: 'Version of Wrangler to install'
+    required: false
+    default: 'latest'
+  
+  api-token:
+    description: 'Cloudflare API token'
+    required: true
+  
+  account-id:
+    description: 'Cloudflare account ID'
+    required: true
+
+outputs:
+  wrangler-version:
+    description: 'Installed Wrangler version'
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Wrangler CLI
+      shell: bash
+      id: install
+      run: |
+        echo "📦 Installing Wrangler CLI..."
+        
+        if [ "${{ inputs.wrangler-version }}" = "latest" ]; then
+          npm install -g wrangler
+        else
+          npm install -g wrangler@${{ inputs.wrangler-version }}
+        fi
+        
+        # Get installed version
+        INSTALLED_VERSION=$(wrangler --version | head -1)
+        echo "version=$INSTALLED_VERSION" >> $GITHUB_OUTPUT
+        echo "✅ Wrangler CLI installed: $INSTALLED_VERSION"
+
+    - name: Configure Wrangler authentication
+      shell: bash
+      run: |
+        echo "🔐 Configuring Wrangler authentication..."
+        
+        # Verify API token is valid
+        if ! wrangler whoami > /dev/null 2>&1; then
+          echo "❌ Failed to authenticate with Cloudflare API"
+          echo "Please verify your CLOUDFLARE_API_TOKEN is valid"
+          exit 1
+        fi
+        
+        # Verify account access
+        if ! wrangler account list > /dev/null 2>&1; then
+          echo "❌ Failed to access Cloudflare account"
+          echo "Please verify your CLOUDFLARE_ACCOUNT_ID is correct"
+          exit 1
+        fi
+        
+        echo "✅ Wrangler authentication successful"
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+
+    - name: Display Wrangler info
+      shell: bash
+      run: |
+        echo "📊 Wrangler Configuration Info:"
+        echo "User: $(wrangler whoami 2>/dev/null || echo 'Authentication failed')"
+        echo "Account ID: ${{ inputs.account-id }}"
+        
+        echo "## 🛠️ Wrangler Setup Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ steps.install.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Authentication**: ✅ Configured" >> $GITHUB_STEP_SUMMARY
+        echo "- **Account**: ${{ inputs.account-id }}" >> $GITHUB_STEP_SUMMARY
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}

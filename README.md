@@ -48,7 +48,7 @@ Deploy React, Vue, Svelte, and other Vite-based static applications to Cloudflar
 **Best for:** Static React, Vue, Svelte, vanilla JS apps
 **Documentation:** [QUICK_START_README.md](./QUICK_START_README.md) | [CHEAT_SHEET.md](./CHEAT_SHEET.md)
 
-### 2. **next-ci.yml** - Next.js to Cloudflare Pages + Functions ⭐
+### 2. **next-ci.yml** - Next.js to Cloudflare Workers ⭐
 
 Deploy Next.js applications to Cloudflare Pages with Functions support for SSR, API routes, and dynamic features.
 

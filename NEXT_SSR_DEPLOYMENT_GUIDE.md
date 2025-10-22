@@ -18,14 +18,14 @@
 
 ## 🚨 **Key Differences from Static Sites**
 
-| Feature | Static Sites (Vite/React) | Next.js Apps (SSR/Static) |
+| Feature | Static Sites (Vite/React) | Next.js Apps (SSR/Edge) |
 |---------|------------------------|--------------------------|
 | **Template** | `vite-ci.yml` | `next-ci.yml` |
-| **Build Output** | `next export` → `out/` | `@cloudflare/next-on-pages` → `.vercel/output/` |
-| **Deployment** | Cloudflare Pages (static) | Cloudflare Pages + Functions |
+| **Build Output** | `next export` → `out/` | Next.js build → `.next/` |
+| **Deployment** | Cloudflare Pages (static) | Cloudflare Workers (edge) |
 | **Dynamic Routes** | ❌ No | ✅ Yes |
 | **API Routes** | ❌ No | ✅ Yes |
-| **SSR/ISR** | ❌ No | ✅ Yes |
+| **SSR/ISR** | ❌ No | ✅ Yes (at the edge) |
 | **Middleware** | ❌ No | ✅ Yes |
 
 ---
@@ -34,10 +34,10 @@
 
 ### 1. Install Required Dependencies
 
-In your Next.js project, install the Cloudflare adapter:
+In your Next.js project, install the Cloudflare Workers SDK:
 
 ```bash
-npm install --save-dev @cloudflare/next-on-pages wrangler
+npm install --save-dev @cloudflare/workers-sdk
 ```
 
 ### 2. Update Package.json Scripts
@@ -108,21 +108,21 @@ jobs:
     if: github.ref == 'refs/heads/development'
     uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
-      project-name: my-nextjs-app
+      worker-name: my-nextjs-app
       environment: development
-      project-name-suffix: -dev
+      worker-name-suffix: -dev
       custom-domain: dev.myapp.com
-      build-command: npm run pages:build
+      build-command: npm run build
 
   # Production deployment
   deploy-prod:
     if: github.ref == 'refs/heads/main'
     uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
-      project-name: my-nextjs-app
+      worker-name: my-nextjs-app
       environment: production
       custom-domain: myapp.com
-      build-command: npm run pages:build
+      build-command: npm run build
       fail-on-domain-error: true
 ```
 
