@@ -23,6 +23,13 @@ runs:
         npm install -g wrangler
         echo "✅ Wrangler CLI installed successfully"
 
+    - name: Verify Wrangler installation
+      shell: bash
+      run: |
+        echo "🔍 Verifying Wrangler installation..."
+        wrangler --version
+        echo "✅ Wrangler is ready for use"
+
     - name: Setup Next.js for Workers
       shell: bash
       run: |
