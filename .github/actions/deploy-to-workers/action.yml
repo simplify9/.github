@@ -46,6 +46,22 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Install Wrangler CLI
+      shell: bash
+      run: |
+        echo "📦 Ensuring Wrangler CLI is available..."
+        
+        # Check if wrangler is already available (from dev dependencies)
+        if npx wrangler --version >/dev/null 2>&1; then
+          echo "✅ Wrangler CLI is available via npx"
+          npx wrangler --version
+        else
+          echo "Installing Wrangler CLI globally..."
+          npm install -g wrangler
+          echo "✅ Wrangler CLI installed globally"
+          npx wrangler --version
+        fi
+
     - name: Validate deployment inputs
       shell: bash
       run: |
@@ -84,7 +100,7 @@ runs:
             value=$(echo "$var" | cut -d'=' -f2-)
             
             echo "Setting $key..."
-            echo "$value" | wrangler secret put "$key" --env ${{ inputs.environment }}
+            echo "$value" | npx wrangler secret put "$key" --env ${{ inputs.environment }}
           fi
         done
         
@@ -99,8 +115,17 @@ runs:
       run: |
         echo "🚀 Deploying to Cloudflare Workers..."
         
+        # Debug information
+        echo "Working directory: $(pwd)"
+        echo "Available files:"
+        ls -la
+        echo "Wrangler version:"
+        npx wrangler --version
+        echo "Wrangler config:"
+        cat wrangler.toml
+        
         # Prepare deployment command
-        DEPLOY_CMD="wrangler deploy --env ${{ inputs.environment }}"
+        DEPLOY_CMD="npx wrangler deploy --env ${{ inputs.environment }}"
         
         if [ "${{ inputs.dry-run }}" = "true" ]; then
           DEPLOY_CMD="$DEPLOY_CMD --dry-run"
