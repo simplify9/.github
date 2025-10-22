@@ -44,7 +44,7 @@ outputs:
   
   entry-point:
     description: 'Path to generated worker entry point'
-    value: 'worker.js'
+    value: '.vercel/output/static/_worker.js'
 
 runs:
   using: 'composite'
@@ -58,13 +58,13 @@ runs:
         # Create wrangler.toml
         cat > wrangler.toml << EOF
         name = "${{ inputs.worker-name }}"
-        main = "worker.js"
+        main = ".vercel/output/static/_worker.js"
         compatibility_date = "${{ inputs.compatibility-date }}"
         compatibility_flags = ["${{ inputs.compatibility-flags }}"]
         
         # Assets configuration for Next.js static files
         [site]
-        bucket = ".next/static"
+        bucket = ".vercel/output/static"
         
         # Default route pattern
         [[routes]]
@@ -104,85 +104,18 @@ runs:
         echo "config-file=wrangler.toml" >> $GITHUB_OUTPUT
         echo "✅ Created wrangler.toml configuration"
 
-    - name: Create custom worker entry point
+    - name: Configure Workers Routes
       shell: bash
       run: |
-        echo "🔨 Creating custom worker entry point..."
+        echo "� Configuring Workers routes..."
         
-        cat > worker.js << 'EOF'
-        /**
-         * Cloudflare Worker for Next.js Application
-         * This worker serves the Next.js application at the edge
-         */
+        # Create the output directory if it doesn't exist
+        mkdir -p .vercel/output/static
         
-        export default {
-          async fetch(request, env, ctx) {
-            const url = new URL(request.url);
-            
-            // Handle static assets
-            if (url.pathname.startsWith('/_next/static/')) {
-              // Serve static files (these would be uploaded as assets)
-              return new Response('Static file not found', { status: 404 });
-            }
-            
-            // Handle API routes
-            if (url.pathname.startsWith('/api/')) {
-              return handleApiRoute(request, env, ctx);
-            }
-            
-            // Handle page routes
-            return handlePageRoute(request, env, ctx);
-          }
-        };
+        # Only exclude _next/static, allow CDN to serve images directly
+        echo '{"version":1,"description":"Built with @cloudflare/next-on-pages","include":["/*"],"exclude":["/_next/static/*"]}' > .vercel/output/static/_routes.json
         
-        async function handleApiRoute(request, env, ctx) {
-          // API route handling logic
-          const url = new URL(request.url);
-          
-          // Basic API response
-          return new Response(
-            JSON.stringify({ 
-              message: 'API route',
-              path: url.pathname,
-              method: request.method 
-            }),
-            { 
-              headers: { 'Content-Type': 'application/json' },
-              status: 200 
-            }
-          );
-        }
-        
-        async function handlePageRoute(request, env, ctx) {
-          // Basic HTML response for pages
-          const url = new URL(request.url);
-          
-          const html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Next.js on Cloudflare Workers</title>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-        </head>
-        <body>
-          <div id="__next">
-            <h1>Next.js Application</h1>
-            <p>Running on Cloudflare Workers</p>
-            <p>Path: ${url.pathname}</p>
-            <p>This is a basic worker implementation. You can extend this to integrate with your Next.js build output.</p>
-          </div>
-        </body>
-        </html>`;
-        
-          return new Response(html, {
-            headers: { 'Content-Type': 'text/html' },
-            status: 200
-          });
-        }
-        EOF
-        
-        echo "✅ Created custom worker entry point"
+        echo "✅ Workers routes configured correctly"
 
     - name: Validate configuration
       shell: bash
@@ -197,7 +130,7 @@ runs:
         
         # Basic validation of wrangler.toml structure
         if grep -q "name.*=.*\"${{ inputs.worker-name }}\"" wrangler.toml && \
-           grep -q "main.*=.*\"worker.js\"" wrangler.toml && \
+           grep -q "main.*=.*\".vercel/output/static/_worker.js\"" wrangler.toml && \
            grep -q "compatibility_date" wrangler.toml; then
           echo "✅ wrangler.toml configuration structure is valid"
         else
@@ -207,11 +140,11 @@ runs:
           exit 1
         fi
         
-        # Check if worker entry point exists
-        if [ -f "worker.js" ]; then
-          echo "✅ Worker entry point created successfully"
+        # Check if routes configuration was created
+        if [ -f ".vercel/output/static/_routes.json" ]; then
+          echo "✅ Workers routes configuration created successfully"
         else
-          echo "❌ Failed to create worker entry point"
+          echo "❌ Failed to create routes configuration"
           exit 1
         fi
 

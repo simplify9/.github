@@ -53,7 +53,7 @@ jobs:
 
 ## 🔧 Next.js Configuration for Workers
 
-Your Next.js application should be configured for edge runtime compatibility:
+Your Next.js application should be configured for Cloudflare Workers compatibility:
 
 ### next.config.js
 ```javascript
@@ -72,9 +72,9 @@ const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   
-  // Image optimization works with Cloudflare
+  // Image optimization - disable for Workers compatibility
   images: {
-    domains: ['your-domain.com'],
+    unoptimized: true, // Required for Cloudflare Workers deployment
   },
 }
 
@@ -96,7 +96,8 @@ module.exports = nextConfig
     "react-dom": "^18.0.0"
   },
   "devDependencies": {
-    "@types/node": "^18.0.0"
+    "@types/node": "^18.0.0",
+    "@cloudflare/next-on-pages": "^1.0.0"
   }
 }
 ```
@@ -232,7 +233,25 @@ jobs:
 - Error handling and validation
 - Test and lint integration
 
-## 🔗 Related Documentation
+## � Technical Details
+
+### Build Process
+The workflow uses `@cloudflare/next-on-pages` to convert your Next.js application for Cloudflare Workers:
+
+1. **Next.js Build**: Runs `npm run build` to create the standard Next.js output
+2. **Workers Conversion**: Uses `npx @cloudflare/next-on-pages` to transform the build for Workers compatibility
+3. **Configuration Generation**: Creates `wrangler.toml` and `_routes.json` files automatically
+4. **Deployment**: Uses Wrangler CLI to deploy to Cloudflare Workers
+
+### Key Files Generated
+- **`.vercel/output/static/_worker.js`** - Main Workers entry point
+- **`wrangler.toml`** - Workers configuration file
+- **`.vercel/output/static/_routes.json`** - Routing configuration for Workers
+
+### Image Optimization
+Since Cloudflare Workers doesn't support Next.js Image Optimization, the workflow automatically configures your app with `images: { unoptimized: true }`. This ensures compatibility while maintaining performance through Cloudflare's global CDN.
+
+## �🔗 Related Documentation
 
 - [Cloudflare Workers Deployment Guide](./CLOUDFLARE_DEPLOYMENT_GUIDE.md)
 - [Next.js SSR Deployment Guide](./NEXT_SSR_DEPLOYMENT_GUIDE.md)
