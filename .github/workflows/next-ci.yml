@@ -185,12 +185,6 @@ jobs:
         with:
           package-manager: ${{ inputs.package-manager }}
 
-      - name: Setup Wrangler CLI
-        uses: simplify9/.github/.github/actions/setup-wrangler@main
-        with:
-          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
       - name: Run linting
         if: inputs.run-lint == true
         run: ${{ inputs.lint-command }}
@@ -199,7 +193,7 @@ jobs:
         if: inputs.run-tests == true
         run: ${{ inputs.test-command }}
 
-      - name: Build Next.js application for Workers
+      - name: Build Next.js application
         run: ${{ inputs.build-command }}
         env:
           NODE_ENV: ${{ inputs.environment }}

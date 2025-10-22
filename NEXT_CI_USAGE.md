@@ -96,7 +96,7 @@ module.exports = nextConfig
     "react-dom": "^18.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-sdk": "latest"
+    "@types/node": "^18.0.0"
   }
 }
 ```
