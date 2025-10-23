@@ -55,6 +55,51 @@ on:
         type: string
         default: 'npm run build'
       
+      # Cloudflare Workers Build Configuration
+      cloudflare-build-command:
+        description: 'Cloudflare Workers build command'
+        required: false
+        type: string
+        default: 'npx @cloudflare/next-on-pages'
+      
+      # Path Configuration
+      next-build-output:
+        description: 'Next.js build output directory'
+        required: false
+        type: string
+        default: '.next'
+      
+      workers-output-dir:
+        description: 'Workers output directory'
+        required: false
+        type: string
+        default: '.vercel/output/static'
+      
+      worker-script-path:
+        description: 'Path to the worker script file'
+        required: false
+        type: string
+        default: '.vercel/output/static/_worker.js'
+      
+      assets-ignore-file:
+        description: 'Path to assets ignore file'
+        required: false
+        type: string
+        default: '.vercel/output/static/.assetsignore'
+      
+      assets-ignore-content:
+        description: 'Content for assets ignore file'
+        required: false
+        type: string
+        default: '_worker.js'
+      
+      # Wrangler Configuration
+      wrangler-config-path:
+        description: 'Path to wrangler.toml file'
+        required: false
+        type: string
+        default: 'wrangler.toml'
+      
       # Optional Steps
       run-lint:
         description: 'Run linting before deployment'
@@ -149,12 +194,20 @@ jobs:
         with:
           build-command: ${{ inputs.build-command }}
           environment: ${{ inputs.environment }}
+          cloudflare-build-command: ${{ inputs.cloudflare-build-command }}
+          next-build-output: ${{ inputs.next-build-output }}
+          workers-output-dir: ${{ inputs.workers-output-dir }}
+          worker-script-path: ${{ inputs.worker-script-path }}
+          assets-ignore-file: ${{ inputs.assets-ignore-file }}
+          assets-ignore-content: ${{ inputs.assets-ignore-content }}
 
       - name: Deploy to Cloudflare Workers
         id: deploy
         uses: simplify9/.github/.github/actions/deploy-nextjs-workers@main
         with:
           wrangler-environment: ${{ inputs.wrangler-environment || inputs.environment }}
+          wrangler-config-path: ${{ inputs.wrangler-config-path }}
+          worker-script-path: ${{ inputs.worker-script-path }}
           setup-custom-domain: ${{ inputs.setup-custom-domain }}
           worker-name: ${{ inputs.worker-name }}
           domain-pattern: ${{ inputs.domain-pattern }}

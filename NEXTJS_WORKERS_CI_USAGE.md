@@ -30,6 +30,53 @@ jobs:
     secrets: inherit
 ```
 
+### Enhanced Configuration Example
+```yaml
+name: Deploy Next.js to Cloudflare Workers
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/nextjs-workers-ci.yml@main
+    with:
+      environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      
+      # Build Configuration
+      node-version: '20'
+      package-manager: 'yarn'
+      install-command: 'yarn install --frozen-lockfile'
+      build-command: 'yarn build'
+      cloudflare-build-command: 'npx @cloudflare/next-on-pages@1'
+      
+      # Path Configuration (for custom project structures)
+      wrangler-config-path: 'configs/wrangler.toml'
+      next-build-output: 'dist'
+      workers-output-dir: 'dist/worker'
+      worker-script-path: 'dist/worker/_worker.js'
+      assets-ignore-file: 'dist/worker/.assetsignore'
+      assets-ignore-content: |
+        _worker.js
+        *.map
+        *.LICENSE.txt
+      
+      # Custom Domain Setup
+      setup-custom-domain: 'true'
+      worker-name: 'my-nextjs-app'
+      domain-pattern: 'app.example.com/*'
+      zone-name: 'example.com'
+      
+      # Quality Gates
+      run-lint: 'true'
+      run-tests: 'true'
+      lint-command: 'yarn lint'
+      test-command: 'yarn test'
+    secrets: inherit
+```
+
 ### Your Exact Workflow (Yarn)
 ```yaml
 name: Deploy Next.js to Cloudflare Workers
@@ -95,6 +142,17 @@ jobs:
 | `install-command` | Install command | `npm ci` | `yarn install --frozen-lockfile` |
 | `lint-command` | Lint command | `npm run lint` | `yarn lint` |
 | `build-command` | Build command | `npm run build` | `yarn build` |
+| `cloudflare-build-command` | Cloudflare build command | `npx @cloudflare/next-on-pages` | `npx @cloudflare/next-on-pages@1` |
+
+### Path Configuration
+| Input | Description | Default | Example |
+|-------|-------------|---------|---------|
+| `wrangler-config-path` | Path to wrangler.toml | `wrangler.toml` | `configs/wrangler.toml` |
+| `next-build-output` | Next.js build output directory | `.next` | `dist`, `out` |
+| `workers-output-dir` | Workers build output directory | `.vercel/output/static` | `dist/worker` |
+| `worker-script-path` | Path to worker script file | `.vercel/output/static/_worker.js` | `dist/worker/_worker.js` |
+| `assets-ignore-file` | Path to assets ignore file | `.vercel/output/static/.assetsignore` | `dist/worker/.assetsignore` |
+| `assets-ignore-content` | Content for assets ignore file | `_worker.js` | `_worker.js\n*.map` |
 
 ### Optional Features
 | Input | Description | Default | Type |
