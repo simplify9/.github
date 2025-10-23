@@ -10,7 +10,7 @@ Ask DevOps to set these **Organization secrets**:
 | App Type | Template | Use Case |
 |----------|----------|----------|
 | **Static Sites** (Vite/CRA) | `vite-ci.yml` | React, Vue, Svelte, vanilla JS |
-| **Next.js Apps** | `next-ci.yml` | Next.js with SSR, API routes deployed to Cloudflare Workers |
+| **Next.js Apps** | `next-ci.yml` | Next.js 15+ with SSR, API routes deployed to Cloudflare Workers |
 
 ---
 
@@ -95,6 +95,7 @@ test-command: yarn test                 # or 'pnpm test'
 - ✅ Examples: Portfolio sites, dashboards, SPAs
 
 ### **Next.js Apps** → Use `next-ci.yml`
+- ✅ **Next.js 15+ Compatible** with auto-detection
 - ✅ Next.js with API routes
 - ✅ Server-side rendering (SSR)
 - ✅ Dynamic routes (`[id].js`)
@@ -102,52 +103,53 @@ test-command: yarn test                 # or 'pnpm test'
 - ✅ Static generation (SSG/ISR)
 - ✅ Examples: E-commerce, blogs, web apps, static sites
 
+📚 **Full Documentation**: See [NEXTJS_WORKERS_CI_USAGE.md](NEXTJS_WORKERS_CI_USAGE.md)
+
 ---
 
-## **Template 2: Next.js Applications**
+## **Template 2: Next.js Applications (Next.js 15+ Compatible)**
 
-**Setup:** Install dependencies first:
-```bash
-npm install --save-dev @cloudflare/next-on-pages wrangler
-```
-
-**Package.json:** Add build script:
-```json
-{
-  "scripts": {
-    "pages:build": "next-on-pages"
-  }
-}
-```
-
-**Workflow:** `.github/workflows/deploy.yml`
+**Quick Setup - Zero Configuration:**
 ```yaml
-name: Deploy Next.js SSR to Cloudflare Workers
+name: Deploy Next.js to Cloudflare Workers
+
 on:
   push:
-    branches: [development, main]
+    branches: [staging, main]
 
 jobs:
-  deploy-dev:
-    if: github.ref == 'refs/heads/development'
+  deploy-staging:
+    if: github.ref == 'refs/heads/staging'
     uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
-      worker-name: YOUR_NEXTJS_APP         # 👈 CHANGE THIS
-      environment: development
-      worker-name-suffix: -dev
-      build-command: npm run build         # 👈 Standard Next.js build
+      environment: 'staging'
+      package-manager: 'yarn'
+      install-command: 'yarn install --frozen-lockfile'
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-  deploy-prod:
+  deploy-production:
     if: github.ref == 'refs/heads/main'
     uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
-      worker-name: YOUR_NEXTJS_APP
-      environment: production
-      build-command: npm run build
-      custom-domain: yourapp.com
+      environment: 'production'
+      package-manager: 'yarn'
+      install-command: 'yarn install --frozen-lockfile'
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 ```
 
-**Next.js Config for Workers:** Enable edge runtime:
+**Features:**
+- ✅ **Auto-detects worker script paths** (Next.js 15 compatible)
+- ✅ **Smart asset handling** (respects @cloudflare/next-on-pages)
+- ✅ **CI/CD friendly domain setup** (no failures on existing routes)
+- ✅ **Package manager flexibility** (npm, yarn, pnpm)
+
+**Required Repository Secrets:**
+- `CLOUDFLARE_API_TOKEN` - [Create here](https://dash.cloudflare.com/profile/api-tokens)
+- `CLOUDFLARE_ACCOUNT_ID` - Found in Cloudflare Dashboard
 ```javascript
 // next.config.js - Optimized for Cloudflare Workers
 module.exports = {
