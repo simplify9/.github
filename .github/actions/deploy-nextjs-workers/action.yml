@@ -33,6 +33,11 @@ inputs:
     required: false
     default: 'false'
   
+  skip-existing-routes:
+    description: 'Skip route creation if route already exists (recommended for CI/CD)'
+    required: false
+    default: 'true'
+  
   api-token:
     description: 'Cloudflare API token'
     required: true
@@ -146,27 +151,53 @@ runs:
         echo "Worker: $WORKER_NAME"
         echo "Zone: ${{ inputs.zone-name }}"
         
-        # Add custom domain route using Cloudflare API
-        RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/workers/scripts/$WORKER_NAME/routes" \
+        # First, check if the route already exists
+        echo "🔍 Checking for existing routes..."
+        EXISTING_ROUTES=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/workers/scripts/$WORKER_NAME/routes" \
           -H "Authorization: Bearer ${{ inputs.api-token }}" \
-          -H "Content-Type: application/json" \
-          --data "{\"pattern\":\"${{ inputs.domain-pattern }}\",\"zone_name\":\"${{ inputs.zone-name }}\"}")
+          -H "Content-Type: application/json")
         
-        # Check if the request was successful
-        SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
+        ROUTE_EXISTS=$(echo "$EXISTING_ROUTES" | jq -r ".result[]? | select(.pattern == \"${{ inputs.domain-pattern }}\") | .id" 2>/dev/null || echo "")
         
-        if [ "$SUCCESS" = "true" ]; then
-          echo "✅ Custom domain route added successfully"
-          ROUTE_ID=$(echo "$RESPONSE" | jq -r '.result.id // "unknown"')
-          echo "Route ID: $ROUTE_ID"
-        else
-          echo "❌ Failed to add custom domain route"
-          echo "Response: $RESPONSE"
+        if [ -n "$ROUTE_EXISTS" ]; then
+          echo "✅ Route already exists for pattern: ${{ inputs.domain-pattern }}"
+          echo "Route ID: $ROUTE_EXISTS"
           
-          if [ "${{ inputs.fail-on-domain-error }}" = "true" ]; then
-            exit 1
+          if [ "${{ inputs.skip-existing-routes }}" = "true" ]; then
+            echo "🔄 Skipping route creation (already configured)"
           else
-            echo "⚠️ Continuing anyway as fail-on-domain-error is false"
+            echo "🔄 Route exists but skip-existing-routes is false, treating as success"
+          fi
+        else
+          echo "📝 Creating new route for pattern: ${{ inputs.domain-pattern }}"
+          
+          # Add custom domain route using Cloudflare API
+          RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/workers/scripts/$WORKER_NAME/routes" \
+            -H "Authorization: Bearer ${{ inputs.api-token }}" \
+            -H "Content-Type: application/json" \
+            --data "{\"pattern\":\"${{ inputs.domain-pattern }}\",\"zone_name\":\"${{ inputs.zone-name }}\"}")
+          
+          # Check if the request was successful
+          SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
+          
+          if [ "$SUCCESS" = "true" ]; then
+            echo "✅ Custom domain route added successfully"
+            ROUTE_ID=$(echo "$RESPONSE" | jq -r '.result.id // "unknown"')
+            echo "Route ID: $ROUTE_ID"
+          else
+            echo "❌ Failed to add custom domain route"
+            echo "Response: $RESPONSE"
+            
+            # Check if it's a "route already exists" error
+            ERROR_MESSAGE=$(echo "$RESPONSE" | jq -r '.errors[]?.message // ""' 2>/dev/null)
+            if echo "$ERROR_MESSAGE" | grep -q -i "already exists\|duplicate"; then
+              echo "🔄 Route appears to already exist (common in CI/CD)"
+              echo "✅ Treating as success since route is configured"
+            elif [ "${{ inputs.fail-on-domain-error }}" = "true" ]; then
+              exit 1
+            else
+              echo "⚠️ Continuing anyway as fail-on-domain-error is false"
+            fi
           fi
         fi
       env:

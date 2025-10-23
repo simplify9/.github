@@ -42,6 +42,11 @@ inputs:
     description: 'Content for assets ignore file'
     required: false
     default: '_worker.js'
+  
+  auto-detect-worker-path:
+    description: 'Auto-detect worker script path for modern @cloudflare/next-on-pages builds'
+    required: false
+    default: 'true'
 
 outputs:
   build-output:
@@ -49,12 +54,16 @@ outputs:
     value: ${{ inputs.workers-output-dir }}
   
   worker-script:
-    description: 'Path to worker script file'
-    value: ${{ inputs.worker-script-path }}
+    description: 'Path to worker script file (auto-detected or configured)'
+    value: ${{ steps.detect-worker-path.outputs.worker-script-path }}
   
   assets-ignore:
     description: 'Path to assets ignore file'
     value: ${{ inputs.assets-ignore-file }}
+  
+  detected-worker-path:
+    description: 'Auto-detected worker script path'
+    value: ${{ steps.detect-worker-path.outputs.worker-script-path }}
 
 runs:
   using: 'composite'
@@ -76,18 +85,69 @@ runs:
         ${{ inputs.cloudflare-build-command }}
         echo "✅ Workers conversion completed successfully"
 
-    - name: Create assets ignore file
+    - name: Auto-detect worker script path
+      id: detect-worker-path
       shell: bash
       run: |
-        echo "📝 Creating assets ignore file..."
+        echo "🔍 Detecting worker script path..."
         
-        # Create directory if it doesn't exist
-        IGNORE_DIR=$(dirname "${{ inputs.assets-ignore-file }}")
-        mkdir -p "$IGNORE_DIR"
+        if [ "${{ inputs.auto-detect-worker-path }}" = "true" ]; then
+          # Check for modern @cloudflare/next-on-pages structure (directory with index.js)
+          if [ -f "${{ inputs.workers-output-dir }}/_worker.js/index.js" ]; then
+            DETECTED_WORKER_PATH="${{ inputs.workers-output-dir }}/_worker.js/index.js"
+            echo "📁 Detected modern structure: _worker.js/index.js"
+          # Check for legacy structure (single _worker.js file)
+          elif [ -f "${{ inputs.workers-output-dir }}/_worker.js" ]; then
+            DETECTED_WORKER_PATH="${{ inputs.workers-output-dir }}/_worker.js"
+            echo "📄 Detected legacy structure: _worker.js"
+          # Fallback to configured path
+          else
+            DETECTED_WORKER_PATH="${{ inputs.worker-script-path }}"
+            echo "⚠️ Using configured path (auto-detection failed): ${{ inputs.worker-script-path }}"
+          fi
+        else
+          DETECTED_WORKER_PATH="${{ inputs.worker-script-path }}"
+          echo "⚙️ Using configured path (auto-detection disabled): ${{ inputs.worker-script-path }}"
+        fi
         
-        # Create assets ignore file
-        echo "${{ inputs.assets-ignore-content }}" > "${{ inputs.assets-ignore-file }}"
-        echo "✅ Assets ignore file created at ${{ inputs.assets-ignore-file }}"
+        echo "worker-script-path=$DETECTED_WORKER_PATH" >> $GITHUB_OUTPUT
+        echo "✅ Worker script path: $DETECTED_WORKER_PATH"
+
+    - name: Handle assets ignore file
+      shell: bash
+      run: |
+        echo "📝 Handling assets ignore file..."
+        
+        IGNORE_FILE="${{ inputs.assets-ignore-file }}"
+        
+        # Check if @cloudflare/next-on-pages already created the file
+        if [ -f "$IGNORE_FILE" ]; then
+          echo "✅ Assets ignore file already exists (created by @cloudflare/next-on-pages)"
+          echo "Current content:"
+          cat "$IGNORE_FILE"
+          
+          # Only override if custom content is explicitly provided and different from default
+          if [ "${{ inputs.assets-ignore-content }}" != "_worker.js" ]; then
+            echo "🔄 Overriding with custom content..."
+            echo "${{ inputs.assets-ignore-content }}" > "$IGNORE_FILE"
+            echo "✅ Custom content applied"
+          else
+            echo "📋 Using existing content (default or auto-generated)"
+          fi
+        else
+          echo "📝 Creating new assets ignore file..."
+          # Create directory if it doesn't exist
+          IGNORE_DIR=$(dirname "$IGNORE_FILE")
+          mkdir -p "$IGNORE_DIR"
+          
+          # Create the file with specified content
+          echo "${{ inputs.assets-ignore-content }}" > "$IGNORE_FILE"
+          echo "✅ Assets ignore file created with content: ${{ inputs.assets-ignore-content }}"
+        fi
+        
+        echo ""
+        echo "Final assets ignore file content:"
+        cat "$IGNORE_FILE"
 
     - name: Verify build output
       shell: bash
@@ -101,10 +161,17 @@ runs:
           exit 1
         fi
         
-        if [ ! -f "${{ inputs.worker-script-path }}" ]; then
-          echo "❌ Worker file not found: ${{ inputs.worker-script-path }}"
+        if [ ! -f "${{ steps.detect-worker-path.outputs.worker-script-path }}" ]; then
+          echo "❌ Worker file not found: ${{ steps.detect-worker-path.outputs.worker-script-path }}"
           echo "Output directory contents:"
           ls -la "${{ inputs.workers-output-dir }}/"
+          
+          # Additional debugging for modern structure
+          if [ -d "${{ inputs.workers-output-dir }}/_worker.js" ]; then
+            echo "Found _worker.js directory, contents:"
+            ls -la "${{ inputs.workers-output-dir }}/_worker.js/"
+          fi
+          
           exit 1
         fi
         
@@ -117,7 +184,7 @@ runs:
         echo ""
         echo "Build output summary:"
         echo "- Output directory: ${{ inputs.workers-output-dir }}"
-        echo "- Worker file: ${{ inputs.worker-script-path }}"
+        echo "- Worker file: ${{ steps.detect-worker-path.outputs.worker-script-path }}"
         echo "- Assets ignore: ${{ inputs.assets-ignore-file }}"
         echo ""
         echo "Files in output directory:"
