@@ -1,276 +1,191 @@
-name: Deploy Next.js App to Cloudflare Workers
+name: 'Next.js Cloudflare Workers CI/CD'
 
 on:
   workflow_call:
     inputs:
-      # Worker Configuration
-      worker-name:
-        description: 'Cloudflare Worker name (without suffix)'
+      # Environment Configuration
+      environment:
+        description: 'Deployment environment (staging, production, development)'
         required: true
         type: string
       
-      # Environment Configuration
-      environment:
-        description: 'Environment to deploy to (e.g., development, staging, production)'
-        required: false
-        type: string
-        default: 'development'
-      
-      # Branch Configuration
+      # Branch Configuration  
       target-branch:
         description: 'Target branch for deployment'
         required: false
         type: string
-        default: 'development'
+        default: 'main'
       
       # Node.js Configuration
       node-version:
         description: 'Node.js version to use'
         required: false
         type: string
-        default: '18'
+        default: '20'
       
+      # Package Manager Configuration
       package-manager:
         description: 'Package manager to use (npm, yarn, pnpm)'
         required: false
         type: string
         default: 'npm'
       
-      # Build Configuration
+      package-manager-cache:
+        description: 'Package manager cache key (npm, yarn, pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+      
+      # Build Commands
+      install-command:
+        description: 'Dependencies install command'
+        required: false
+        type: string
+        default: 'npm ci'
+      
+      lint-command:
+        description: 'Lint command'
+        required: false
+        type: string
+        default: 'npm run lint'
+      
       build-command:
-        description: 'Build command to run'
+        description: 'Build command'
         required: false
         type: string
         default: 'npm run build'
       
-      output-directory:
-        description: 'Directory where Next.js build output is located'
+      # Optional Steps
+      run-lint:
+        description: 'Run linting before deployment'
+        required: false
+        type: boolean
+        default: true
+      
+      run-tests:
+        description: 'Run tests before deployment'
+        required: false
+        type: boolean
+        default: false
+      
+      test-command:
+        description: 'Test command'
         required: false
         type: string
-        default: '.next'
+        default: 'npm test'
       
-      # Worker Configuration
-      worker-name-suffix:
-        description: 'Suffix to add to worker name (e.g., -dev, -staging)'
+      # Wrangler Configuration
+      wrangler-environment:
+        description: 'Wrangler environment name (uses existing wrangler.toml config)'
         required: false
         type: string
         default: ''
-      
-      # Cloudflare Workers Configuration
-      compatibility-date:
-        description: 'Cloudflare Workers compatibility date'
-        required: false
-        type: string
-        default: '2024-10-20'
-      
-      compatibility-flags:
-        description: 'Cloudflare Workers compatibility flags'
-        required: false
-        type: string
-        default: 'nodejs_compat'
-      
-      # Custom Routes
-      custom-routes:
-        description: 'Custom routes configuration for the worker'
-        required: false
-        type: string
-        default: ''
-      
-      # Environment Variables
-      environment-variables:
-        description: 'Environment variables to set for the worker (JSON format)'
-        required: false
-        type: string
-        default: '{}'
       
       # Custom Domain Configuration
-      custom-domain:
-        description: 'Custom domain to configure for the worker (optional)'
+      setup-custom-domain:
+        description: 'Setup custom domain routes after deployment'
+        required: false
+        type: boolean
+        default: false
+      
+      worker-name:
+        description: 'Worker name for custom domain routes (from wrangler.toml)'
+        required: false
+        type: string
+        default: ''
+      
+      domain-pattern:
+        description: 'Domain pattern for custom routes (e.g., "example.com/*")'
+        required: false
+        type: string
+        default: ''
+      
+      zone-name:
+        description: 'Cloudflare zone name for custom routes'
         required: false
         type: string
         default: ''
       
       fail-on-domain-error:
-        description: 'Whether to fail deployment if custom domain setup fails'
+        description: 'Fail deployment if custom domain setup fails'
         required: false
         type: boolean
         default: false
-      
-      # Additional Options
-      run-tests:
-        description: 'Whether to run tests before deployment'
-        required: false
-        type: boolean
-        default: true
-      
-      test-command:
-        description: 'Test command to run'
-        required: false
-        type: string
-        default: 'npm test'
-      
-      run-lint:
-        description: 'Whether to run linting before deployment'
-        required: false
-        type: boolean
-        default: true
-      
-      lint-command:
-        description: 'Lint command to run'
-        required: false
-        type: string
-        default: 'npm run lint'
-    
-    secrets:
-      CLOUDFLARE_API_TOKEN:
-        description: 'Cloudflare API token (optional - uses organization secret if not provided)'
-        required: false
-      CLOUDFLARE_ACCOUNT_ID:
-        description: 'Cloudflare account ID (optional - uses organization secret if not provided)'
-        required: false
 
     outputs:
       deployment-url:
         description: 'URL of the deployed worker'
-        value: ${{ jobs.deploy.outputs.url }}
-      worker-name:
-        description: 'Full worker name used for deployment'
-        value: ${{ jobs.deploy.outputs.worker-name }}
+        value: ${{ jobs.deploy.outputs.deployment-url }}
+      
+      environment:
+        description: 'Environment deployed to'
+        value: ${{ inputs.environment }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy Next.js to Cloudflare Workers (${{ inputs.environment }})
-    
     outputs:
-      url: ${{ steps.deploy.outputs.url }}
-      worker-name: ${{ env.FULL_WORKER_NAME }}
+      deployment-url: ${{ steps.deploy.outputs.deployment-url }}
     
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target-branch }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Next.js project
+        uses: simplify9/.github/.github/actions/setup-nextjs@main
         with:
           node-version: ${{ inputs.node-version }}
-          cache: ${{ inputs.package-manager }}
+          package-manager: ${{ inputs.package-manager-cache }}
+          install-command: ${{ inputs.install-command }}
+          lint-command: ${{ inputs.lint-command }}
+          test-command: ${{ inputs.test-command }}
+          run-lint: ${{ inputs.run-lint }}
+          run-tests: ${{ inputs.run-tests }}
 
-      - name: Set worker name
-        run: |
-          FULL_NAME="${{ inputs.worker-name }}${{ inputs.worker-name-suffix }}"
-          echo "FULL_WORKER_NAME=$FULL_NAME" >> $GITHUB_ENV
-          echo "🏷️ Using worker name: $FULL_NAME"
-
-      - name: Install dependencies
-        run: |
-          case "${{ inputs.package-manager }}" in
-            npm)
-              npm ci
-              ;;
-            yarn)
-              yarn install --frozen-lockfile
-              ;;
-            pnpm)
-              pnpm install --frozen-lockfile
-              ;;
-            *)
-              echo "❌ Unsupported package manager: ${{ inputs.package-manager }}"
-              exit 1
-              ;;
-          esac
-
-      - name: Setup Next.js for Cloudflare Workers
-        uses: simplify9/.github/.github/actions/setup-nextjs-workers@main
+      - name: Build Next.js for Workers
+        uses: simplify9/.github/.github/actions/build-nextjs-workers@main
         with:
-          package-manager: ${{ inputs.package-manager }}
-
-      - name: Run linting
-        if: inputs.run-lint == true
-        run: ${{ inputs.lint-command }}
-
-      - name: Run tests
-        if: inputs.run-tests == true
-        run: ${{ inputs.test-command }}
-
-      - name: Build Next.js application
-        run: ${{ inputs.build-command }}
-        env:
-          NODE_ENV: ${{ inputs.environment }}
-          ENVIRONMENT: ${{ inputs.environment }}
-
-      - name: Convert Next.js build for Workers
-        run: |
-          npx @cloudflare/next-on-pages
-          echo "Conversion for Workers completed successfully"
-
-      - name: Configure Workers project
-        uses: simplify9/.github/.github/actions/configure-workers-project@main
-        with:
-          worker-name: ${{ env.FULL_WORKER_NAME }}
-          compatibility-date: ${{ inputs.compatibility-date }}
-          compatibility-flags: ${{ inputs.compatibility-flags }}
           build-command: ${{ inputs.build-command }}
-          output-directory: ${{ inputs.output-directory }}
-          custom-routes: ${{ inputs.custom-routes }}
           environment: ${{ inputs.environment }}
 
       - name: Deploy to Cloudflare Workers
         id: deploy
-        uses: simplify9/.github/.github/actions/deploy-to-workers@main
+        uses: simplify9/.github/.github/actions/deploy-nextjs-workers@main
         with:
-          worker-name: ${{ env.FULL_WORKER_NAME }}
-          environment: ${{ inputs.environment }}
+          wrangler-environment: ${{ inputs.wrangler-environment || inputs.environment }}
+          setup-custom-domain: ${{ inputs.setup-custom-domain }}
+          worker-name: ${{ inputs.worker-name }}
+          domain-pattern: ${{ inputs.domain-pattern }}
+          zone-name: ${{ inputs.zone-name }}
+          fail-on-domain-error: ${{ inputs.fail-on-domain-error }}
           api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          environment-variables: ${{ inputs.environment-variables }}
-
-      - name: Setup custom domain
-        if: inputs.custom-domain != ''
-        uses: simplify9/.github/.github/actions/setup-cloudflare-domain@main
-        with:
-          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          project-name: ${{ env.FULL_WORKER_NAME }}
-          domain-name: ${{ inputs.custom-domain }}
-          fail-on-error: ${{ inputs.fail-on-domain-error }}
 
       - name: Deployment summary
         run: |
           echo "## 🚀 Next.js Workers Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Worker**: ${{ env.FULL_WORKER_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Compatibility Date**: ${{ inputs.compatibility-date }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Compatibility Flags**: ${{ inputs.compatibility-flags }}" >> $GITHUB_STEP_SUMMARY
           
-          if [ -n "${{ steps.deploy.outputs.url }}" ]; then
-            echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          if [ -f "wrangler.toml" ]; then
+            WORKER_NAME=$(grep -E '^name\s*=' wrangler.toml | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || echo "Unknown")
+            echo "- **Worker Name**: $WORKER_NAME" >> $GITHUB_STEP_SUMMARY
           fi
           
-          if [ -n "${{ inputs.custom-domain }}" ]; then
-            echo "- **Custom Domain**: ${{ inputs.custom-domain }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.setup-custom-domain }}" = "true" ]; then
+            echo "- **Custom Domain**: ${{ inputs.domain-pattern }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ steps.deploy.outputs.deployment-url }}" ]; then
+            echo "- **Deployment URL**: ${{ steps.deploy.outputs.deployment-url }}" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🛠️ Technical Details" >> $GITHUB_STEP_SUMMARY
-          echo "- Uses **Cloudflare Workers** for edge-side rendering" >> $GITHUB_STEP_SUMMARY
-          echo "- Deployed using **Wrangler CLI**" >> $GITHUB_STEP_SUMMARY
-          echo "- Supports dynamic routes, API routes, and middleware at the edge" >> $GITHUB_STEP_SUMMARY
-          echo "- Compatible with Next.js App Router and Pages Router" >> $GITHUB_STEP_SUMMARY
-          echo "- Edge runtime provides ultra-low latency globally" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Next.js Workers deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
-
-      - name: Performance and optimization tips
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 💡 Workers Performance Tips" >> $GITHUB_STEP_SUMMARY
-          echo "- **Edge Runtime**: All code runs at the edge by default for minimal latency" >> $GITHUB_STEP_SUMMARY
-          echo "- **Cold Start Optimization**: Keep bundle size small for faster cold starts" >> $GITHUB_STEP_SUMMARY
-          echo "- **Streaming**: Workers support streaming responses for better performance" >> $GITHUB_STEP_SUMMARY
-          echo "- **Caching**: Use Cloudflare Cache API for custom caching strategies" >> $GITHUB_STEP_SUMMARY
-          echo "- **KV Storage**: Use Cloudflare KV for persistent edge storage" >> $GITHUB_STEP_SUMMARY
-          echo "- **Durable Objects**: Use for stateful applications requiring consistency" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛠️ Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Uses existing wrangler.toml**: ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Assets ignore**: ✅ _worker.js excluded" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build tool**: @cloudflare/next-on-pages" >> $GITHUB_STEP_SUMMARY

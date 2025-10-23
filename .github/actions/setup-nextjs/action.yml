@@ -1,0 +1,86 @@
+name: 'Setup Next.js Project'
+description: 'Sets up Node.js, installs dependencies, and runs linting/testing'
+author: 'Simplify9'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+  
+  package-manager:
+    description: 'Package manager cache key (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  
+  install-command:
+    description: 'Dependencies install command'
+    required: false
+    default: 'npm ci'
+  
+  lint-command:
+    description: 'Lint command'
+    required: false
+    default: 'npm run lint'
+  
+  test-command:
+    description: 'Test command'
+    required: false
+    default: 'npm test'
+  
+  run-lint:
+    description: 'Run linting'
+    required: false
+    default: 'true'
+  
+  run-tests:
+    description: 'Run tests'
+    required: false
+    default: 'false'
+
+outputs:
+  node-version:
+    description: 'Node.js version used'
+    value: ${{ inputs.node-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.package-manager }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        echo "📦 Installing dependencies..."
+        ${{ inputs.install-command }}
+        echo "✅ Dependencies installed successfully"
+
+    - name: Run linting
+      if: inputs.run-lint == 'true'
+      shell: bash
+      run: |
+        echo "🔍 Running linting..."
+        ${{ inputs.lint-command }}
+        echo "✅ Linting completed successfully"
+
+    - name: Run tests
+      if: inputs.run-tests == 'true'
+      shell: bash
+      run: |
+        echo "🧪 Running tests..."
+        ${{ inputs.test-command }}
+        echo "✅ Tests completed successfully"
+
+    - name: Setup summary
+      shell: bash
+      run: |
+        echo "## 📦 Next.js Setup Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Install Command**: ${{ inputs.install-command }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linting**: ${{ inputs.run-lint == 'true' && '✅ Enabled' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Testing**: ${{ inputs.run-tests == 'true' && '✅ Enabled' || '⏭️ Skipped' }}" >> $GITHUB_STEP_SUMMARY
