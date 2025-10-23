@@ -40,6 +40,16 @@ inputs:
   account-id:
     description: 'Cloudflare account ID'
     required: true
+  
+  wrangler-config-path:
+    description: 'Path to wrangler.toml configuration file'
+    required: false
+    default: 'wrangler.toml'
+  
+  worker-script-path:
+    description: 'Path to the worker script file'
+    required: false
+    default: '.vercel/output/static/_worker.js'
 
 outputs:
   deployment-url:
@@ -65,19 +75,19 @@ runs:
         # Deploy command
         if [ -n "$WRANGLER_ENV" ] && [ "$WRANGLER_ENV" != "production" ]; then
           echo "Deploying to environment: $WRANGLER_ENV"
-          npx wrangler deploy --env "$WRANGLER_ENV"
+          npx wrangler deploy --config "${{ inputs.wrangler-config-path }}" --env "$WRANGLER_ENV"
         else
           echo "Deploying to production environment"
-          npx wrangler deploy
+          npx wrangler deploy --config "${{ inputs.wrangler-config-path }}"
         fi
         
         # Extract worker name from wrangler.toml
         WORKER_NAME=""
-        if [ -f "wrangler.toml" ]; then
-          WORKER_NAME=$(grep -E '^name\s*=' wrangler.toml | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+        if [ -f "${{ inputs.wrangler-config-path }}" ]; then
+          WORKER_NAME=$(grep -E '^name\s*=' "${{ inputs.wrangler-config-path }}" | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
           if [ -n "$WRANGLER_ENV" ] && [ "$WRANGLER_ENV" != "production" ]; then
             # Check if environment section exists and has a different name
-            ENV_NAME=$(grep -A 10 "^\[env\.$WRANGLER_ENV\]" wrangler.toml | grep -E '^name\s*=' | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+            ENV_NAME=$(grep -A 10 "^\[env\.$WRANGLER_ENV\]" "${{ inputs.wrangler-config-path }}" | grep -E '^name\s*=' | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
             if [ -n "$ENV_NAME" ]; then
               WORKER_NAME="$ENV_NAME"
             fi
