@@ -41,7 +41,27 @@ This repository hosts reusable GitHub Actions workflows and composite actions fo
 
 ## 🚀 Available Templates
 
-### 1. **vite-ci.yml** - Vite Apps to Cloudflare Pages ⭐
+### 1. **nextjs-workers-ci.yml** - Next.js to Cloudflare Workers ⭐ NEW!
+
+Deploy Next.js applications with full SSR to Cloudflare Workers at the edge.
+
+**Best for:** Next.js apps with SSR, API routes, dynamic content
+**Documentation:** [NEXTJS_WORKERS_CI_USAGE.md](./NEXTJS_WORKERS_CI_USAGE.md)
+
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/nextjs-workers-ci.yml@main
+    with:
+      environment: 'production'
+      wrangler-environment: 'production'
+      setup-custom-domain: true
+      domain-pattern: 'app.example.com/*'
+      zone-name: 'example.com'
+    secrets: inherit
+```
+
+### 2. **vite-ci.yml** - Vite Apps to Cloudflare Pages ⭐
 
 Deploy React, Vue, Svelte, and other Vite-based static applications to Cloudflare Pages.
 

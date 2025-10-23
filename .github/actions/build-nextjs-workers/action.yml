@@ -1,0 +1,91 @@
+name: 'Build Next.js for Cloudflare Workers'
+description: 'Builds Next.js application and prepares it for Cloudflare Workers deployment'
+author: 'Simplify9'
+
+inputs:
+  build-command:
+    description: 'Build command to run'
+    required: false
+    default: 'npm run build'
+  
+  environment:
+    description: 'Environment for build (sets NODE_ENV and ENVIRONMENT)'
+    required: false
+    default: 'production'
+
+outputs:
+  build-output:
+    description: 'Path to build output directory'
+    value: '.vercel/output/static'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Build Next.js application
+      shell: bash
+      run: |
+        echo "🏗️ Building Next.js application..."
+        ${{ inputs.build-command }}
+        echo "✅ Next.js build completed successfully"
+      env:
+        NODE_ENV: ${{ inputs.environment }}
+        ENVIRONMENT: ${{ inputs.environment }}
+
+    - name: Build for Cloudflare Workers
+      shell: bash
+      run: |
+        echo "⚡ Converting Next.js build for Cloudflare Workers..."
+        npx @cloudflare/next-on-pages
+        echo "✅ Workers conversion completed successfully"
+
+    - name: Create assets ignore file
+      shell: bash
+      run: |
+        echo "📝 Creating assets ignore file..."
+        echo "_worker.js" > .vercel/output/static/.assetsignore
+        echo "✅ Assets ignore file created"
+
+    - name: Verify build output
+      shell: bash
+      run: |
+        echo "🔍 Verifying build output..."
+        
+        if [ ! -d ".vercel/output/static" ]; then
+          echo "❌ Build output directory not found!"
+          echo "Current directory contents:"
+          ls -la
+          exit 1
+        fi
+        
+        if [ ! -f ".vercel/output/static/_worker.js" ]; then
+          echo "❌ Worker file not found!"
+          echo "Static directory contents:"
+          ls -la .vercel/output/static/
+          exit 1
+        fi
+        
+        if [ ! -f ".vercel/output/static/.assetsignore" ]; then
+          echo "❌ Assets ignore file not found!"
+          exit 1
+        fi
+        
+        echo "✅ Build verification completed successfully"
+        echo ""
+        echo "Build output summary:"
+        echo "- Static directory: .vercel/output/static/"
+        echo "- Worker file: _worker.js"
+        echo "- Assets ignore: .assetsignore"
+        echo ""
+        echo "Files in static directory:"
+        ls -la .vercel/output/static/ | head -10
+
+    - name: Build summary
+      shell: bash
+      run: |
+        echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Command**: ${{ inputs.build-command }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Output Directory**: .vercel/output/static/" >> $GITHUB_STEP_SUMMARY
+        echo "- **Worker File**: ✅ _worker.js" >> $GITHUB_STEP_SUMMARY
+        echo "- **Assets Ignore**: ✅ .assetsignore" >> $GITHUB_STEP_SUMMARY
+        echo "- **Conversion Tool**: @cloudflare/next-on-pages" >> $GITHUB_STEP_SUMMARY

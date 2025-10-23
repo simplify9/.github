@@ -1,0 +1,183 @@
+name: 'Deploy Next.js to Cloudflare Workers'
+description: 'Deploys Next.js application to Cloudflare Workers and optionally sets up custom domain routes'
+author: 'Simplify9'
+
+inputs:
+  wrangler-environment:
+    description: 'Wrangler environment name (from wrangler.toml)'
+    required: false
+    default: ''
+  
+  setup-custom-domain:
+    description: 'Setup custom domain routes after deployment'
+    required: false
+    default: 'false'
+  
+  worker-name:
+    description: 'Worker name for custom domain routes'
+    required: false
+    default: ''
+  
+  domain-pattern:
+    description: 'Domain pattern for custom routes (e.g., "example.com/*")'
+    required: false
+    default: ''
+  
+  zone-name:
+    description: 'Cloudflare zone name for custom routes'
+    required: false
+    default: ''
+  
+  fail-on-domain-error:
+    description: 'Fail deployment if custom domain setup fails'
+    required: false
+    default: 'false'
+  
+  api-token:
+    description: 'Cloudflare API token'
+    required: true
+  
+  account-id:
+    description: 'Cloudflare account ID'
+    required: true
+
+outputs:
+  deployment-url:
+    description: 'URL of the deployed worker'
+    value: ${{ steps.deploy.outputs.deployment-url }}
+  
+  worker-name:
+    description: 'Worker name used for deployment'
+    value: ${{ steps.deploy.outputs.worker-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Deploy to Cloudflare Workers
+      id: deploy
+      shell: bash
+      run: |
+        echo "🚀 Deploying to Cloudflare Workers..."
+        
+        # Determine the wrangler environment
+        WRANGLER_ENV="${{ inputs.wrangler-environment }}"
+        
+        # Deploy command
+        if [ -n "$WRANGLER_ENV" ] && [ "$WRANGLER_ENV" != "production" ]; then
+          echo "Deploying to environment: $WRANGLER_ENV"
+          npx wrangler deploy --env "$WRANGLER_ENV"
+        else
+          echo "Deploying to production environment"
+          npx wrangler deploy
+        fi
+        
+        # Extract worker name from wrangler.toml
+        WORKER_NAME=""
+        if [ -f "wrangler.toml" ]; then
+          WORKER_NAME=$(grep -E '^name\s*=' wrangler.toml | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+          if [ -n "$WRANGLER_ENV" ] && [ "$WRANGLER_ENV" != "production" ]; then
+            # Check if environment section exists and has a different name
+            ENV_NAME=$(grep -A 10 "^\[env\.$WRANGLER_ENV\]" wrangler.toml | grep -E '^name\s*=' | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+            if [ -n "$ENV_NAME" ]; then
+              WORKER_NAME="$ENV_NAME"
+            fi
+          fi
+        fi
+        
+        # Set outputs
+        echo "worker-name=$WORKER_NAME" >> $GITHUB_OUTPUT
+        
+        # Construct deployment URL
+        if [ -n "$WORKER_NAME" ]; then
+          echo "deployment-url=https://$WORKER_NAME.workers.dev" >> $GITHUB_OUTPUT
+        else
+          echo "deployment-url=https://your-worker.workers.dev" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "✅ Deployment completed successfully"
+        echo "Worker Name: $WORKER_NAME"
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+
+    - name: Setup custom domain routes
+      if: inputs.setup-custom-domain == 'true'
+      shell: bash
+      run: |
+        echo "🌐 Setting up custom domain routes..."
+        
+        # Get worker name from previous step or input
+        WORKER_NAME="${{ steps.deploy.outputs.worker-name }}"
+        if [ -z "$WORKER_NAME" ]; then
+          WORKER_NAME="${{ inputs.worker-name }}"
+        fi
+        
+        if [ -z "$WORKER_NAME" ]; then
+          echo "❌ Worker name not found for custom domain setup"
+          if [ "${{ inputs.fail-on-domain-error }}" = "true" ]; then
+            exit 1
+          else
+            echo "⏭️ Skipping custom domain setup"
+            exit 0
+          fi
+        fi
+        
+        if [ -z "${{ inputs.domain-pattern }}" ] || [ -z "${{ inputs.zone-name }}" ]; then
+          echo "❌ Domain pattern and zone name are required for custom domain setup"
+          if [ "${{ inputs.fail-on-domain-error }}" = "true" ]; then
+            exit 1
+          else
+            echo "⏭️ Skipping custom domain setup"
+            exit 0
+          fi
+        fi
+        
+        echo "Adding route for domain: ${{ inputs.domain-pattern }}"
+        echo "Worker: $WORKER_NAME"
+        echo "Zone: ${{ inputs.zone-name }}"
+        
+        # Add custom domain route using Cloudflare API
+        RESPONSE=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/${{ inputs.account-id }}/workers/scripts/$WORKER_NAME/routes" \
+          -H "Authorization: Bearer ${{ inputs.api-token }}" \
+          -H "Content-Type: application/json" \
+          --data "{\"pattern\":\"${{ inputs.domain-pattern }}\",\"zone_name\":\"${{ inputs.zone-name }}\"}")
+        
+        # Check if the request was successful
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success // false')
+        
+        if [ "$SUCCESS" = "true" ]; then
+          echo "✅ Custom domain route added successfully"
+          ROUTE_ID=$(echo "$RESPONSE" | jq -r '.result.id // "unknown"')
+          echo "Route ID: $ROUTE_ID"
+        else
+          echo "❌ Failed to add custom domain route"
+          echo "Response: $RESPONSE"
+          
+          if [ "${{ inputs.fail-on-domain-error }}" = "true" ]; then
+            exit 1
+          else
+            echo "⚠️ Continuing anyway as fail-on-domain-error is false"
+          fi
+        fi
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.account-id }}
+
+    - name: Deployment summary
+      shell: bash
+      run: |
+        echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Worker Name**: ${{ steps.deploy.outputs.worker-name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ inputs.wrangler-environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Deployment URL**: ${{ steps.deploy.outputs.deployment-url }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ inputs.setup-custom-domain }}" = "true" ]; then
+          echo "- **Custom Domain**: ${{ inputs.domain-pattern }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Zone**: ${{ inputs.zone-name }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🛠️ Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platform**: Cloudflare Workers" >> $GITHUB_STEP_SUMMARY
+        echo "- **Runtime**: Edge Runtime" >> $GITHUB_STEP_SUMMARY
+        echo "- **Global Distribution**: ✅ All edge locations" >> $GITHUB_STEP_SUMMARY
