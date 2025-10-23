@@ -179,6 +179,15 @@ on:
         description: 'Environment deployed to'
         value: ${{ inputs.environment }}
 
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: 'Cloudflare API token with Workers and DNS permissions'
+        required: true
+      
+      CLOUDFLARE_ACCOUNT_ID:
+        description: 'Cloudflare account ID'
+        required: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

@@ -41,47 +41,42 @@ This repository hosts reusable GitHub Actions workflows and composite actions fo
 
 ## 🚀 Available Templates
 
-### 1. **nextjs-workers-ci.yml** - Next.js to Cloudflare Workers ⭐ NEW!
+### 1. **next-ci.yml** - Next.js to Cloudflare Workers ⭐ Next.js 15 Compatible
 
 Deploy Next.js applications with full SSR to Cloudflare Workers at the edge.
 
-**Best for:** Next.js apps with SSR, API routes, dynamic content
-**Documentation:** [NEXTJS_WORKERS_CI_USAGE.md](./NEXTJS_WORKERS_CI_USAGE.md)
+**Best for:** Next.js apps with SSR, API routes, dynamic content  
+**Documentation:** [NEXTJS_DOCUMENTATION_INDEX.md](./NEXTJS_DOCUMENTATION_INDEX.md) | [NEXTJS_WORKERS_CI_USAGE.md](./NEXTJS_WORKERS_CI_USAGE.md)
+
+**Key Features:**
+- ✅ **Next.js 15 Compatible** with auto-detection
+- ✅ Server-Side Rendering (SSR) at the edge
+- ✅ API Routes & Dynamic Routes  
+- ✅ **Smart worker script detection** (modern & legacy)
+- ✅ **CI/CD friendly domain setup**
+- ✅ Uses @cloudflare/next-on-pages
+- ✅ Package manager flexibility (npm, yarn, pnpm)
 
 ```yaml
 jobs:
   deploy:
-    uses: simplify9/.github/.github/workflows/nextjs-workers-ci.yml@main
+    uses: simplify9/.github/.github/workflows/next-ci.yml@main
     with:
       environment: 'production'
-      wrangler-environment: 'production'
-      setup-custom-domain: true
-      domain-pattern: 'app.example.com/*'
-      zone-name: 'example.com'
-    secrets: inherit
+      package-manager: 'yarn'
+      install-command: 'yarn install --frozen-lockfile'
+      auto-detect-worker-path: true  # Next.js 15 compatible
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 ```
 
 ### 2. **vite-ci.yml** - Vite Apps to Cloudflare Pages ⭐
 
 Deploy React, Vue, Svelte, and other Vite-based static applications to Cloudflare Pages.
 
-**Best for:** Static React, Vue, Svelte, vanilla JS apps
+**Best for:** Static React, Vue, Svelte, vanilla JS apps  
 **Documentation:** [QUICK_START_README.md](./QUICK_START_README.md) | [CHEAT_SHEET.md](./CHEAT_SHEET.md)
-
-### 2. **next-ci.yml** - Next.js to Cloudflare Workers ⭐
-
-Deploy Next.js applications to Cloudflare Pages with Functions support for SSR, API routes, and dynamic features.
-
-**Best for:** Next.js apps with SSR, API routes, dynamic routes, middleware
-**Documentation:** [NEXT_SSR_DEPLOYMENT_GUIDE.md](./NEXT_SSR_DEPLOYMENT_GUIDE.md)
-
-**Key Features:**
-- ✅ Server-Side Rendering (SSR)
-- ✅ API Routes & Dynamic Routes  
-- ✅ App Router & Pages Router
-- ✅ Middleware support
-- ✅ Uses @cloudflare/next-on-pages
-- ✅ Supports both SSR and static generation
 
 ### 4. **sw-cicd.yml** - Complete .NET CI/CD Pipeline
 
