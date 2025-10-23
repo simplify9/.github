@@ -100,6 +100,13 @@ on:
         type: string
         default: 'wrangler.toml'
       
+      # Auto-detection Configuration
+      auto-detect-worker-path:
+        description: 'Auto-detect worker script path for modern @cloudflare/next-on-pages builds'
+        required: false
+        type: boolean
+        default: true
+      
       # Optional Steps
       run-lint:
         description: 'Run linting before deployment'
@@ -156,6 +163,12 @@ on:
         required: false
         type: boolean
         default: false
+      
+      skip-existing-routes:
+        description: 'Skip route creation if route already exists (recommended for CI/CD)'
+        required: false
+        type: boolean
+        default: true
 
     outputs:
       deployment-url:
@@ -190,6 +203,7 @@ jobs:
           run-tests: ${{ inputs.run-tests }}
 
       - name: Build Next.js for Workers
+        id: build
         uses: simplify9/.github/.github/actions/build-nextjs-workers@main
         with:
           build-command: ${{ inputs.build-command }}
@@ -200,6 +214,7 @@ jobs:
           worker-script-path: ${{ inputs.worker-script-path }}
           assets-ignore-file: ${{ inputs.assets-ignore-file }}
           assets-ignore-content: ${{ inputs.assets-ignore-content }}
+          auto-detect-worker-path: ${{ inputs.auto-detect-worker-path }}
 
       - name: Deploy to Cloudflare Workers
         id: deploy
@@ -207,12 +222,13 @@ jobs:
         with:
           wrangler-environment: ${{ inputs.wrangler-environment || inputs.environment }}
           wrangler-config-path: ${{ inputs.wrangler-config-path }}
-          worker-script-path: ${{ inputs.worker-script-path }}
+          worker-script-path: ${{ steps.build.outputs.worker-script }}
           setup-custom-domain: ${{ inputs.setup-custom-domain }}
           worker-name: ${{ inputs.worker-name }}
           domain-pattern: ${{ inputs.domain-pattern }}
           zone-name: ${{ inputs.zone-name }}
           fail-on-domain-error: ${{ inputs.fail-on-domain-error }}
+          skip-existing-routes: ${{ inputs.skip-existing-routes }}
           api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
@@ -223,6 +239,8 @@ jobs:
           echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Auto-detect Worker Path**: ${{ inputs.auto-detect-worker-path }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Detected Worker Script**: ${{ steps.build.outputs.worker-script }}" >> $GITHUB_STEP_SUMMARY
           
           if [ -f "wrangler.toml" ]; then
             WORKER_NAME=$(grep -E '^name\s*=' wrangler.toml | head -1 | sed 's/name\s*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || echo "Unknown")
@@ -240,5 +258,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🛠️ Configuration" >> $GITHUB_STEP_SUMMARY
           echo "- **Uses existing wrangler.toml**: ✅" >> $GITHUB_STEP_SUMMARY
-          echo "- **Assets ignore**: ✅ _worker.js excluded" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build tool**: @cloudflare/next-on-pages" >> $GITHUB_STEP_SUMMARY
+          echo "- **Modern @cloudflare/next-on-pages**: ✅ Auto-detection enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- **Assets ignore**: ✅ Smart handling" >> $GITHUB_STEP_SUMMARY
+          echo "- **Next.js 15 Compatible**: ✅" >> $GITHUB_STEP_SUMMARY
