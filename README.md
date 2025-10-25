@@ -1,687 +1,1370 @@
-# Reusable CI/CD Workflows and Templates
+# Reusable CI/CD Workflows and Actions# Reusable CI/CD Workflows and Templates
 
-This repository hosts reusable GitHub Actions workflows and composite actions for Simplify9 projects.
 
-## 🚀 **Quick Start - Cloudflare Pages for Vite Apps**
 
-**Most popular template!** Deploy React, Vue, Svelte, or any Vite app to Cloudflare Pages.
+This repository hosts reusable GitHub Actions workflows and composite actions for Simplify9 projects.This repository hosts reusable GitHub Actions workflows and composite actions for Simplify9 projects.
 
-### **Complete Documentation**
-👉 **[QUICK_START_README.md](./QUICK_START_README.md)** - Complete guide with copy-paste examples  
-👉 **[CHEAT_SHEET.md](./CHEAT_SHEET.md)** - One-page reference for quick lookup
 
-### **30-Second Setup:**
+
+## 🚀 Quick Start## 🚀 **Quick Start - Cloudflare Pages for Vite Apps**
+
+
+
+Most projects will use one of these templates:**Most popular template!** Deploy React, Vue, Svelte, or any Vite app to Cloudflare Pages.
+
+
+
+| **Project Type** | **Template** | **Best For** |### **Complete Documentation**
+
+|------------------|--------------|-------------|👉 **[QUICK_START_README.md](./QUICK_START_README.md)** - Complete guide with copy-paste examples  
+
+| **Frontend Apps** | `vite-ci.yml` | React, Vue, Svelte, vanilla JS - static sites |👉 **[CHEAT_SHEET.md](./CHEAT_SHEET.md)** - One-page reference for quick lookup
+
+| **APIs & Services** | `api-cicd.yml` | REST APIs, microservices with Docker + Helm |
+
+| **.NET Projects** | `sw-cicd.yml` | .NET applications with NuGet, Docker, Helm |### **30-Second Setup:**
+
 1. Check [QUICK_START_README.md](./QUICK_START_README.md) for copy-paste examples
-2. Change `project-name` to your actual app name
-3. Set `build-directory: dist` (for Vite) or `build-directory: build` (for CRA)
-4. Push to `development` or `main` - done! 🎉
 
-**What you get:**
-- `development` branch → `your-app-dev` (auto-deployed)
+### 30-Second Setup2. Change `project-name` to your actual app name
+
+1. **Set Organization Secrets** (recommended):3. Set `build-directory: dist` (for Vite) or `build-directory: build` (for CRA)
+
+   - `CLOUDFLARE_API_TOKEN` & `CLOUDFLARE_ACCOUNT_ID` (for frontend)4. Push to `development` or `main` - done! 🎉
+
+   - `KUBECONFIG`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` (for APIs)
+
+2. **Create workflow** with your template**What you get:**
+
+3. **Push to main/development** - done! 🎉- `development` branch → `your-app-dev` (auto-deployed)
+
 - `main` branch → `your-app` (auto-deployed with tests)
-- Automatic Cloudflare project creation
-- Optional custom domain setup
 
----
+---- Automatic Cloudflare project creation
+
+- Optional custom domain setup
 
 ## 📁 Repository Structure
 
-```
-.github/
-├── actions/
-│   ├── setup-cloudflare-project/    # Cloudflare Pages project setup
-│   ├── setup-cloudflare-domain/     # Cloudflare custom domain configuration
-│   └── helm-deploy/                 # Helm deployment action
-└── workflows/
-    ├── sw-cicd.yml                  # Complete .NET CI/CD pipeline
-    ├── ci-docker.yaml              # Docker build and push
-    ├── ci-helm.yaml                 # Helm chart deployment
-    └── vite-ci.yml                  # Vite to Cloudflare Pages deployment
+---
+
 ```
 
-## 🚀 Available Templates
+.github/## 📁 Repository Structure
 
-### 1. **next-ci.yml** - Next.js to Cloudflare Workers ⭐ Next.js 15 Compatible
+├── workflows/           # Reusable workflow templates
+
+│   ├── vite-ci.yml     # Frontend apps → Cloudflare Pages```
+
+│   ├── api-cicd.yml    # APIs → Docker + Kubernetes.github/
+
+│   ├── sw-cicd.yml     # .NET → NuGet + Docker + Kubernetes├── actions/
+
+│   ├── ci-docker.yaml  # Docker build and push only│   ├── setup-cloudflare-project/    # Cloudflare Pages project setup
+
+│   └── ci-helm.yaml    # Helm deployment only│   ├── setup-cloudflare-domain/     # Cloudflare custom domain configuration
+
+└── actions/            # Composite actions│   └── helm-deploy/                 # Helm deployment action
+
+    ├── setup-cloudflare-project/    # Cloudflare Pages setup└── workflows/
+
+    ├── setup-cloudflare-domain/     # Custom domain configuration    ├── sw-cicd.yml                  # Complete .NET CI/CD pipeline
+
+    ├── helm-deploy/                 # Kubernetes Helm deployment    ├── ci-docker.yaml              # Docker build and push
+
+    ├── helm-deploy-s9generic/       # SF9 generic chart deployment    ├── ci-helm.yaml                 # Helm chart deployment
+
+    ├── helm-package-push/           # Helm chart packaging    └── vite-ci.yml                  # Vite to Cloudflare Pages deployment
+
+    ├── docker-build-push/           # Docker image building```
+
+    ├── dotnet-build/                # .NET project building
+
+    ├── dotnet-pack-push/            # NuGet package publishing## 🚀 Available Templates
+
+    ├── determine-semver/            # Semantic versioning
+
+    └── tag-github-origin/           # Git tagging### 1. **next-ci.yml** - Next.js to Cloudflare Workers ⭐ Next.js 15 Compatible
+
+```
 
 Deploy Next.js applications with full SSR to Cloudflare Workers at the edge.
 
+---
+
 **Best for:** Next.js apps with SSR, API routes, dynamic content  
-**Documentation:** [NEXTJS_DOCUMENTATION_INDEX.md](./NEXTJS_DOCUMENTATION_INDEX.md) | [NEXTJS_WORKERS_CI_USAGE.md](./NEXTJS_WORKERS_CI_USAGE.md)
 
-**Key Features:**
+# 🔄 Workflow Templates**Documentation:** [NEXTJS_DOCUMENTATION_INDEX.md](./NEXTJS_DOCUMENTATION_INDEX.md) | [NEXTJS_WORKERS_CI_USAGE.md](./NEXTJS_WORKERS_CI_USAGE.md)
+
+
+
+## 1. `vite-ci.yml` - Frontend Apps to Cloudflare Pages**Key Features:**
+
 - ✅ **Next.js 15 Compatible** with auto-detection
-- ✅ Server-Side Rendering (SSR) at the edge
+
+**Perfect for:** React, Vue, Svelte, vanilla JavaScript static applications- ✅ Server-Side Rendering (SSR) at the edge
+
 - ✅ API Routes & Dynamic Routes  
-- ✅ **Smart worker script detection** (modern & legacy)
-- ✅ **CI/CD friendly domain setup**
-- ✅ Uses @cloudflare/next-on-pages
-- ✅ Package manager flexibility (npm, yarn, pnpm)
 
-```yaml
+### Features- ✅ **Smart worker script detection** (modern & legacy)
+
+- ✅ Multi-environment support (dev, staging, production)- ✅ **CI/CD friendly domain setup**
+
+- ✅ Automated Cloudflare Pages project creation- ✅ Uses @cloudflare/next-on-pages
+
+- ✅ Custom domain configuration- ✅ Package manager flexibility (npm, yarn, pnpm)
+
+- ✅ Support for npm, yarn, and pnpm
+
+- ✅ Comprehensive error handling and logging```yaml
+
 jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/next-ci.yml@main
-    with:
+
+### Quick Example  deploy:
+
+```yaml    uses: simplify9/.github/.github/workflows/next-ci.yml@main
+
+name: Deploy Frontend    with:
+
       environment: 'production'
-      package-manager: 'yarn'
-      install-command: 'yarn install --frozen-lockfile'
-      auto-detect-worker-path: true  # Next.js 15 compatible
+
+on:      package-manager: 'yarn'
+
+  push:      install-command: 'yarn install --frozen-lockfile'
+
+    branches: [development, main]      auto-detect-worker-path: true  # Next.js 15 compatible
+
     secrets:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-```
 
-### 2. **vite-ci.yml** - Vite Apps to Cloudflare Pages ⭐
+jobs:      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-Deploy React, Vue, Svelte, and other Vite-based static applications to Cloudflare Pages.
+  deploy-dev:      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-**Best for:** Static React, Vue, Svelte, vanilla JS apps  
+    if: github.ref == 'refs/heads/development'```
+
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+    with:### 2. **vite-ci.yml** - Vite Apps to Cloudflare Pages ⭐
+
+      project-name: my-awesome-app
+
+      environment: developmentDeploy React, Vue, Svelte, and other Vite-based static applications to Cloudflare Pages.
+
+      project-name-suffix: -dev
+
+      custom-domain: dev.mysite.com**Best for:** Static React, Vue, Svelte, vanilla JS apps  
+
 **Documentation:** [QUICK_START_README.md](./QUICK_START_README.md) | [CHEAT_SHEET.md](./CHEAT_SHEET.md)
 
-### 4. **sw-cicd.yml** - Complete .NET CI/CD Pipeline
+  deploy-prod:
 
-Reusable workflow name: `Reusable SW CI/CD Pipeline`
+    if: github.ref == 'refs/heads/main'### 4. **sw-cicd.yml** - Complete .NET CI/CD Pipeline
 
-A production-ready CI/CD pipeline for .NET applications with Docker, Helm, and Kubernetes deployment.
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
 
-**Features:**
-- ✅ Semantic versioning and Git tagging
+    with:Reusable workflow name: `Reusable SW CI/CD Pipeline`
+
+      project-name: my-awesome-app
+
+      environment: productionA production-ready CI/CD pipeline for .NET applications with Docker, Helm, and Kubernetes deployment.
+
+      custom-domain: mysite.com
+
+      fail-on-domain-error: true**Features:**
+
+```- ✅ Semantic versioning and Git tagging
+
 - ✅ .NET project building and testing
-- ✅ NuGet package publishing (optional)
+
+### Configuration Options- ✅ NuGet package publishing (optional)
+
 - ✅ Docker image building and pushing
-- ✅ Helm chart packaging and publishing
-- ✅ Kubernetes deployment using the `helm-deploy` action
 
-### 2. **vite-ci.yml** - Vite to Cloudflare Pages 🆕
+| Input | Description | Default | Required |- ✅ Helm chart packaging and publishing
 
-Reusable workflow name: `Deploy Vite App to Cloudflare Pages`
+|-------|-------------|---------|----------|- ✅ Kubernetes deployment using the `helm-deploy` action
 
-A flexible template for deploying Vite applications to Cloudflare Pages with automated project and domain management.
+| `project-name` | Base Cloudflare project name | - | **Yes** |
 
-**Features:**
-- ✅ Multi-environment support (dev, staging, production)
-- ✅ Automated Cloudflare Pages project creation
-- ✅ Custom domain configuration
+| `environment` | Environment name | `development` | No |### 2. **vite-ci.yml** - Vite to Cloudflare Pages 🆕
+
+| `target-branch` | Target branch for deployment | `development` | No |
+
+| `node-version` | Node.js version | `18` | No |Reusable workflow name: `Deploy Vite App to Cloudflare Pages`
+
+| `package-manager` | Package manager (npm/yarn/pnpm) | `npm` | No |
+
+| `build-command` | Build command | `npm run build` | No |A flexible template for deploying Vite applications to Cloudflare Pages with automated project and domain management.
+
+| `build-directory` | Build output directory | `build` | No |
+
+| `project-name-suffix` | Project name suffix | `''` | No |**Features:**
+
+| `custom-domain` | Custom domain to configure | `''` | No |- ✅ Multi-environment support (dev, staging, production)
+
+| `fail-on-domain-error` | Fail if domain setup fails | `false` | No |- ✅ Automated Cloudflare Pages project creation
+
+| `run-tests` | Whether to run tests | `true` | No |- ✅ Custom domain configuration
+
 - ✅ Support for npm, yarn, and pnpm
-- ✅ Comprehensive error handling and logging
+
+---- ✅ Comprehensive error handling and logging
+
 - ✅ Modular composite actions
 
+## 2. `api-cicd.yml` - API CI/CD Pipeline
+
 **Complex logic is separated into reusable composite actions:**
-- `setup-cloudflare-project` - Handles project creation and configuration
+
+**Perfect for:** REST APIs, microservices, backend applications with Docker and Kubernetes- `setup-cloudflare-project` - Handles project creation and configuration
+
 - `setup-cloudflare-domain` - Manages custom domain setup
 
----
+### Features
 
-## 📖 Cloudflare Pages Deployment Guide
+- ✅ Semantic versioning and Git tagging---
 
-### Quick Start
+- ✅ Docker image building and pushing
 
-1. **Set up Organization Secrets (Recommended):**
-   ```
-   CLOUDFLARE_API_TOKEN     # Cloudflare API token with Pages permissions
+- ✅ Helm chart support (local and external)## 📖 Cloudflare Pages Deployment Guide
+
+- ✅ Multi-environment Kubernetes deployment
+
+- ✅ Flexible chart configuration### Quick Start
+
+
+
+### Quick Example1. **Set up Organization Secrets (Recommended):**
+
+```yaml   ```
+
+name: Deploy API   CLOUDFLARE_API_TOKEN     # Cloudflare API token with Pages permissions
+
    CLOUDFLARE_ACCOUNT_ID    # Your Cloudflare account ID
-   ```
-   
-   ℹ️ *Set these as **Organization secrets** for automatic inheritance across all repositories*
 
-2. **Create your deployment workflow:**
-   ```yaml
-   name: Deploy to Cloudflare Pages
-   
-   on:
-     push:
-       branches: [development, main]
-   
-   jobs:
-     # Uses organization secrets automatically
-     deploy-dev:
-       if: github.ref == 'refs/heads/development'
+on:   ```
+
+  push:   
+
+    branches: [development, staging, main]   ℹ️ *Set these as **Organization secrets** for automatic inheritance across all repositories*
+
+
+
+jobs:2. **Create your deployment workflow:**
+
+  deploy:   ```yaml
+
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main   name: Deploy to Cloudflare Pages
+
+    with:   
+
+      # Required   on:
+
+      chart-name: "my-api"     push:
+
+             branches: [development, main]
+
+      # Enable deployments (all disabled by default)   
+
+      deploy-to-development: true   jobs:
+
+      deploy-to-staging: true     # Uses organization secrets automatically
+
+      deploy-to-production: true     deploy-dev:
+
+             if: github.ref == 'refs/heads/development'
+
+      # Container configuration       uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+      container-registry: "registry.digitalocean.com"       with:
+
+      image-name: "namespace/my-api"         project-name: my-awesome-app
+
+      helm-image-repo: "registry.digitalocean.com/namespace"         environment: development
+
+               project-name-suffix: -dev
+
+    secrets:         custom-domain: dev.yoursite.com
+
+      kubeconfig: ${{ secrets.KUBECONFIG }}   
+
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}     # Override with different Cloudflare account if needed
+
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}     deploy-prod:
+
+```       if: github.ref == 'refs/heads/main'
+
        uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-       with:
-         project-name: my-awesome-app
-         environment: development
-         project-name-suffix: -dev
-         custom-domain: dev.yoursite.com
-   
-     # Override with different Cloudflare account if needed
-     deploy-prod:
-       if: github.ref == 'refs/heads/main'
-       uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-       with:
-         project-name: my-awesome-app
-         environment: production
-         custom-domain: yoursite.com
+
+### Important Notes       with:
+
+- **All deployments are disabled by default** - you must explicitly enable them         project-name: my-awesome-app
+
+- **Branch-based deployment**: `development` → dev, `staging` → staging, `main` → production         environment: production
+
+- **Supports both local and external Helm charts**         custom-domain: yoursite.com
+
          fail-on-domain-error: true
-       secrets:
+
+### Chart Configuration Examples       secrets:
+
          CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
-         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PROD_CLOUDFLARE_ACCOUNT_ID }}
-   ```
 
-### Configuration Options
+#### Local Chart         CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PROD_CLOUDFLARE_ACCOUNT_ID }}
 
-| Input | Description | Default | Required |
+```yaml   ```
+
+with:
+
+  chart-name: "my-api"           # Your app name### Configuration Options
+
+  chart-path: "./chart"          # Local chart directory
+
+```| Input | Description | Default | Required |
+
 |-------|-------------|---------|----------|
-| `project-name` | Base Cloudflare project name | - | **Yes** |
-| `environment` | Environment name | `development` | No |
-| `target-branch` | Target branch for deployment | `development` | No |
-| `node-version` | Node.js version | `18` | No |
-| `package-manager` | Package manager (npm/yarn/pnpm) | `npm` | No |
-| `build-command` | Build command | `npm run build` | No |
-| `build-directory` | Build output directory | `build` | No |
-| `project-name-suffix` | Project name suffix | `''` | No |
+
+#### External Chart (SF9 Generic)| `project-name` | Base Cloudflare project name | - | **Yes** |
+
+```yaml| `environment` | Environment name | `development` | No |
+
+with:| `target-branch` | Target branch for deployment | `development` | No |
+
+  chart-name: "my-api"                    # Your app name in cluster| `node-version` | Node.js version | `18` | No |
+
+  chart-path: "https://charts.sf9.io"    # Repository URL| `package-manager` | Package manager (npm/yarn/pnpm) | `npm` | No |
+
+  source-chart-name: "s9genericchart"    # Chart to pull| `build-command` | Build command | `npm run build` | No |
+
+  chart-version: "1.2.3"                 # Version to pull| `build-directory` | Build output directory | `build` | No |
+
+```| `project-name-suffix` | Project name suffix | `''` | No |
+
 | `custom-domain` | Custom domain to configure | `''` | No |
-| `fail-on-domain-error` | Fail if domain setup fails | `false` | No |
+
+### Key Configuration Options| `fail-on-domain-error` | Fail if domain setup fails | `false` | No |
+
 | `run-tests` | Whether to run tests | `true` | No |
-| `test-command` | Test command | `npm test` | No |
 
-### Usage Examples
+| Input | Description | Default | Required || `test-command` | Test command | `npm test` | No |
 
-**Multi-environment deployment:**
-```yaml
-jobs:
-  deploy-dev:
-    if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-    with:
+|-------|-------------|---------|----------|
+
+| `chart-name` | Your application name | - | **Yes** |### Usage Examples
+
+| `deploy-to-development` | Enable dev deployment | `false` | No |
+
+| `deploy-to-staging` | Enable staging deployment | `false` | No |**Multi-environment deployment:**
+
+| `deploy-to-production` | Enable prod deployment | `false` | No |```yaml
+
+| `container-registry` | Container registry URL | - | **Yes** |jobs:
+
+| `image-name` | Docker image name | - | **Yes** |  deploy-dev:
+
+| `helm-image-repo` | Registry path for Helm values | - | **Yes** |    if: github.ref == 'refs/heads/development'
+
+| `chart-path` | Local chart path or repo URL | `./chart` | No |    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+| `source-chart-name` | External chart name | `s9genericchart` | No |    with:
+
       project-name: my-awesome-app
-      environment: development
+
+---      environment: development
+
       project-name-suffix: -dev
-      custom-domain: dev.yoursite.com
 
-  deploy-staging:
+## 3. `sw-cicd.yml` - .NET CI/CD Pipeline      custom-domain: dev.yoursite.com
+
+
+
+**Perfect for:** .NET applications with NuGet packages, Docker containers, and Kubernetes deployment  deploy-staging:
+
     if: github.ref == 'refs/heads/staging'
-    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+### Features    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+- ✅ Semantic versioning and Git tagging    with:
+
+- ✅ .NET project building and testing      project-name: my-awesome-app
+
+- ✅ NuGet package publishing (optional)      environment: staging
+
+- ✅ Docker image building and pushing      project-name-suffix: -staging
+
+- ✅ Helm chart packaging and publishing      custom-domain: staging.yoursite.com
+
+- ✅ Kubernetes deployment      fail-on-domain-error: true
+
+
+
+### Quick Example  deploy-prod:
+
+```yaml    if: github.ref == 'refs/heads/main'
+
+name: Deploy .NET App    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
     with:
-      project-name: my-awesome-app
-      environment: staging
-      project-name-suffix: -staging
-      custom-domain: staging.yoursite.com
+
+on:      project-name: my-awesome-app
+
+  push:      environment: production
+
+    branches: [development, staging, main]      custom-domain: yoursite.com
+
       fail-on-domain-error: true
 
-  deploy-prod:
-    if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-    with:
-      project-name: my-awesome-app
-      environment: production
-      custom-domain: yoursite.com
-      fail-on-domain-error: true
-      run-tests: true
-    # Optional: Override with different Cloudflare account
-    # secrets:
-    #   CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
-    #   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PROD_CLOUDFLARE_ACCOUNT_ID }}
-```
+jobs:      run-tests: true
 
-**Using different package managers:**
-```yaml
-# Yarn
-deploy-yarn:
-  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-  with:
-    project-name: my-app
-    package-manager: yarn
-    build-command: yarn build
-    test-command: yarn test
+  deploy:    # Optional: Override with different Cloudflare account
 
-# pnpm
-deploy-pnpm:
-  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-  with:
-    project-name: my-app
-    package-manager: pnpm
-    build-command: pnpm build
+    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main    # secrets:
+
+    with:    #   CLOUDFLARE_API_TOKEN: ${{ secrets.PROD_CLOUDFLARE_API_TOKEN }}
+
+      # Project configuration    #   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.PROD_CLOUDFLARE_ACCOUNT_ID }}
+
+      dotnet-version: '8.0.x'```
+
+      test-projects: '**/*Tests.csproj'
+
+      nuget-projects: '**/MyLibrary.csproj'**Using different package managers:**
+
+      ```yaml
+
+      # Container configuration# Yarn
+
+      container-registry: 'docker.io'deploy-yarn:
+
+      container-repository: 'mycompany'  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+      image-name: 'my-dotnet-app'  with:
+
+          project-name: my-app
+
+      # Helm configuration    package-manager: yarn
+
+      chart-name: 'my-dotnet-app'    build-command: yarn build
+
+      helm-registry: 'docker.io'    test-command: yarn test
+
+      helm-repository: 'mycompany'
+
+      # pnpm
+
+    secrets:deploy-pnpm:
+
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}  uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+      registry-username: ${{ secrets.DOCKER_USERNAME }}  with:
+
+      registry-password: ${{ secrets.DOCKER_PASSWORD }}    project-name: my-app
+
+      kubeconfig: ${{ secrets.KUBECONFIG }}    package-manager: pnpm
+
+```    build-command: pnpm build
+
     test-command: pnpm test
-```
 
----
+### Configuration Options```
 
-## 🔧 Composite Actions
 
-### Cloudflare Pages Actions
 
-#### `setup-cloudflare-project`
-Handles Cloudflare Pages project creation and configuration with comprehensive error handling.
+| Input | Description | Default | Required |---
+
+|-------|-------------|---------|----------|
+
+| `dotnet-version` | .NET version | `8.0.x` | No |## 🔧 Composite Actions
+
+| `nuget-projects` | Projects to pack as NuGet | `''` | No |
+
+| `test-projects` | Test projects to run | `**/*Tests.csproj` | No |### Cloudflare Pages Actions
+
+| `container-registry` | Container registry | `docker.io` | No |
+
+| `container-repository` | Container repository | - | **Yes** |#### `setup-cloudflare-project`
+
+| `image-name` | Docker image name | - | **Yes** |Handles Cloudflare Pages project creation and configuration with comprehensive error handling.
+
+| `chart-name` | Helm chart name | - | **Yes** |
 
 #### `setup-cloudflare-domain`
-Manages custom domain setup with graceful conflict resolution and optional failure modes.
 
----
+---Manages custom domain setup with graceful conflict resolution and optional failure modes.
 
-## ✅ **Ready for Production Use!**
 
-All workflows and actions are production-ready and follow best practices for security, maintainability, and reusability.
 
----
+## 4. `ci-docker.yaml` - Docker Build Only---
 
-## 📋 Legacy Workflows Documentation
 
-### 1. sw-cicd.yml - Complete CI/CD Pipeline
 
-### Overview
+**Perfect for:** When you only need Docker image building without deployment## ✅ **Ready for Production Use!**
 
-A production-ready CI/CD pipeline that handles the complete application lifecycle:
-- ✅ **Semantic versioning and Git tagging**
-- ✅ **.NET project building and testing**
-- ✅ **NuGet package publishing** (optional)
-- ✅ **Docker image building and pushing**
-- ✅ **Helm chart packaging and publishing**
-- ✅ **Kubernetes deployment** using the `helm-deploy` action
 
-**Architecture**: Clean separation between the reusable workflow template and the specialized deployment action.
 
-### Key Features
+### Quick ExampleAll workflows and actions are production-ready and follow best practices for security, maintainability, and reusability.
+
+```yaml
+
+name: Build Docker Image---
+
+
+
+on:## 📋 Legacy Workflows Documentation
+
+  push:
+
+    branches: [main]### 1. sw-cicd.yml - Complete CI/CD Pipeline
+
+
+
+jobs:### Overview
+
+  build:
+
+    uses: simplify9/.github/.github/workflows/ci-docker.yaml@mainA production-ready CI/CD pipeline that handles the complete application lifecycle:
+
+    with:- ✅ **Semantic versioning and Git tagging**
+
+      image-name: 'my-app'- ✅ **.NET project building and testing**
+
+      registry: 'docker.io'- ✅ **NuGet package publishing** (optional)
+
+      repository: 'mycompany'- ✅ **Docker image building and pushing**
+
+    secrets:- ✅ **Helm chart packaging and publishing**
+
+      registry-username: ${{ secrets.DOCKER_USERNAME }}- ✅ **Kubernetes deployment** using the `helm-deploy` action
+
+      registry-password: ${{ secrets.DOCKER_PASSWORD }}
+
+```**Architecture**: Clean separation between the reusable workflow template and the specialized deployment action.
+
+
+
+---### Key Features
+
 - 🚀 **Based on proven patterns** - Matches your successful SW-Surl-api deployment
-- 🔐 **Secure secret handling** - Direct GitHub Actions interpolation
+
+## 5. `ci-helm.yaml` - Helm Deployment Only- 🔐 **Secure secret handling** - Direct GitHub Actions interpolation
+
 - 📦 **Automated registry management** - Repository name lowercasing
-- ⚙️ **Fixed tool versions** - Helm 3.14.0 for consistency
+
+**Perfect for:** When you only need Helm chart packaging and deployment- ⚙️ **Fixed tool versions** - Helm 3.14.0 for consistency
+
 - 🔄 **Reusable design** - Clean parameter passing to helm-deploy action
 
-### 📋 Complete Reference
+### Quick Example
+
+```yaml### 📋 Complete Reference
+
+name: Deploy with Helm
 
 #### **Template Invocation**
 
-```yaml
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      # Version configuration
-      major-version: '1'           # Major version number
-      minor-version: '0'           # Minor version number
-      
-      # .NET configuration  
-      dotnet-version: '8.0.x'      # .NET SDK version
-      nuget-projects: 'src/**/*.csproj'  # Projects to publish to NuGet
-      run-tests: 'true'            # Whether to run tests
-      
-      # Docker configuration
-      dockerfile-path: './Dockerfile'     # Path to Dockerfile
-      docker-context: '.'                 # Build context
-      
-      # Helm and deployment
-      chart-name: 'my-app'                # Required: Helm chart name
-      chart-path: './chart'               # Path to chart directory
-      development-namespace: 'dev'        # Target namespace
-      container-registry: 'ghcr.io'       # Registry URL
-      
-      # Application secrets and configuration
-      helm-set-values: |
-        ingress.enabled=true,
-        replicas=2,
-        environment="Production",
-        database.url="${{ secrets.DATABASE_URL }}",
-        api.key="${{ secrets.API_KEY }}"
-        
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      API_KEY: ${{ secrets.API_KEY }}
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}  # If publishing NuGet packages
-```
-
-#### **Real-World Example (SW-Surl-api Pattern)**
-```yaml
-name: CI/CD Pipeline
 on:
-  push:
+
+  push:```yaml
+
+    branches: [main]jobs:
+
+  deploy:
+
+jobs:    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+  deploy:    with:
+
+    uses: simplify9/.github/.github/workflows/ci-helm.yaml@main      # Version configuration
+
+    with:      major-version: '1'           # Major version number
+
+      chart-name: 'my-app'      minor-version: '0'           # Minor version number
+
+      chart-version: '1.0.0'      
+
+      registry: 'docker.io'      # .NET configuration  
+
+      repository: 'mycompany'      dotnet-version: '8.0.x'      # .NET SDK version
+
+    secrets:      nuget-projects: 'src/**/*.csproj'  # Projects to publish to NuGet
+
+      registry-username: ${{ secrets.DOCKER_USERNAME }}      run-tests: 'true'            # Whether to run tests
+
+      registry-password: ${{ secrets.DOCKER_PASSWORD }}      
+
+      kubeconfig: ${{ secrets.KUBECONFIG }}      # Docker configuration
+
+```      dockerfile-path: './Dockerfile'     # Path to Dockerfile
+
+      docker-context: '.'                 # Build context
+
+---      
+
+      # Helm and deployment
+
+# ⚙️ Composite Actions      chart-name: 'my-app'                # Required: Helm chart name
+
+      chart-path: './chart'               # Path to chart directory
+
+## Cloudflare Actions      development-namespace: 'dev'        # Target namespace
+
+      container-registry: 'ghcr.io'       # Registry URL
+
+### `setup-cloudflare-project`      
+
+Creates or verifies a Cloudflare Pages project with specified configuration.      # Application secrets and configuration
+
+      helm-set-values: |
+
+**Inputs:**        ingress.enabled=true,
+
+- `api-token` (required): Cloudflare API token        replicas=2,
+
+- `account-id` (required): Cloudflare account ID          environment="Production",
+
+- `project-name` (required): Name of the project        database.url="${{ secrets.DATABASE_URL }}",
+
+- `production-branch` (optional): Production branch, default: `main`        api.key="${{ secrets.API_KEY }}"
+
+- `build-command` (optional): Build command        
+
+- `build-directory` (optional): Build output directory    secrets:
+
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+**Example:**      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+```yaml      API_KEY: ${{ secrets.API_KEY }}
+
+- uses: simplify9/.github/.github/actions/setup-cloudflare-project@main      nuget-api-key: ${{ secrets.NUGET_API_KEY }}  # If publishing NuGet packages
+
+  with:```
+
+    api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}#### **Real-World Example (SW-Surl-api Pattern)**
+
+    project-name: 'my-awesome-app'```yaml
+
+    build-command: 'npm run build'name: CI/CD Pipeline
+
+    build-directory: 'dist'on:
+
+```  push:
+
     branches: [main]
 
-jobs:
+### `setup-cloudflare-domain`
+
+Configures custom domain for Cloudflare Pages project.jobs:
+
   deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      chart-name: 'surl'
-      major-version: '8'
-      minor-version: '0'
-      development-namespace: 'playground'
+
+**Inputs:**    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+- `api-token` (required): Cloudflare API token    with:
+
+- `account-id` (required): Cloudflare account ID      chart-name: 'surl'
+
+- `project-name` (required): Pages project name      major-version: '8'
+
+- `custom-domain` (required): Custom domain to configure      minor-version: '0'
+
+- `fail-on-error` (optional): Fail on domain setup error, default: `false`      development-namespace: 'playground'
+
       nuget-projects: 'SW.Surl.Sdk/SW.Surl.Sdk.csproj'
-      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
-    secrets:
-      kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
-      helm-set-secret-values: db=${{ toJSON(secrets.DBCS) }}
-      DBCS: ${{ secrets.DBCS }}
-      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+
+**Example:**      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
+
+```yaml    secrets:
+
+- uses: simplify9/.github/.github/actions/setup-cloudflare-domain@main      kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
+
+  with:      helm-set-secret-values: db=${{ toJSON(secrets.DBCS) }}
+
+    api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}      DBCS: ${{ secrets.DBCS }}
+
+    account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+
+    project-name: 'my-app'```
+
+    custom-domain: 'app.example.com'
+
+    fail-on-error: true### Inputs
+
 ```
 
-### Inputs
-
 | Input | Required | Default | Type | Description |
-|-------|----------|---------|------|-------------|
+
+## Helm Actions|-------|----------|---------|------|-------------|
+
 | `major-version` | false | `'1'` | string | Major version number for semantic versioning |
-| `minor-version` | false | `'0'` | string | Minor version number for semantic versioning |
-| `dotnet-version` | false | `'8.0.x'` | string | .NET SDK version to use |
+
+### `helm-deploy`| `minor-version` | false | `'0'` | string | Minor version number for semantic versioning |
+
+Deploy Helm chart from OCI registry to Kubernetes cluster.| `dotnet-version` | false | `'8.0.x'` | string | .NET SDK version to use |
+
 | `nuget-projects` | false | `''` | string | NuGet projects to pack and push (glob pattern). Leave empty to skip NuGet publishing |
-| `test-projects` | false | `'**/*UnitTests/*.csproj'` | string | Test projects to run (glob pattern) |
-| `run-tests` | false | `'false'` | string | Whether to run tests during build |
-| `dockerfile-path` | false | `'./Dockerfile'` | string | Path to Dockerfile |
-| `docker-context` | false | `'.'` | string | Docker build context |
-| `docker-platforms` | false | `'linux/amd64'` | string | Target platforms for Docker build |
-| `chart-path` | false | `'./chart'` | string | Path to Helm chart directory |
-| `chart-name` | true | — | string | Helm chart name (required) |
-| `deploy-to-development` | false | `true` | boolean | Deploy to development environment |
-| `development-namespace` | false | `'development'` | string | Kubernetes namespace for development |
-| `container-registry` | false | `'ghcr.io'` | string | Container registry (docker.io, ghcr.io, etc.) |
-| `image-name` | false | — | string | Docker image name (defaults to repository name) |
+
+**Inputs:**| `test-projects` | false | `'**/*UnitTests/*.csproj'` | string | Test projects to run (glob pattern) |
+
+- `chart-name` (required): Name of the Helm chart| `run-tests` | false | `'false'` | string | Whether to run tests during build |
+
+- `chart-version` (required): Version of the chart to deploy| `dockerfile-path` | false | `'./Dockerfile'` | string | Path to Dockerfile |
+
+- `registry` (optional): OCI registry URL, default: `docker.io`| `docker-context` | false | `'.'` | string | Docker build context |
+
+- `repository` (required): Repository path in registry| `docker-platforms` | false | `'linux/amd64'` | string | Target platforms for Docker build |
+
+- `registry-username` (required): Registry username| `chart-path` | false | `'./chart'` | string | Path to Helm chart directory |
+
+- `registry-password` (required): Registry password| `chart-name` | true | — | string | Helm chart name (required) |
+
+- `kubeconfig` (required): Base64 encoded kubeconfig| `deploy-to-development` | false | `true` | boolean | Deploy to development environment |
+
+- `namespace` (optional): Kubernetes namespace, default: chart name| `development-namespace` | false | `'development'` | string | Kubernetes namespace for development |
+
+- `environment` (optional): Environment name for values| `container-registry` | false | `'ghcr.io'` | string | Container registry (docker.io, ghcr.io, etc.) |
+
+- `set-values` (optional): Additional Helm values to set| `image-name` | false | — | string | Docker image name (defaults to repository name) |
+
 | `helm-set-values` | false | — | string | Regular Helm values as comma-separated key=value pairs for configuration (uses `--set`). Example: `ingress.enabled=true,replicas=2,environment="Production"` |
 
-### Secrets
+**Example:**
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `nuget-api-key` | false | NuGet API key for package publishing |
-| `nuget-source` | false | NuGet source URL (defaults to nuget.org) |
-| `registry-username` | false | Container registry username (defaults to github.actor) |
-| `registry-password` | false | Container registry password/token (defaults to GITHUB_TOKEN) |
-| `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
-| `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
-| `helm-set-secret-values` | false | Secret values as comma-separated key=value pairs (uses `--set-string`). Example: `db=${{ toJSON(secrets.DBCS) }},api.key=${{ secrets.API_KEY }}` |
+```yaml### Secrets
+
+- uses: simplify9/.github/.github/actions/helm-deploy@main
+
+  with:| Secret | Required | Description |
+
+    chart-name: 'my-api'|--------|----------|-------------|
+
+    chart-version: '1.0.0'| `nuget-api-key` | false | NuGet API key for package publishing |
+
+    repository: 'mycompany'| `nuget-source` | false | NuGet source URL (defaults to nuget.org) |
+
+    registry-username: ${{ secrets.DOCKER_USERNAME }}| `registry-username` | false | Container registry username (defaults to github.actor) |
+
+    registry-password: ${{ secrets.DOCKER_PASSWORD }}| `registry-password` | false | Container registry password/token (defaults to GITHUB_TOKEN) |
+
+    kubeconfig: ${{ secrets.KUBECONFIG }}| `kubeconfig` | false | Base64 encoded kubeconfig for Kubernetes deployment |
+
+    namespace: 'production'| `github-token` | false | GitHub token for tagging (defaults to GITHUB_TOKEN) |
+
+    set-values: 'replicas=3,image.tag=v1.0.0'| `helm-set-secret-values` | false | Secret values as comma-separated key=value pairs (uses `--set-string`). Example: `db=${{ toJSON(secrets.DBCS) }},api.key=${{ secrets.API_KEY }}` |
+
+```
 
 ### Secret Handling
 
-**Two-Input Approach**: The workflow uses separate inputs for regular configuration and secrets to ensure proper Helm handling:
+### `helm-deploy-s9generic`
 
-1. **`helm-set-values`** (input) → Regular configuration values → `--set` (shell-parsed)
-2. **`helm-set-secret-values`** (secret) → Secret values → `--set-string` (literal strings)
+Deploy using SF9 generic Helm chart with enhanced configuration.**Two-Input Approach**: The workflow uses separate inputs for regular configuration and secrets to ensure proper Helm handling:
 
-**Architecture**:
-1. **Your workflow** → calls `sw-cicd.yml` with values and secrets separated
-2. **sw-cicd.yml** → passes values to `helm-deploy` action with proper parameter separation
-3. **helm-deploy action** → uses `--set` for config and `--set-string` for secrets
 
-**Key Features**:
+
+**Inputs:**1. **`helm-set-values`** (input) → Regular configuration values → `--set` (shell-parsed)
+
+- `chart-name` (required): Application name2. **`helm-set-secret-values`** (secret) → Secret values → `--set-string` (literal strings)
+
+- `chart-version` (required): Chart version
+
+- `app-version` (required): Application version**Architecture**:
+
+- `kubeconfig` (required): Base64 encoded kubeconfig1. **Your workflow** → calls `sw-cicd.yml` with values and secrets separated
+
+- `environment` (optional): Environment name2. **sw-cicd.yml** → passes values to `helm-deploy` action with proper parameter separation
+
+- `namespace` (optional): Kubernetes namespace3. **helm-deploy action** → uses `--set` for config and `--set-string` for secrets
+
+- `image-repo` (optional): Container image repository
+
+- `set-values` (optional): Additional Helm values**Key Features**:
+
 - ✅ **Proper secret handling** - `--set-string` prevents shell parsing of secret values with special characters
-- ✅ **Separation of concerns** - Regular config vs secrets handled differently
-- ✅ **Connection string safe** - Avoids "SSL: command not found" errors with database connection strings
-- ✅ **Repository name lowercasing** - Automatically converts image repository names to lowercase
-- ✅ **Fixed Helm version** - Uses Helm 3.14.0 for consistency
 
-```yaml
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      # Regular configuration values (--set)
+**Example:**- ✅ **Separation of concerns** - Regular config vs secrets handled differently
+
+```yaml- ✅ **Connection string safe** - Avoids "SSL: command not found" errors with database connection strings
+
+- uses: simplify9/.github/.github/actions/helm-deploy-s9generic@main- ✅ **Repository name lowercasing** - Automatically converts image repository names to lowercase
+
+  with:- ✅ **Fixed Helm version** - Uses Helm 3.14.0 for consistency
+
+    chart-name: 'payment-api'
+
+    chart-version: '1.2.0'```yaml
+
+    app-version: '2.1.5'jobs:
+
+    kubeconfig: ${{ secrets.KUBECONFIG }}  deploy:
+
+    environment: 'production'    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+    image-repo: 'registry.example.com/apps'    with:
+
+```      # Regular configuration values (--set)
+
       helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls"'
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+### `helm-package-push`    secrets:
+
+Package and push Helm chart to OCI registry.      kubeconfig: ${{ secrets.KUBECONFIG }}
+
       # Secret values (--set-string) - handles connection strings with special characters
-      helm-set-secret-values: db=${{ toJSON(secrets.DBCS) }}
-```
 
-**Key Points:**
-- **Regular config**: Use `helm-set-values` input for non-sensitive configuration
-- **Secrets**: Use `helm-set-secret-values` secret for sensitive data like connection strings
-- **Connection strings**: Use `${{ toJSON(secrets.NAME) }}` to properly escape complex connection strings
-- **Shell-safe**: `--set-string` prevents shell parsing issues with spaces and special characters
-- **Clean separation** - No mixing of config and secrets in the same parameter
+**Inputs:**      helm-set-secret-values: db=${{ toJSON(secrets.DBCS) }}
 
-### Outputs
+- `chart-path` (required): Path to Helm chart directory```
 
-| Output | Description |
-|--------|-------------|
-| `version` | Generated semantic version |
-| `docker-image` | Built Docker image with tag |
-| `helm-chart` | Published Helm chart URL |
+- `chart-name` (required): Name of the chart
 
-### Examples
+- `chart-version` (required): Version of the chart**Key Points:**
 
-#### Basic .NET Application (No Secrets)
+- `app-version` (required): Application version- **Regular config**: Use `helm-set-values` input for non-sensitive configuration
+
+- `registry` (optional): OCI registry, default: `docker.io`- **Secrets**: Use `helm-set-secret-values` secret for sensitive data like connection strings
+
+- `repository` (required): Repository in registry- **Connection strings**: Use `${{ toJSON(secrets.NAME) }}` to properly escape complex connection strings
+
+- `registry-username` (required): Registry username- **Shell-safe**: `--set-string` prevents shell parsing issues with spaces and special characters
+
+- `registry-password` (required): Registry password- **Clean separation** - No mixing of config and secrets in the same parameter
+
+
+
+**Example:**### Outputs
+
 ```yaml
-name: Deploy Application
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
 
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      chart-name: my-api
-      helm-set-values: 'ingress.enabled=true,replicas=2,environment="Production"'
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-```
+- uses: simplify9/.github/.github/actions/helm-package-push@main| Output | Description |
+
+  with:|--------|-------------|
+
+    chart-path: './chart'| `version` | Generated semantic version |
+
+    chart-name: 'my-api'| `docker-image` | Built Docker image with tag |
+
+    chart-version: '1.0.0'| `helm-chart` | Published Helm chart URL |
+
+    app-version: '1.0.0'
+
+    repository: 'mycompany'### Examples
+
+    registry-username: ${{ secrets.DOCKER_USERNAME }}
+
+    registry-password: ${{ secrets.DOCKER_PASSWORD }}#### Basic .NET Application (No Secrets)
+
+``````yaml
+
+name: Deploy Application
+
+## Docker Actionson:
+
+  push:
+
+### `docker-build-push`    branches: [main]
+
+Build and push Docker image to registry.  workflow_dispatch:
+
+
+
+**Inputs:**jobs:
+
+- `image-name` (required): Name of the Docker image  deploy:
+
+- `image-tag` (required): Tag for the image    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+- `registry` (optional): Docker registry, default: `docker.io`    with:
+
+- `repository` (required): Repository in registry      chart-name: my-api
+
+- `registry-username` (required): Registry username      helm-set-values: 'ingress.enabled=true,replicas=2,environment="Production"'
+
+- `registry-password` (required): Registry password    secrets:
+
+- `dockerfile-path` (optional): Path to Dockerfile, default: `./Dockerfile`      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+- `docker-context` (optional): Docker build context, default: `.````
+
+- `docker-platforms` (optional): Target platforms, default: `linux/amd64`
 
 #### .NET Application with Database and API Key
+
+**Example:**```yaml
+
+```yamlname: Deploy API with Secrets
+
+- uses: simplify9/.github/.github/actions/docker-build-push@mainon:
+
+  with:  push:
+
+    image-name: 'my-api'    branches: [main]
+
+    image-tag: 'v1.0.0'
+
+    repository: 'mycompany'jobs:
+
+    registry-username: ${{ secrets.DOCKER_USERNAME }}  deploy:
+
+    registry-password: ${{ secrets.DOCKER_PASSWORD }}    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+    dockerfile-path: './docker/Dockerfile'### Usage Examples
+
+    docker-platforms: 'linux/amd64,linux/arm64'
+
+```#### Simple Application (No Secrets)
+
 ```yaml
-name: Deploy API with Secrets
+
+## .NET Actionsname: Deploy Simple App
+
 on:
-  push:
-    branches: [main]
 
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-### Usage Examples
+### `dotnet-build`  push:
 
-#### Simple Application (No Secrets)
-```yaml
-name: Deploy Simple App
-on:
-  push:
-    branches: [main]
+Build and test .NET projects.    branches: [main]
 
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      chart-name: simple-app
+
+
+**Inputs:**jobs:
+
+- `dotnet-version` (optional): .NET version, default: `8.0.x`  deploy:
+
+- `test-projects` (optional): Test projects glob pattern, default: `**/*Tests.csproj`    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+- `test-logger` (optional): Test logger, default: `trx`    with:
+
+- `configuration` (optional): Build configuration, default: `Release`      chart-name: simple-app
+
       major-version: '1'
-      minor-version: '0'
-      helm-set-values: 'ingress.enabled=true,replicas=2,environment="production"'
-      deploy-to-development: true
-      development-namespace: prod
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-      registry-username: ${{ github.actor }}
+
+**Example:**      minor-version: '0'
+
+```yaml      helm-set-values: 'ingress.enabled=true,replicas=2,environment="production"'
+
+- uses: simplify9/.github/.github/actions/dotnet-build@main      deploy-to-development: true
+
+  with:      development-namespace: prod
+
+    dotnet-version: '8.0.x'    secrets:
+
+    test-projects: '**/Tests/*.csproj'      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+    configuration: 'Release'      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+
+```      registry-username: ${{ github.actor }}
+
       registry-password: ${{ secrets.GITHUB_TOKEN }}
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-```
 
-#### Application with Database Secret (Your Exact Use Case)
-```yaml
-name: Deploy App with Database
-on:
-  push:
-    branches: [main]
+### `dotnet-pack-push`      github-token: ${{ secrets.GITHUB_TOKEN }}
+
+Pack and push .NET projects as NuGet packages.```
+
+
+
+**Inputs:**#### Application with Database Secret (Your Exact Use Case)
+
+- `dotnet-version` (optional): .NET version, default: `8.0.x````yaml
+
+- `nuget-projects` (required): Projects to pack (glob pattern)name: Deploy App with Database
+
+- `package-version` (required): NuGet package versionon:
+
+- `nuget-api-key` (required): NuGet API key  push:
+
+- `nuget-source` (optional): NuGet source URL, default: NuGet.org    branches: [main]
+
+- `configuration` (optional): Build configuration, default: `Release`
 
 jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      chart-name: surl-api
-      major-version: '2'
-      minor-version: '1'
-      helm-set-values: |
-        ingress.enabled=true,
-        replicas=1,
+
+**Example:**  deploy:
+
+```yaml    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+- uses: simplify9/.github/.github/actions/dotnet-pack-push@main    with:
+
+  with:      chart-name: surl-api
+
+    nuget-projects: '**/MyLibrary.csproj'      major-version: '2'
+
+    package-version: '1.0.0'      minor-version: '1'
+
+    nuget-api-key: ${{ secrets.NUGET_API_KEY }}      helm-set-values: |
+
+    configuration: 'Release'        ingress.enabled=true,
+
+```        replicas=1,
+
         ingress.hosts={surl.sf9.io},
-        environment="Staging",
+
+## Utility Actions        environment="Staging",
+
         ingress.path="/api",
-        ingress.tls[0].secretName="surl-tls",
-        db=${{ secrets.DBCS }}
+
+### `determine-semver`        ingress.tls[0].secretName="surl-tls",
+
+Generate semantic version based on Git history and conventional commits.        db=${{ secrets.DBCS }}
+
       deploy-to-development: true
-      development-namespace: staging
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+**Inputs:**      development-namespace: staging
+
+- `major-version` (optional): Major version, default: `1`    secrets:
+
+- `minor-version` (optional): Minor version, default: `0`      kubeconfig: ${{ secrets.KUBECONFIG }}
+
       DBCS: ${{ secrets.DBCS }}
-```
 
-#### 🚀 Getting Started (Ready to Use!)
+**Outputs:**```
 
-#### 1. **Replace Your Existing Workflow**
+- `version`: Generated semantic version (e.g., `1.2.3`)
 
-Create `.github/workflows/ci-cd.yml` in your repository:
+- `version-tag`: Version with 'v' prefix (e.g., `v1.2.3`)#### 🚀 Getting Started (Ready to Use!)
+
+
+
+**Example:**#### 1. **Replace Your Existing Workflow**
 
 ```yaml
-name: CI/CD Pipeline
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
 
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      # Required
-      chart-name: 'your-app-name'
-      
-      # Optional (with sensible defaults)
-      major-version: '1'
-      minor-version: '0'
-      development-namespace: 'development'
-      container-registry: 'ghcr.io'
-      
-      # Deployment configuration
-      helm-set-values: |
-        ingress.enabled=true,
-        replicas=1,
-        environment="Development",
-        database.connectionString="${{ secrets.DATABASE_URL }}"
-        
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      # Add any other secrets referenced in helm-set-values
+- uses: simplify9/.github/.github/actions/determine-semver@mainCreate `.github/workflows/ci-cd.yml` in your repository:
+
+  id: version
+
+  with:```yaml
+
+    major-version: '2'name: CI/CD Pipeline
+
+    minor-version: '1'on:
+
+  push:
+
+- name: Use version    branches: [main]
+
+  run: echo "Version is ${{ steps.version.outputs.version }}"  workflow_dispatch:
+
 ```
 
-#### 2. **Configure Repository Secrets**
+jobs:
 
-Set these secrets in your repository settings:
+### `tag-github-origin`  deploy:
 
-| Secret | Purpose | How to Get |
-|--------|---------|------------|
-| `KUBECONFIG` | Kubernetes access | `base64 -w 0 ~/.kube/config` |
-| `DATABASE_URL` | App secrets | Your database connection string |
-| `NUGET_API_KEY` | NuGet publishing | From nuget.org (if publishing packages) |
+Create and push Git tag to origin repository.    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+    with:
+
+**Inputs:**      # Required
+
+- `tag-name` (required): Name of the tag to create      chart-name: 'your-app-name'
+
+- `tag-message` (optional): Tag message      
+
+      # Optional (with sensible defaults)
+
+**Example:**      major-version: '1'
+
+```yaml      minor-version: '0'
+
+- uses: simplify9/.github/.github/actions/tag-github-origin@main      development-namespace: 'development'
+
+  with:      container-registry: 'ghcr.io'
+
+    tag-name: 'v1.0.0'      
+
+    tag-message: 'Release version 1.0.0'      # Deployment configuration
+
+```      helm-set-values: |
+
+        ingress.enabled=true,
+
+---        replicas=1,
+
+        environment="Development",
+
+# 🔧 Common Setup Patterns        database.connectionString="${{ secrets.DATABASE_URL }}"
+
+        
+
+## Organization Secrets (Recommended)    secrets:
+
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+Set these secrets at the **Organization** level for automatic inheritance:      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # Add any other secrets referenced in helm-set-values
+
+### For Frontend Apps (Cloudflare)```
+
+```
+
+CLOUDFLARE_API_TOKEN     # API token with Pages:Edit permission#### 2. **Configure Repository Secrets**
+
+CLOUDFLARE_ACCOUNT_ID    # Your Cloudflare account ID
+
+```Set these secrets in your repository settings:
+
+
+
+### For APIs & Services (Kubernetes)| Secret | Purpose | How to Get |
+
+```|--------|---------|------------|
+
+KUBECONFIG               # Base64 encoded kubeconfig file| `KUBECONFIG` | Kubernetes access | `base64 -w 0 ~/.kube/config` |
+
+REGISTRY_USERNAME        # Container registry username  | `DATABASE_URL` | App secrets | Your database connection string |
+
+REGISTRY_PASSWORD        # Container registry password| `NUGET_API_KEY` | NuGet publishing | From nuget.org (if publishing packages) |
+
+```
 
 #### 3. **That's It! 🎉**
 
-Your deployment will now:
-- ✅ **Build and test** your .NET application
-- ✅ **Create semantic versions** automatically
-- ✅ **Build and push** Docker images
-- ✅ **Package and publish** Helm charts
+### For .NET Projects
+
+```Your deployment will now:
+
+NUGET_API_KEY           # NuGet.org API key (if publishing packages)- ✅ **Build and test** your .NET application
+
+DOCKER_USERNAME         # Docker Hub username- ✅ **Create semantic versions** automatically
+
+DOCKER_PASSWORD         # Docker Hub password or token- ✅ **Build and push** Docker images
+
+```- ✅ **Package and publish** Helm charts
+
 - ✅ **Deploy to Kubernetes** with your secrets
-- ✅ **Verify deployment** health
 
-**Migration Time**: ~5 minutes to replace your existing workflow!
+## Multi-Environment Deployment- ✅ **Verify deployment** health
 
-### ✅ **Verification Checklist**
 
-After migration, verify these work:
 
-- [ ] **Build succeeds** - .NET compilation and tests
-- [ ] **Docker image published** - Check your container registry
-- [ ] **Helm chart published** - Check OCI registry charts
-- [ ] **Kubernetes deployment** - Check your cluster
-- [ ] **Secrets injected correctly** - Verify application connects to database
-- [ ] **Deployment summary** - Check GitHub Actions summary page
+### Frontend Apps**Migration Time**: ~5 minutes to replace your existing workflow!
+
 ```yaml
-name: CI/CD Pipeline
-on:
-  push:
-    branches: [main]
+
+jobs:### ✅ **Verification Checklist**
+
+  deploy-dev:
+
+    if: github.ref == 'refs/heads/development'After migration, verify these work:
+
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
+
+    with:- [ ] **Build succeeds** - .NET compilation and tests
+
+      project-name: my-app- [ ] **Docker image published** - Check your container registry
+
+      environment: development- [ ] **Helm chart published** - Check OCI registry charts
+
+      project-name-suffix: -dev- [ ] **Kubernetes deployment** - Check your cluster
+
+- [ ] **Secrets injected correctly** - Verify application connects to database
+
+  deploy-prod:- [ ] **Deployment summary** - Check GitHub Actions summary page
+
+    if: github.ref == 'refs/heads/main'```yaml
+
+    uses: simplify9/.github/.github/workflows/vite-ci.yml@mainname: CI/CD Pipeline
+
+    with:on:
+
+      project-name: my-app  push:
+
+      environment: production    branches: [main]
+
+```
 
 jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      chart-name: 'surl'
-      major-version: '8'
-      minor-version: '0'
-      development-namespace: 'playground'
-      nuget-projects: 'SW.Surl.Sdk/SW.Surl.Sdk.csproj'
-      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls",db="${{ secrets.DBCS }}"'
-    secrets:
-      kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
+
+### API Services  deploy:
+
+```yaml    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+
+jobs:    with:
+
+  deploy:      chart-name: 'surl'
+
+    uses: simplify9/.github/.github/workflows/api-cicd.yml@main      major-version: '8'
+
+    with:      minor-version: '0'
+
+      chart-name: "my-api"      development-namespace: 'playground'
+
+      deploy-to-development: true    # Deploys from 'development' branch      nuget-projects: 'SW.Surl.Sdk/SW.Surl.Sdk.csproj'
+
+      deploy-to-staging: true        # Deploys from 'staging' branch      helm-set-values: 'ingress.enabled=true,replicas=1,ingress.hosts={surl.sf9.io},environment="Staging",ingress.path="/api",ingress.tls[0].secretName="surl-tls",db="${{ secrets.DBCS }}"'
+
+      deploy-to-production: true     # Deploys from 'main' branch    secrets:
+
+```      kubeconfig: ${{ secrets.S9Dev_KUBECONFIG }}
+
       DBCS: ${{ secrets.DBCS }}
-      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+
+---      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+
 ```
+
+# 🚨 Common Troubleshooting
 
 This example shows:
-- ✅ **Multiple secrets** - Database connection string and kubeconfig
+
+## API CI/CD Issues- ✅ **Multiple secrets** - Database connection string and kubeconfig
+
 - ✅ **Complex helm values** - Ingress configuration with TLS
-- ✅ **NuGet publishing** - SDK package publishing to NuGet
-- ✅ **Custom namespace** - Deployment to 'playground' environment
-```yaml
-name: Deploy Enterprise Application
-on:
-  push:
-    branches: [main]
 
-jobs:
-  deploy:
+### Deployment Jobs Skipped- ✅ **NuGet publishing** - SDK package publishing to NuGet
+
+**Problem**: Jobs show as "skipped" even though build succeeded- ✅ **Custom namespace** - Deployment to 'playground' environment
+
+```yaml
+
+**Solutions:**name: Deploy Enterprise Application
+
+1. **Enable deployment**: Set `deploy-to-development: true`on:
+
+2. **Correct branch**: Push to `development`, `staging`, or `main`  push:
+
+3. **Required secrets**: Ensure `kubeconfig` secret is set    branches: [main]
+
+
+
+### Wrong Image Path in Podsjobs:
+
+**Problem**: Pod shows incorrect image or missing version  deploy:
+
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
-      chart-name: enterprise-app
-      helm-set-values: |
-        replicas=3,
-        environment="production",
+
+**Solution**: Set `helm-image-repo` explicitly:    with:
+
+```yaml      chart-name: enterprise-app
+
+with:      helm-set-values: |
+
+  helm-image-repo: "registry.digitalocean.com/namespace"        replicas=3,
+
+```        environment="production",
+
         ingress.enabled=true,
-        database.primary="${{ secrets.PRIMARY_DB }}",
+
+## Vite CI Issues        database.primary="${{ secrets.PRIMARY_DB }}",
+
         cache.redis="${{ secrets.REDIS_URL }}",
-        storage.s3="${{ secrets.S3_ACCESS_KEY }}",
-        email.smtp="${{ secrets.SMTP_PASSWORD }}",
+
+### Build Directory Not Found        storage.s3="${{ secrets.S3_ACCESS_KEY }}",
+
+**Problem**: Build fails with "directory not found"        email.smtp="${{ secrets.SMTP_PASSWORD }}",
+
         auth.jwt="${{ secrets.JWT_SECRET }}"
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-      PRIMARY_DB: ${{ secrets.PRIMARY_DATABASE_CONNECTION }}
-      REDIS_URL: ${{ secrets.REDIS_CONNECTION_STRING }}
-      S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
-      SMTP_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-      JWT_SECRET: ${{ secrets.JWT_SIGNING_KEY }}
+
+**Solution**: Set correct build directory:    secrets:
+
+```yaml      kubeconfig: ${{ secrets.KUBECONFIG }}
+
+with:      PRIMARY_DB: ${{ secrets.PRIMARY_DATABASE_CONNECTION }}
+
+  build-directory: "dist"  # For Vite      REDIS_URL: ${{ secrets.REDIS_CONNECTION_STRING }}
+
+  # OR      S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+
+  build-directory: "build" # For Create React App      SMTP_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+
+```      JWT_SECRET: ${{ secrets.JWT_SIGNING_KEY }}
+
 ```
 
-#### NuGet Library Publishing
+### Custom Domain Fails
+
+**Problem**: Domain setup fails during deployment#### NuGet Library Publishing
+
 ```yaml
-name: Build and Publish Library
-on:
-  push:
-    branches: [main]
+
+**Solution**: Set `fail-on-domain-error: false` for non-critical domain issues:name: Build and Publish Library
+
+```yamlon:
+
+with:  push:
+
+  fail-on-domain-error: false  # Don't fail deployment on domain issues    branches: [main]
+
+```
 
 jobs:
-  deploy:
+
+---  deploy:
+
     uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
-    with:
+
+# 🤝 Contributing    with:
+
       chart-name: my-library
-      nuget-projects: 'src/**/*.csproj'
-      run-tests: 'true'
-      test-projects: 'tests/**/*Tests.csproj'
-      deploy-to-development: false
-    secrets:
+
+1. **Fork** this repository      nuget-projects: 'src/**/*.csproj'
+
+2. **Create** a feature branch: `git checkout -b feature/amazing-feature`      run-tests: 'true'
+
+3. **Commit** your changes: `git commit -m 'Add amazing feature'`      test-projects: 'tests/**/*Tests.csproj'
+
+4. **Push** to the branch: `git push origin feature/amazing-feature`      deploy-to-development: false
+
+5. **Open** a Pull Request    secrets:
+
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-```
 
-### Repository Secrets
+## Development Guidelines```
 
-Set up these secrets in your repository:
+
+
+- **Workflows** should be reusable and environment-agnostic### Repository Secrets
+
+- **Actions** should be focused on single responsibilities
+
+- **Documentation** should include practical examplesSet up these secrets in your repository:
+
+- **Test** changes in a separate repository before merging
 
 #### Required Secrets
-- **KUBECONFIG**: Base64 encoded kubeconfig for your Kubernetes cluster
 
-#### Optional Secrets (as needed by your application)
+---- **KUBECONFIG**: Base64 encoded kubeconfig for your Kubernetes cluster
+
+
+
+# 📄 License#### Optional Secrets (as needed by your application)
+
 - Any application secrets (database connections, API keys, etc.)
-- Pass them directly in `helm-set-values` using `${{ secrets.SECRET_NAME }}`
 
-#### NuGet Publishing (if applicable)
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.- Pass them directly in `helm-set-values` using `${{ secrets.SECRET_NAME }}`
+
+
+
+---#### NuGet Publishing (if applicable)
+
 - **NUGET_API_KEY**: API key for NuGet.org or private feed
+
+# 🆘 Support
 
 ### Helm Chart Requirements
 
-Your Helm chart should support these standard values:
-- `image.repository`, `image.tag`: Container image settings (automatically set)
+- **Issues**: [GitHub Issues](https://github.com/simplify9/.github/issues)
+
+- **Discussions**: [GitHub Discussions](https://github.com/simplify9/.github/discussions)Your Helm chart should support these standard values:
+
+- **Documentation**: Check this README for comprehensive guides- `image.repository`, `image.tag`: Container image settings (automatically set)
+
 - `ingress.enabled`, `ingress.hosts`, `ingress.tls`: Ingress configuration
-- `replicas`: Pod replica count
-- `environment`: Environment label
 
-#### Custom Values
-Any values passed through `helm-set-values` become available in your Helm templates:
+**Quick Help:**- `replicas`: Pod replica count
 
+- Frontend apps → Use `vite-ci.yml`- `environment`: Environment label
+
+- APIs & services → Use `api-cicd.yml`  
+
+- .NET projects → Use `sw-cicd.yml`#### Custom Values
+
+- Need Docker only → Use `ci-docker.yaml`Any values passed through `helm-set-values` become available in your Helm templates:
+
+- Need Helm only → Use `ci-helm.yaml`
 ```yaml
 # values.yaml
 database:
