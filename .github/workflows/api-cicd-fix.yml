@@ -365,7 +365,7 @@ jobs:
           path: ${{ inputs.chart-name }}
 
       - name: Deploy to Development (via local composite action)
-        uses: simplify9/.github/actions/helm-generic@fix
+        uses: simplify9/.github/.github/actions/helm-generic@fix
         with:
           # Required basics
           app_name: ${{ inputs.helm-app-name || inputs.chart-name }}
