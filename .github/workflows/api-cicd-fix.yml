@@ -375,20 +375,20 @@ jobs:
           chart: ${{ inputs.chart-name }}
           chart_repo: "https://charts.sf9.io"
 
-          # Service & image
-          service_target_port: '80'
-          image_repo: ${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }}
-          pull_secret: ${{ inputs.image-pull-secret || 'sf9cr' }}
+          # # Service & image
+          # service_target_port: '80'
+          # image_repo: ${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }}
+          # pull_secret: ${{ inputs.image-pull-secret || 'sf9cr' }}
 
-          # Ingress (dev)
-          ingress_host: ${{ inputs.development-ingress-host }}
-          ingress_tls_secret: ${{ inputs.development-ingress-tls-secret }}
-          ingress_cert_issuer: ${{ inputs.ingress-cert-issuer || 'letsencrypt-nginx' }}
-          ingress_proxy_body_size: ${{ inputs.ingress-proxy-body-size || '50m' }}
-          ingress_paths: |
-            - /
-            - /api
-            - /docs
+          # # Ingress (dev)
+          # ingress_host: ${{ inputs.development-ingress-host }}
+          # ingress_tls_secret: ${{ inputs.development-ingress-tls-secret }}
+          # ingress_cert_issuer: ${{ inputs.ingress-cert-issuer || 'letsencrypt-nginx' }}
+          # ingress_proxy_body_size: ${{ inputs.ingress-proxy-body-size || '50m' }}
+          # ingress_paths: |
+          #   - /
+          #   - /api
+          #   - /docs
 
           # Helm timing/flags
           helm_timeout: '5m'
@@ -402,6 +402,7 @@ jobs:
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}
               ${{ inputs.development-helm-set-values }}
+              
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
 

@@ -24,36 +24,6 @@ inputs:
     description: "Helm repo URL providing the chart (ignored if chart is a path)"
     required: false
     default: "https://charts.sf9.io"
-  environment_label:
-    description: "Value for app/environment variable passed to chart"
-    required: false
-    default: Staging
-  service_target_port:
-    description: "Service targetPort"
-    required: false
-    default: '5000'
-  ingress_host:
-    description: "Primary ingress host"
-    required: true
-  ingress_tls_secret:
-    description: "TLS secret for ingress host"
-    required: true
-  ingress_cert_issuer:
-    description: "cert-manager cluster issuer"
-    required: false
-    default: letsencrypt-nginx
-  ingress_proxy_body_size:
-    description: "nginx ingress proxy body size annotation"
-    required: false
-    default: 50m
-  image_repo:
-    description: "Container image repository (without tag)"
-    required: false
-    default: registry.digitalocean.com/sf9cr
-  pull_secret:
-    description: "Kubernetes image pull secret name"
-    required: false
-    default: sf9cr
   helm_timeout:
     description: "Helm upgrade --timeout value"
     required: false
@@ -149,14 +119,6 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
         CHART: ${{ inputs.chart }}
         CHART_REPO: ${{ inputs.chart_repo }}
-        ENVIRONMENT_LABEL: ${{ inputs.environment_label }}
-        SERVICE_TARGET_PORT: ${{ inputs.service_target_port }}
-        INGRESS_HOST: ${{ inputs.ingress_host }}
-        INGRESS_TLS_SECRET: ${{ inputs.ingress_tls_secret }}
-        INGRESS_CERT_ISSUER: ${{ inputs.ingress_cert_issuer }}
-        INGRESS_PROXY_BODY_SIZE: ${{ inputs.ingress_proxy_body_size }}
-        IMAGE_REPO: ${{ inputs.image_repo }}
-        PULL_SECRET: ${{ inputs.pull_secret }}
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
@@ -177,17 +139,11 @@ runs:
           CHART_REF="$CHART"
         fi
 
+        # BASE_SET_ARGS now only covers mandatory intrinsic values; all other chart settings must be passed via
+        # extra_set_values (one per line) or extra_args. See modified input description for guidance.
         BASE_SET_ARGS=(
-          --set service.targetPort="${SERVICE_TARGET_PORT}"
           --set app.name="${APP_NAME}"
           --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
-          --set environment="${ENVIRONMENT_LABEL}"
-          --set ingress.hosts[0].host="${INGRESS_HOST}"
-          --set ingress.hosts[0].tlsSecret="${INGRESS_TLS_SECRET}"
-          --set image.repo="${IMAGE_REPO}"
-          --set image.pullSecret="${PULL_SECRET}"
-          --set ingress.annotations.cert-manager\\.io/cluster-issuer="${INGRESS_CERT_ISSUER}"
-          --set ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/proxy-body-size="${INGRESS_PROXY_BODY_SIZE}"
         )
 
         PATH_SET_ARGS=()
