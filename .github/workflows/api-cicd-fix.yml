@@ -462,7 +462,7 @@ jobs:
 
           # Translate your previous comma-joined --set into line-based entries
           extra_set_values: |
-            image.repo=${{ format('{0}/{1}', env.CONTAINER_REGISTRY) }}
+            image.repo=${{ env.CONTAINER_REGISTRY }}
             app.name=${{ inputs.app-name || inputs.helm-app-name || inputs.chart-name }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }}
