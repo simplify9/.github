@@ -373,7 +373,7 @@ jobs:
 
           # Use the downloaded chart directory/package directly
           chart: ${{ inputs.chart-name }}
-          chart_repo: ""                   # empty => don't add repo (local artifact)
+          chart_repo: "https://charts.sf9.io"
 
           # Service & image
           service_target_port: '80'
