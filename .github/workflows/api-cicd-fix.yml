@@ -480,8 +480,8 @@ jobs:
             service.targetPort=${{ inputs.service-target-port }}
             ${{ steps.ingress.outputs.ingress-values }}
             image.pullSecret=sf9cr
-            ingress.annotations.cert-manager.io/cluster-issuer=letsencrypt-nginx
-            ingress.annotations.nginx.ingress.kubernetes.io/proxy-body-size=50m
+            ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
+            ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
               ${{ inputs.development-helm-set-values }}
               
           # Kubeconfig (raw YAML or base64; your secret works for both)
