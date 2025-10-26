@@ -42,11 +42,6 @@ on:
         description: 'Your application name: This becomes your app name in Kubernetes. For external charts, this will be the name of the repackaged chart.'
         required: true
         type: string
-      chart-version:
-        description: 'Chart version: For external charts, specify which version to pull (e.g., "1.2.3", "latest"). For local charts, this is ignored as the generated semantic version is used.'
-        required: false
-        default: 'latest'
-        type: string
       source-chart-name:
         description: 'Source chart name: For external charts, this is the name of the chart to pull from the repository (e.g., "s9genericchart"). For local charts, this is ignored.'
         required: false
@@ -65,10 +60,6 @@ on:
         type: string
       
       # Helm image configuration (for your specific template structure)
-      helm-image-repo:
-        description: 'Helm image.repo value (will use container-registry/image-name if not provided)'
-        required: false
-        type: string
       helm-app-name:
         description: 'Helm app.name value (will use chart-name if not provided)'
         required: false
@@ -471,7 +462,7 @@ jobs:
 
           # Translate your previous comma-joined --set into line-based entries
           extra_set_values: |
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }}
+            image.repo=${{ format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }}
             app.name=${{ inputs.app-name || inputs.helm-app-name || inputs.chart-name }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }}
@@ -511,7 +502,7 @@ jobs:
           release-name: ${{ inputs.chart-name }}-staging
           namespace: ${{ inputs.staging-namespace }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
+            image.repo=${{ format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
             app.version=${{ needs.version.outputs.version }},
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }},
@@ -542,7 +533,7 @@ jobs:
           release-name: ${{ inputs.chart-name }}-prod
           namespace: ${{ inputs.production-namespace }}
           set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
+            image.repo=${{ format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
             app.name=${{ inputs.helm-app-name || inputs.chart-name }},
             app.version=${{ needs.version.outputs.version }},
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }},
