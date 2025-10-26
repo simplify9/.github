@@ -32,13 +32,6 @@ on:
         default: 'linux/amd64'
         type: string
       
-      # Helm configuration (for build job)
-      chart-path:
-        description: 'Helm chart path: Local directory (e.g., "./chart") or external Helm repository URL (e.g., "https://charts.sf9.io")'
-        required: false
-        default: './chart'
-        type: string
-
 
       # Registry configuration (for build job)
       container-registry:
@@ -46,60 +39,17 @@ on:
         required: false
         default: 'ghcr.io'
         type: string
-      image-name:
-        description: 'Docker image name (will use repository name if not provided)'
-        required: false
-        type: string
-      
-      # Helm image configuration (for your specific template structure)
-      
-      # Development deployment configuration (for deploy-development job)
-      deploy-to-development:
-        description: 'Deploy to development environment'
-        required: false
-        default: false
-        type: boolean
-      development-namespace:
+            
+      namespace:
         description: 'Kubernetes namespace for development'
         required: false
         default: 'development'
         type: string
-      development-helm-set-values:
+      helm-set-values:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
       
-      # Staging deployment configuration (for deploy-staging job)
-      deploy-to-staging:
-        description: 'Deploy to staging environment'
-        required: false
-        default: false
-        type: boolean
-      staging-namespace:
-        description: 'Kubernetes namespace for staging'
-        required: false
-        default: 'staging'
-        type: string
-      staging-helm-set-values:
-        description: 'Staging Helm set values (comma-separated: key1=value1,key2=value2)'
-        required: false
-        type: string
-      
-      # Production deployment configuration (for deploy-production job)
-      deploy-to-production:
-        description: 'Deploy to production environment'
-        required: false
-        default: false
-        type: boolean
-      production-namespace:
-        description: 'Kubernetes namespace for production'
-        required: false
-        default: 'production'
-        type: string
-      production-helm-set-values:
-        description: 'Production Helm set values (comma-separated: key1=value1,key2=value2)'
-        required: false
-        type: string
 
       # Dynamic deployment value inputs (generic, not prefixed with environment)
       environment:
@@ -151,15 +101,10 @@ on:
         required: false
       
       # Secret deployment values (ordered by deployment stages)
-      development-helm-set-secret-values:
-        description: 'Development Helm set secret values (comma-separated: key1=value1,key2=value2)'
+      helm-set-secret-values:
+        description: 'Helm set secret values (comma-separated: key1=value1,key2=value2)'
         required: false
-      staging-helm-set-secret-values:
-        description: 'Staging Helm set secret values (comma-separated: key1=value1,key2=value2)'
-        required: false
-      production-helm-set-secret-values:
-        description: 'Production Helm set secret values (comma-separated: key1=value1,key2=value2)'
-        required: false
+
 
     outputs:
       version:
@@ -175,7 +120,7 @@ on:
 env:
   # Set default registry and image name
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
-  IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+  IMAGE_NAME: ${{ inputs.app-name || github.repository }}
 
 jobs:
   version:
@@ -295,7 +240,7 @@ jobs:
         with:
           # Required basics
           app_name: ${{ inputs.app-name }}
-          namespace: ${{ inputs.development-namespace }}
+          namespace: ${{ inputs.namespace }}
 
           # Use the downloaded chart directory/package directly
           chart: s9genericchart
@@ -318,69 +263,7 @@ jobs:
             image.pullSecret=sf9cr
             ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
             ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
-              ${{ inputs.development-helm-set-values }}
+              ${{ inputs.helm-set-values }}
               
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
-
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: [version, build]
-    if: inputs.deploy-to-staging && github.ref_name == 'staging'
-    environment: staging
-    steps:
-      - name: Download chart artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: helm-chart-${{ inputs.chart-name }}
-          path: ${{ inputs.chart-name }}
-
-      - name: Deploy to Staging (Unified Artifact-Based)
-        uses: simplify9/.github/.github/actions/helm-deploy-s9generic@main
-        env:
-          SECRET_VALUES: ${{ secrets.staging-helm-set-secret-values }}
-        with:
-          chart-name: ${{ inputs.chart-name }}
-          chart-version: ${{ needs.version.outputs.version }}
-          chart-path: ${{ inputs.chart-name }}
-          kubeconfig: ${{ secrets.kubeconfig }}
-          release-name: ${{ inputs.chart-name }}-staging
-          namespace: ${{ inputs.staging-namespace }}
-          set-values: >-
-            image.repo=${{ format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
-            app.name=${{ inputs.app-name || inputs.chart-name }},
-            app.version=${{ needs.version.outputs.version }},
-            image.overrideName=${{ inputs.app-name || inputs.chart-name }},
-            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.staging-helm-set-values && format(',{0}', inputs.staging-helm-set-values) || '' }}
-          timeout: '5m'
-
-  deploy-production:
-    runs-on: ubuntu-latest
-    needs: [version, build]
-    if: inputs.deploy-to-production && (github.ref_name == 'main' || github.ref_name == 'master')
-    environment: production
-    steps:
-      - name: Download chart artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: helm-chart-${{ inputs.chart-name }}
-          path: ${{ inputs.chart-name }}
-
-      - name: Deploy to Production (Unified Artifact-Based)
-        uses: simplify9/.github/.github/actions/helm-deploy-s9generic@main
-        env:
-          SECRET_VALUES: ${{ secrets.production-helm-set-secret-values }}
-        with:
-          chart-name: ${{ inputs.chart-name }}
-          chart-version: ${{ needs.version.outputs.version }}
-          chart-path: ${{ inputs.chart-name }}
-          kubeconfig: ${{ secrets.kubeconfig }}
-          release-name: ${{ inputs.chart-name }}-prod
-          namespace: ${{ inputs.production-namespace }}
-          set-values: >-
-            image.repo=${{ format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
-            app.name=${{ inputs.app-name || inputs.chart-name }},
-            app.version=${{ needs.version.outputs.version }},
-            image.overrideName=${{ inputs.app-name || inputs.chart-name }},
-            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.production-helm-set-values && format(',{0}', inputs.production-helm-set-values) || '' }}
-          timeout: '5m'
