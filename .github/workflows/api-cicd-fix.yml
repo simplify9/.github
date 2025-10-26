@@ -363,26 +363,47 @@ jobs:
         with:
           name: helm-chart-${{ inputs.chart-name }}
           path: ${{ inputs.chart-name }}
- 
-      - name: Deploy to Development (Unified Artifact-Based)
-        uses: simplify9/.github/.github/actions/helm-deploy-temp@fix
-        env:
-          SECRET_VALUES: ${{ secrets.development-helm-set-secret-values }}
+
+      - name: Deploy to Development (via local composite action)
+        uses: ./.github/actions/helm-generic
         with:
-          chart-name: ${{ inputs.chart-name }}
-          chart-version: ${{ needs.version.outputs.version }}
-          chart-path: ${{ inputs.chart-name }}
-          kubeconfig: ${{ secrets.kubeconfig }}
-          release-name: ${{ inputs.chart-name }}-dev
+          # Required basics
+          app_name: ${{ inputs.helm-app-name || inputs.chart-name }}
           namespace: ${{ inputs.development-namespace }}
-          registry: ${{ env.CONTAINER_REGISTRY }}
-          set-values: >-
-            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }},
-            app.name=${{ inputs.helm-app-name || inputs.chart-name }},
-            app.version=${{ needs.version.outputs.version }},
-            image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }},
-            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format(',{0}', inputs.development-helm-set-values) || '' }}
-          timeout: '5m'
+
+          # Use the downloaded chart directory/package directly
+          chart: ${{ inputs.chart-name }}
+          chart_repo: ""                   # empty => don't add repo (local artifact)
+
+          # Service & image
+          service_target_port: '80'
+          image_repo: ${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }}
+          pull_secret: ${{ inputs.image-pull-secret || 'sf9cr' }}
+
+          # Ingress (dev)
+          ingress_host: ${{ inputs.development-ingress-host }}
+          ingress_tls_secret: ${{ inputs.development-ingress-tls-secret }}
+          ingress_cert_issuer: ${{ inputs.ingress-cert-issuer || 'letsencrypt-nginx' }}
+          ingress_proxy_body_size: ${{ inputs.ingress-proxy-body-size || '50m' }}
+          ingress_paths: |
+            - /
+            - /api
+            - /docs
+
+          # Helm timing/flags
+          helm_timeout: '5m'
+          extra_args: "--wait"
+
+          # Translate your previous comma-joined --set into line-based entries
+          extra_set_values: |
+            image.repo=${{ inputs.helm-image-repo || format('{0}/{1}', env.CONTAINER_REGISTRY, env.IMAGE_NAME) }}
+            app.name=${{ inputs.helm-app-name || inputs.chart-name }}
+            app.version=${{ needs.version.outputs.version }}
+            image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }}
+            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format('\n{0}', inputs.development-helm-set-values) || '' }}
+
+          # Kubeconfig (raw YAML or base64; your secret works for both)
+          kubeconfig_data: ${{ secrets.kubeconfig }}
 
   deploy-staging:
     runs-on: ubuntu-latest
