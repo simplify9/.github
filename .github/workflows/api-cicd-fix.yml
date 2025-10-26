@@ -400,8 +400,8 @@ jobs:
             app.name=${{ inputs.helm-app-name || inputs.chart-name }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }}
-            image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format('\n{0}', inputs.development-helm-set-values) || '' }}
-
+            image.overrideVersion=${{ needs.version.outputs.version }}
+              ${{ inputs.development-helm-set-values }}
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
 
