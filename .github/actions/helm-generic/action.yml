@@ -1,0 +1,200 @@
+name: 'Helm Deploy'
+description: 'Deploy a Helm chart to a Kubernetes cluster'
+
+inputs:
+  registry_profile:
+    description: "Profile code for dynamic kubeconfig/registry vars & secrets (e.g., S9, WISEWELL)"
+    required: false
+    default: S9
+  app_name:
+    description: "Application name (Helm release name)"
+    required: true
+  version:
+    description: "Logical version label (may be used in image tag selection)"
+    required: false
+    default: staging
+  namespace:
+    description: "Kubernetes namespace to deploy into"
+    required: true
+  chart:
+    description: "Chart name (local or from repo)"
+    required: false
+    default: s9genericchart
+  chart_repo:
+    description: "Helm repo URL providing the chart (ignored if chart is a path)"
+    required: false
+    default: "https://charts.sf9.io"
+  helm_timeout:
+    description: "Helm upgrade --timeout value"
+    required: false
+    default: 15m
+  extra_set_values:
+    description: |-
+      Optional multi-line string of additional Helm --set key=value pairs (one per line).
+    required: false
+    default: ''
+  extra_args:
+    description: "Raw extra args appended to helm upgrade (e.g. --debug)"
+    required: false
+    default: ''
+  ingress_paths:
+    description: |-
+      YAML list of ingress paths. Provide as a multi-line YAML sequence, e.g.:
+        - /
+        - /api
+        - /docs
+      Defaults to just the root path '/'. Each entry becomes --set ingress.paths[index]=<value>.
+    required: false
+    default: |-
+      - /
+  kubeconfig_data:
+    description: |-
+      Raw kubeconfig YAML or base64-encoded kubeconfig data. This replaces the dynamic secret (<PROFILE>_KUBECONFIG).
+      IMPORTANT: Passing sensitive data as a plain input may expose it in logs. Prefer keeping this workflow reusable only
+      in controlled contexts. Provide either the full YAML (containing apiVersion, clusters, users, etc.) or a base64 string
+      that decodes to the kubeconfig file contents.
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Derive sanitized branch name
+      id: branch
+      shell: bash
+      env:
+        GITHUB_REF_NAME: ${{ github.ref_name }}
+        GITHUB_REF: ${{ github.ref }}
+      run: |
+        set -euo pipefail
+        RAW_NAME="${GITHUB_REF_NAME:-}"
+        if [ -z "$RAW_NAME" ]; then
+          RAW_NAME="${GITHUB_REF##*/}" || RAW_NAME="detached"
+        fi
+        SANITIZED=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/-{2,}/-/g; s/^-+//; s/-+$//')
+        [ -z "$SANITIZED" ] && SANITIZED="detached"
+        SANITIZED=${SANITIZED:0:40}
+        echo "name=$SANITIZED" >> "$GITHUB_OUTPUT"
+        echo "BRANCH_SANITIZED=$SANITIZED" >> "$GITHUB_ENV"
+
+    - name: Process kubeconfig input
+      id: kube
+      shell: bash
+      env:
+        KUBECONFIG_DATA: ${{ inputs.kubeconfig_data }}
+      run: |
+        set -euo pipefail
+        DATA="${KUBECONFIG_DATA:-}"
+        if [ -z "$DATA" ]; then
+          echo "kubeconfig_data input is required but empty." >&2
+          exit 1
+        fi
+        if echo "$DATA" | grep -q 'apiVersion:'; then
+          printf "%s" "$DATA" > kubeconfig.yaml
+        else
+          echo "$DATA" | base64 -d > kubeconfig.yaml || { echo "Failed to base64 decode kubeconfig_data input" >&2; exit 1; }
+        fi
+        chmod 600 kubeconfig.yaml
+        echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
+
+    - name: Set KUBECONFIG env
+      shell: bash
+      run: echo "KUBECONFIG=${{ steps.kube.outputs.kubeconfig_path }}" >> "$GITHUB_ENV"
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: v3.14.4
+
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
+      with:
+        version: 'latest'
+
+    - name: Helm upgrade / install
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        CHART: ${{ inputs.chart }}
+        CHART_REPO: ${{ inputs.chart_repo }}
+        HELM_TIMEOUT: ${{ inputs.helm_timeout }}
+        EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
+        EXTRA_ARGS: ${{ inputs.extra_args }}
+        INGRESS_PATHS: ${{ inputs.ingress_paths }}
+        BRANCH: ${{ steps.branch.outputs.name }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "$CHART_REPO" ]; then
+          helm repo add s9generic "$CHART_REPO" 2>/dev/null || true
+          helm repo update >/dev/null
+          if [ "$CHART" = "s9genericchart" ]; then
+            CHART_REF="s9generic/$CHART"
+          else
+            CHART_REF="$CHART"
+          fi
+        else
+          CHART_REF="$CHART"
+        fi
+
+        # BASE_SET_ARGS now only covers mandatory intrinsic values; all other chart settings must be passed via
+        # extra_set_values (one per line) or extra_args. See modified input description for guidance.
+        BASE_SET_ARGS=(
+          --set app.name="${APP_NAME}"
+          --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
+        )
+
+        PATH_SET_ARGS=()
+        if [ -n "${INGRESS_PATHS// /}" ]; then
+          INDEX=0
+          CLEAN_PATHS="$(printf '%s' "$INGRESS_PATHS" | tr -d '\r')"
+          while IFS= read -r line; do
+            line="$(printf '%s' "$line" | sed -E 's/#.*$//')"
+            line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            [ -z "$line" ] && continue
+            P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
+            [ -z "$P" ] && continue
+            PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
+            INDEX=$((INDEX+1))
+          done <<< "$CLEAN_PATHS"
+        fi
+
+        EXTRA_SET_ARGS=""
+        if [ -n "${EXTRA_SET_VALUES// /}" ]; then
+          while IFS= read -r line; do
+            [ -z "${line}" ] && continue
+            KV=$(echo "$line" | sed 's/^ *//;s/ *$//')
+            [ -z "$KV" ] && continue
+            EXTRA_SET_ARGS+=" --set $KV"
+          done <<< "$EXTRA_SET_VALUES"
+        fi
+
+        echo "Executing Helm upgrade with base settings plus extras..."
+        echo "DEBUG: Raw INGRESS_PATHS value:" >&2
+        printf '%s\n' "$INGRESS_PATHS" >&2 || true
+        echo "DEBUG: Expanded PATH_SET_ARGS (count=${#PATH_SET_ARGS[@]}):" >&2
+        printf '  %s\n' "${PATH_SET_ARGS[@]}" >&2 || true
+
+        set -x
+        helm upgrade "${APP_NAME}" "$CHART_REF" \
+          --install \
+          --namespace "${NAMESPACE}" \
+          --create-namespace \
+          "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
+          --timeout "${HELM_TIMEOUT}" \
+          ${EXTRA_ARGS}
+        set +x
+
+    - name: Show release status
+      if: always()
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        NAMESPACE: ${{ inputs.namespace }}
+      run: |
+        set -euo pipefail
+        helm status "$APP_NAME" -n "$NAMESPACE" || true
+        echo "---"
+        kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$APP_NAME" || true
