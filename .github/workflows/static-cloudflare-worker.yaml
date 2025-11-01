@@ -40,7 +40,7 @@ on:
         type: boolean
       compatibility_date:
         description: Cloudflare Workers compatibility_date (YYYY-MM-DD)
-        required: true
+        required: false
         default: "2024-10-20"
         type: string
       route:
