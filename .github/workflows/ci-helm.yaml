@@ -97,6 +97,15 @@ on:
         default: |-
           - /
 
+      kubeconfig_data:
+        description: |-
+          Raw kubeconfig YAML or base64-encoded kubeconfig data. This replaces the dynamic secret (<PROFILE>_KUBECONFIG).
+          IMPORTANT: Passing sensitive data as a plain input may expose it in logs. Prefer keeping this workflow reusable only
+          in controlled contexts. Provide either the full YAML (containing apiVersion, clusters, users, etc.) or a base64 string
+          that decodes to the kubeconfig file contents.
+        required: true
+        type: string
+
     # No explicit secrets declared; they are resolved dynamically like <PROFILE>_KUBECONFIG.
 
 env:
@@ -118,8 +127,8 @@ env:
   EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
   EXTRA_ARGS: ${{ inputs.extra_args }}
   INGRESS_PATHS: ${{ inputs.ingress_paths }}
-  # Raw kubeconfig secret (non-normalized profile reference first)
-  KUBECONFIG_SECRET: ${{ secrets[format('{0}_KUBECONFIG', inputs.registry_profile)] }}
+  # Kubeconfig provided directly as workflow input (raw or base64)
+  KUBECONFIG_INPUT: ${{ inputs.kubeconfig_data }}
 
 concurrency:
   group: helm-${{ inputs.app_name }}-${{ inputs.version }}
@@ -149,35 +158,24 @@ jobs:
           echo "name=$SANITIZED" >> "$GITHUB_OUTPUT"
           echo "BRANCH_SANITIZED=$SANITIZED" >> "$GITHUB_ENV"
 
-      - name: Normalize profile case
-        id: norm
-        shell: bash
-        env:
-          PROFILE: ${{ inputs.registry_profile }}
-        run: |
-          set -euo pipefail
-          UP=$(printf "%s" "$PROFILE" | tr '[:lower:]' '[:upper:]')
-          echo "profile_upper=$UP" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve kubeconfig secret (normalized preference)
+      - name: Process kubeconfig input
         id: kube
         shell: bash
         env:
-          KUBE_RAW: ${{ env.KUBECONFIG_SECRET }}
-          KUBE_UP: ${{ secrets[format('{0}_KUBECONFIG', steps.norm.outputs.profile_upper)] }}
+          KUBECONFIG_DATA: ${{ env.KUBECONFIG_INPUT }}
         run: |
           set -euo pipefail
-          DATA="${KUBE_UP:-${KUBE_RAW:-}}"
+          DATA="${KUBECONFIG_DATA:-}"
           if [ -z "$DATA" ]; then
-            echo "Kubeconfig secret missing. Define secret: ${{ steps.norm.outputs.profile_upper }}_KUBECONFIG (or lower-case variant)." >&2
+            echo "kubeconfig_data input is required but empty." >&2
             exit 1
           fi
-          # Detect if base64 or raw (very lightweight heuristic)
-            if echo "$DATA" | grep -q 'apiVersion:'; then
-              printf "%s" "$DATA" > kubeconfig.yaml
-            else
-              echo "$DATA" | base64 -d > kubeconfig.yaml || { echo "Failed to base64 decode kubeconfig secret" >&2; exit 1; }
-            fi
+          # Detect if base64 or raw (heuristic: look for apiVersion: substring)
+          if echo "$DATA" | grep -q 'apiVersion:'; then
+            printf "%s" "$DATA" > kubeconfig.yaml
+          else
+            echo "$DATA" | base64 -d > kubeconfig.yaml || { echo "Failed to base64 decode kubeconfig_data input" >&2; exit 1; }
+          fi
           chmod 600 kubeconfig.yaml
           echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
 

@@ -1,7 +1,0 @@
-{
-  "name": "Build Docker Image via Reusable Workflow",
-  "description": "Build and push a Docker image using the org reusable workflow.",
-  "iconName": "octicon-rocket",
-  "categories": ["Continuous integration", "Docker"],
-  "filePatterns": ["Dockerfile"]
-}

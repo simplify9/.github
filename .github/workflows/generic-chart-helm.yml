@@ -1,0 +1,268 @@
+name: 'API CI/CD Pipeline (reusable)'
+
+on:
+  workflow_call:
+    inputs:
+      # Version configuration (for version job)
+      major-version:
+        description: 'Major version number'
+        required: false
+        default: '1'
+        type: string
+      minor-version:
+        description: 'Minor version number'
+        required: false
+        default: '0'
+        type: string
+      
+      # Docker configuration (for build job)
+      dockerfile-path:
+        description: 'Path to Dockerfile'
+        required: false
+        default: './Dockerfile'
+        type: string
+      docker-context:
+        description: 'Docker build context'
+        required: false
+        default: '.'
+        type: string
+      docker-platforms:
+        description: 'Target platforms for Docker build'
+        required: false
+        default: 'linux/amd64'
+        type: string
+      
+
+      # Registry configuration (for build job)
+      container-registry:
+        description: 'Container registry (docker.io, ghcr.io, etc.)'
+        required: false
+        default: 'ghcr.io'
+        type: string
+            
+      namespace:
+        description: 'Kubernetes namespace for development'
+        required: false
+        default: 'development'
+        type: string
+      helm-set-values:
+        description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
+        required: false
+        type: string
+      
+
+      # Dynamic deployment value inputs (generic, not prefixed with environment)
+      environment:
+        description: 'Value for environment Helm set (e.g., Development, Staging)'
+        required: false
+        type: string
+      app-name:
+        description: 'Application name for app.name Helm value (overrides helm-app-name)'
+        required: false
+        type: string
+      ingress-host:
+        description: 'Primary ingress host (maps to ingress.hosts[0].host)'
+        required: false
+        type: string
+      service-target-port:
+        description: 'Service targetPort (maps to service.targetPort)'
+        required: false
+        type: string
+      ingress-hosts:
+        description: 'Comma-separated list of ingress hosts (maps to ingress.hosts[i].host)'
+        required: false
+        type: string
+      ingress-paths:
+        description: 'Comma-separated list of ingress paths (maps to ingress.paths[i])'
+        required: false
+        type: string
+      ingress-tls-secrets:
+        description: 'Comma or newline separated list of TLS secrets matching ingress-hosts by index; falls back to ingress-tls-secret if absent'
+        required: false
+        type: string
+
+    secrets:
+      # Container registry secrets
+      registry-username:
+        description: 'Container registry username'
+        required: false
+      registry-password:
+        description: 'Container registry password/token'
+        required: false
+      
+      # Kubernetes secrets
+      kubeconfig:
+        description: 'Base64 encoded kubeconfig'
+        required: false
+      
+      # GitHub token for tagging
+      github-token:
+        description: 'GitHub token for tagging'
+        required: false
+      
+      # Secret deployment values (ordered by deployment stages)
+      helm-set-secret-values:
+        description: 'Helm set secret values (comma-separated: key1=value1,key2=value2)'
+        required: false
+
+
+    outputs:
+      version:
+        description: 'Generated semantic version'
+        value: ${{ jobs.version.outputs.version }}
+      docker-image:
+        description: 'Built Docker image with tag'
+        value: ${{ jobs.build.outputs.docker-image }}
+      helm-chart:
+        description: 'Published Helm chart URL'
+        value: ${{ jobs.build.outputs.helm-chart }}
+
+env:
+  # Set default registry and image name
+  CONTAINER_REGISTRY: ${{ inputs.container-registry }}
+  IMAGE_NAME: ${{ inputs.app-name || github.repository }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: ${{ inputs.major-version }}
+          minor: ${{ inputs.minor-version }}
+ 
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ steps.semver.outputs.version }}
+          sha: ${{ github.sha }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: version
+    outputs:
+      docker-image: ${{ steps.docker.outputs.image-tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and push Docker image
+        id: docker
+        uses: simplify9/.github/.github/actions/docker-build-push@main
+        with:
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          image-name: ${{ env.IMAGE_NAME }}
+          version: ${{ needs.version.outputs.version }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          dockerfile: ${{ inputs.dockerfile-path }}
+          context: ${{ inputs.docker-context }}
+          platforms: ${{ inputs.docker-platforms }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    environment: development
+    steps:
+
+      - name: Generate dynamic ingress values
+        id: ingress
+        shell: bash
+        run: |
+          HOSTS_INPUT="${{ inputs.ingress-hosts }}"
+          PATHS_INPUT="${{ inputs.ingress-paths }}"
+          TLS_ARRAY_INPUT="${{ inputs.ingress-tls-secrets }}"
+
+          # Supports both comma-separated and multiline YAML block scalar inputs.
+          # Example multiline usage:
+          # ingress-hosts: |
+          #   host1.example.com
+          #   host2.example.com
+          # ingress-paths: |
+          #   /api
+          #   /docs
+          #   /metrics
+
+          OUTPUT=""
+
+          if [ -n "$HOSTS_INPUT" ]; then
+            HOSTS_CLEAN=$(echo "$HOSTS_INPUT" | sed 's/\r//g' | tr ',' '\n')
+            # Prepare TLS secrets list if provided
+            if [ -n "$TLS_ARRAY_INPUT" ]; then
+              TLS_CLEAN=$(echo "$TLS_ARRAY_INPUT" | sed 's/\r//g' | tr ',' '\n')
+              mapfile -t TLS_LIST < <(echo "$TLS_CLEAN" | grep -v '^[[:space:]]*$') || true
+            fi
+            INDEX=0
+            while IFS= read -r line; do
+              host=$(echo "$line" | xargs)
+              [ -z "$host" ] && continue
+              OUTPUT+="ingress.hosts[$INDEX].host=$host\n"
+              host_tls=""
+              if [ -n "$TLS_ARRAY_INPUT" ] && [ $INDEX -lt ${#TLS_LIST[@]} ]; then
+                host_tls=$(echo "${TLS_LIST[$INDEX]}" | xargs)
+              fi
+              if [ -n "$host_tls" ]; then
+                OUTPUT+="ingress.hosts[$INDEX].tlsSecret=$host_tls\n"
+              fi
+              INDEX=$((INDEX+1))
+            done <<< "$HOSTS_CLEAN"
+          fi
+
+          if [ -n "$PATHS_INPUT" ]; then
+            PATHS_CLEAN=$(echo "$PATHS_INPUT" | sed 's/\r//g' | tr ',' '\n')
+            PINDEX=0
+            while IFS= read -r line; do
+              path=$(echo "$line" | xargs)
+              [ -z "$path" ] && continue
+              OUTPUT+="ingress.paths[$PINDEX]=$path\n"
+              PINDEX=$((PINDEX+1))
+            done <<< "$PATHS_CLEAN"
+          fi
+
+          {
+            echo "ingress-values<<EOF"
+            echo -e "$OUTPUT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Development (via local composite action)
+        uses: simplify9/.github/.github/actions/helm-generic@main
+        with:
+          # Required basics
+          app_name: ${{ inputs.app-name }}
+          namespace: ${{ inputs.namespace }}
+
+          # Use the downloaded chart directory/package directly
+          chart: s9genericchart
+          chart_repo: "https://charts.sf9.io"
+
+          # Helm timing/flags
+          helm_timeout: '5m'
+          extra_args: "--wait"
+
+          # Translate your previous comma-joined --set into line-based entries
+          extra_set_values: |
+            image.repo=${{ env.CONTAINER_REGISTRY }}
+            app.name=${{ inputs.app-name }}
+            app.version=${{ needs.version.outputs.version }}
+            image.overrideName=${{ inputs.app-name }}
+            image.overrideVersion=${{ needs.version.outputs.version }}
+            environment=${{ inputs.environment }}
+            service.targetPort=${{ inputs.service-target-port }}
+            ${{ steps.ingress.outputs.ingress-values }}
+            image.pullSecret=sf9cr
+            ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
+            ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
+              ${{ inputs.helm-set-values }}
+              
+          # Kubeconfig (raw YAML or base64; your secret works for both)
+          kubeconfig_data: ${{ secrets.kubeconfig }}
