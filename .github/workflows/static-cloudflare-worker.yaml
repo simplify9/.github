@@ -112,15 +112,15 @@ jobs:
             npm run lint
           fi
 
-      - name: Build Next.js
-        run: |
-          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
-            yarn ${{ inputs.build_script }}
-          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
-            pnpm ${{ inputs.build_script }}
-          else
-            npm run ${{ inputs.build_script }}
-          fi
+    #   - name: Build Next.js
+    #     run: |
+    #       if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+    #         yarn ${{ inputs.build_script }}
+    #       elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+    #         pnpm ${{ inputs.build_script }}
+    #       else
+    #         npm run ${{ inputs.build_script }}
+    #       fi
 
       - name: Build Cloudflare Workers bundle (next-on-pages)
         run: npx @cloudflare/next-on-pages@${{ inputs.next_on_pages_version }}
