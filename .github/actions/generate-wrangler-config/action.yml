@@ -1,0 +1,62 @@
+name: "Generate wrangler.toml"
+description: "Generates a wrangler.toml file dynamically for Cloudflare Workers"
+author: "Simplify9"
+inputs:
+  COMPATIBILITY_DATE:
+    description: "Wrangler compatibility_date (e.g. 2024-10-20)"
+    required: true
+    default: "2024-10-20"
+  ROUTE:
+    description: "Route pattern (e.g. example.com/*)"
+    required: true
+  PROJECT_NAME:
+    description: "General Project Name"
+    required: true
+  ENVIRONMENT:
+    description: "Deployment environment name (e.g. production, staging)"
+    required: false
+    default: "production"
+  ASSETS_DIR:
+    description: "Directory for static assets served (wrangler [assets] directory)"
+    required: false
+    default: ".vercel/output/static"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate wrangler.toml
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        COMPAT_DATE="${{ inputs.COMPATIBILITY_DATE }}"
+        ROUTE="${{ inputs.ROUTE }}"
+        PROJECT_NAME="${{ inputs.PROJECT_NAME }}"
+        ENVIRONMENT="${{ inputs.ENVIRONMENT }}"
+        ASSETS_DIR="${{ inputs.ASSETS_DIR }}"
+
+        [ -z "$COMPAT_DATE" ] && echo "Missing COMPATIBILITY_DATE" && exit 1
+        [ -z "$ROUTE" ] && echo "Missing ROUTE" && exit 1
+        [ -z "$PROJECT_NAME" ] && echo "Missing PROJECT_NAME" && exit 1
+
+        TRIMMED="$(echo "$ROUTE" | xargs)"
+
+        cat > wrangler.toml <<EOF
+    
+        name = "${PROJECT_NAME}"
+        compatibility_date = "${COMPAT_DATE}"
+        compatibility_flags = ["nodejs_compat"]
+
+        [assets]
+        directory = "./${ASSETS_DIR}"
+
+        [env.${ENVIRONMENT}]
+        name = "${PROJECT_NAME}-${ENVIRONMENT}"
+        [[env.${ENVIRONMENT}.routes]]
+        pattern = "${TRIMMED}"
+        custom_domain = true
+        EOF
+
+        echo "Generated wrangler.toml:"
+        echo "---------------------------"
+        cat wrangler.toml
