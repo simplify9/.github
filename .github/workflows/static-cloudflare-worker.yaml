@@ -41,6 +41,7 @@ on:
       compatibility_date:
         description: Cloudflare Workers compatibility_date (YYYY-MM-DD)
         required: true
+        default: "2024-10-20"
         type: string
       route:
         description: Route / custom domain for the Worker (e.g., example.com)
@@ -140,7 +141,7 @@ jobs:
           ASSETS_DIR: ${{ inputs.assets_dir }}
 
       - name: Deploy with Wrangler
-        uses: cloudflare/wrangler-action@${{ inputs.wrangler_action_version }}
+        uses: cloudflare/wrangler-action@v3
         with:
           command: deploy --env ${{ inputs.environment }}
           apiToken: ${{ secrets.cloudflare_api_token }}
