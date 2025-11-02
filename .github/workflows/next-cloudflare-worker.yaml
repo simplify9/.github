@@ -132,7 +132,7 @@ jobs:
           PROJECT_NAME: ${{ inputs.project_name }}
           ENVIRONMENT: ${{ inputs.environment }}
           ASSETS_DIR: ${{ inputs.assets_dir }}
-          BUILD_FOR_OPENNEXT: "true"
+          BUILD_FOR_OPENNEXT: "false"
 
       - name: Build Cloudflare Workers bundle (OpenNext.js)
         run: npx opennextjs-cloudflare build
