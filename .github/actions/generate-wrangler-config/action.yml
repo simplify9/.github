@@ -46,18 +46,8 @@ runs:
 
         TRIMMED="$(echo "$ROUTE" | xargs)"
 
-        # Start building wrangler.toml content
         cat > wrangler.toml <<EOF
-        EOF
-
-        # Add main entry if BUILD_FOR_OPENNEXT is true
-        if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
-          echo 'main = ".open-next/worker.js"' >> wrangler.toml
-          echo '' >> wrangler.toml
-        fi
-
-        # Add the rest of the configuration
-        cat >> wrangler.toml <<EOF
+    
         name = "${PROJECT_NAME}"
         compatibility_date = "${COMPAT_DATE}"
         compatibility_flags = ["nodejs_compat"]
@@ -74,9 +64,14 @@ runs:
 
         EOF
 
-        # Add ASSETS binding if BUILD_FOR_OPENNEXT is true
+
+        # Add ASSETS binding and main entry if BUILD_FOR_OPENNEXT is true
         if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
+          echo '' >> wrangler.toml
+          sed -i '1imain = ".open-next/worker.js"' wrangler.toml
           echo 'binding = "ASSETS"' >> wrangler.toml
-        fi        echo "Generated wrangler.toml:"
+        fi
+
+        echo "Generated wrangler.toml:"
         echo "---------------------------"
         cat wrangler.toml
