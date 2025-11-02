@@ -114,7 +114,7 @@ jobs:
 
 
       - name: Install OpenNext.js Cloudflare adapter
-        run: npm install -g @opennextjs/cloudflare@${{ inputs.opennextjs_version }}
+        run: npm i @opennextjs/cloudflare@${{ inputs.opennextjs_version }}
 
       - name: Create OpenNext.js configuration
         run: |
