@@ -61,13 +61,14 @@ runs:
         
         [assets]
         directory = "./${ASSETS_DIR}"
-        
+
         EOF
 
 
-        # Add ASSETS binding if BUILD_FOR_OPENNEXT is true
+        # Add ASSETS binding and main entry if BUILD_FOR_OPENNEXT is true
         if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
           echo '' >> wrangler.toml
+          echo 'main = ".open-next/worker.js"' >> wrangler.toml
           echo 'binding = "ASSETS"' >> wrangler.toml
         fi
 
