@@ -124,10 +124,6 @@ jobs:
           export default defineCloudflareConfig();
           EOF
 
-      - name: Build Cloudflare Workers bundle (OpenNext.js)
-        run: npx opennextjs-cloudflare build
-
-
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
@@ -137,6 +133,10 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           ASSETS_DIR: ${{ inputs.assets_dir }}
           BUILD_FOR_OPENNEXT: "true"
+
+      - name: Build Cloudflare Workers bundle (OpenNext.js)
+        run: npx opennextjs-cloudflare build
+
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
