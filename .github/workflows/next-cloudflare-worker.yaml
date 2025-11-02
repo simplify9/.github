@@ -46,9 +46,9 @@ on:
         required: true
         type: string
       assets_dir:
-        description: Directory with static assets (usually .vercel/output/static)
+        description: Directory with static assets (usually .open-next/assets)
         required: false
-        default: ".vercel/output/static"
+        default: ".open-next/assets"
         type: string
       wrangler_action_version:
         description: Version tag for cloudflare/wrangler-action
