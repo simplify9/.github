@@ -57,10 +57,13 @@ runs:
         [[env.${ENVIRONMENT}.routes]]
         pattern = "${TRIMMED}"
         custom_domain = true
-        EOF
 
+        
         [assets]
         directory = "./${ASSETS_DIR}"
+        
+        EOF
+
 
         # Add ASSETS binding if BUILD_FOR_OPENNEXT is true
         if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
