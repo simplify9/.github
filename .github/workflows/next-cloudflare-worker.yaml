@@ -125,7 +125,7 @@ jobs:
           EOF
 
       - name: Build Cloudflare Workers bundle (OpenNext.js)
-        run: opennextjs-cloudflare build
+        run: npx opennextjs-cloudflare build
 
 
       - name: Generate wrangler.toml
