@@ -118,7 +118,7 @@ jobs:
 
       - name: Create OpenNext.js configuration
         run: |
-          cat > cloudflare.config.js << 'EOF'
+          cat > open-next.config.js << 'EOF'
           import { defineCloudflareConfig } from "@opennextjs/cloudflare";
 
           export default defineCloudflareConfig();
