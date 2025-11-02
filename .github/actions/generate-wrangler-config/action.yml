@@ -20,6 +20,10 @@ inputs:
     description: "Directory for static assets served (wrangler [assets] directory)"
     required: false
     default: ".vercel/output/static"
+  BUILD_FOR_OPENNEXT:
+    description: "Build for OpenNext (adds ASSETS binding)"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -34,6 +38,7 @@ runs:
         PROJECT_NAME="${{ inputs.PROJECT_NAME }}"
         ENVIRONMENT="${{ inputs.ENVIRONMENT }}"
         ASSETS_DIR="${{ inputs.ASSETS_DIR }}"
+        BUILD_FOR_OPENNEXT="${{ inputs.BUILD_FOR_OPENNEXT }}"
 
         [ -z "$COMPAT_DATE" ] && echo "Missing COMPATIBILITY_DATE" && exit 1
         [ -z "$ROUTE" ] && echo "Missing ROUTE" && exit 1
@@ -47,15 +52,21 @@ runs:
         compatibility_date = "${COMPAT_DATE}"
         compatibility_flags = ["nodejs_compat"]
 
-        [assets]
-        directory = "./${ASSETS_DIR}"
-
         [env.${ENVIRONMENT}]
         name = "${PROJECT_NAME}-${ENVIRONMENT}"
         [[env.${ENVIRONMENT}.routes]]
         pattern = "${TRIMMED}"
         custom_domain = true
         EOF
+
+        [assets]
+        directory = "./${ASSETS_DIR}"
+
+        # Add ASSETS binding if BUILD_FOR_OPENNEXT is true
+        if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
+          echo '' >> wrangler.toml
+          echo 'binding = "ASSETS"' >> wrangler.toml
+        fi
 
         echo "Generated wrangler.toml:"
         echo "---------------------------"
