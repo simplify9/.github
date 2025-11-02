@@ -116,6 +116,13 @@ jobs:
       - name: Install OpenNext.js Cloudflare adapter
         run: npm install -g @opennextjs/cloudflare@${{ inputs.opennextjs_version }}
 
+      - name: Create OpenNext.js configuration
+        run: |
+          cat > cloudflare.config.js << 'EOF'
+          import { defineCloudflareConfig } from "@opennextjs/cloudflare";
+
+          export default defineCloudflareConfig();
+          EOF
 
       - name: Build Cloudflare Workers bundle (OpenNext.js)
         run: opennextjs-cloudflare build
