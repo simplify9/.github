@@ -123,7 +123,9 @@ jobs:
 
           export default defineCloudflareConfig();
           EOF
-
+      - name: Install Wrangler
+        run: npm install --no-save wrangler
+        
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
