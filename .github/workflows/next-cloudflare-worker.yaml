@@ -122,10 +122,9 @@ jobs:
           import { defineCloudflareConfig } from "@opennextjs/cloudflare";
 
           export default defineCloudflareConfig();
-          EOF
       - name: Install Wrangler
-        run: npm install --no-save wrangler
-        
+        run: npm install wrangler --no-save --legacy-peer-deps --no-package-lock
+
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
