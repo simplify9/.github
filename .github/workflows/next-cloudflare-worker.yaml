@@ -112,10 +112,6 @@ jobs:
             npm run ${{ inputs.build_script }}
           fi
 
-
-      - name: Install OpenNext.js Cloudflare adapter
-        run: npm install --no-save --legacy-peer-deps @opennextjs/cloudflare@${{ inputs.opennextjs_version }}
-
       - name: Create OpenNext.js configuration
         run: |
           cat > open-next.config.ts << 'EOF'
@@ -137,9 +133,12 @@ jobs:
           ASSETS_DIR: ${{ inputs.assets_dir }}
           BUILD_FOR_OPENNEXT: "true"
 
+      - name: Install OpenNext.js Cloudflare adapter
+        run: npm install @opennextjs/cloudflare@1.11.0 --no-save --force --no-package-lock
+
       - name: List local binaries
         run: ls -la node_modules/.bin
-        
+
       - name: Build Cloudflare Workers bundle (OpenNext.js)
         run: npx ./node_modules/.bin/opennextjs-cloudflare build
 
