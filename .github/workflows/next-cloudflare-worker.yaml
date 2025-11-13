@@ -140,7 +140,7 @@ jobs:
         run: ls -la node_modules/.bin
 
       - name: Build Cloudflare Workers bundle (OpenNext.js)
-        run: npx ./node_modules/.bin/opennextjs-cloudflare build
+        run: npx opennextjs-cloudflare build
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
