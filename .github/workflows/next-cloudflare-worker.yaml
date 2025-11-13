@@ -137,9 +137,11 @@ jobs:
           ASSETS_DIR: ${{ inputs.assets_dir }}
           BUILD_FOR_OPENNEXT: "true"
 
-
+      - name: List local binaries
+        run: ls -la node_modules/.bin
+        
       - name: Build Cloudflare Workers bundle (OpenNext.js)
-        run: npx opennext build --target cloudflare
+        run: npx ./node_modules/.bin/opennextjs-cloudflare build
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
