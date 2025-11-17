@@ -1,0 +1,131 @@
+name: Reusable — Deploy Next.js to Cloudflare Workers
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: Node.js version to use
+        required: false
+        default: "20"
+        type: string
+      package_manager:
+        description: One of npm|yarn|pnpm (used for caching + install command)
+        required: false
+        default: "yarn"
+        type: string
+      install_args:
+        description: Extra args for install (e.g., --frozen-lockfile)
+        required: false
+        default: "--frozen-lockfile"
+        type: string
+      run_lint:
+        description: Run `lint` step (expects a matching script)
+        required: false
+        default: true
+        type: boolean
+      build_script:
+        description: Package script to build Vite project (e.g., build)
+        required: false
+        default: "build"
+        type: string
+      compatibility_date:
+        description: Cloudflare Workers compatibility_date (YYYY-MM-DD)
+        required: false
+        default: "2024-10-20"
+        type: string
+      route:
+        description: Route / custom domain for the Worker (e.g., example.com)
+        required: true
+        type: string
+      project_name:
+        description: Base Worker project name (without env suffix)
+        required: true
+        type: string
+      environment:
+        description: Wrangler environment name (e.g., staging, production)
+        required: true
+        type: string
+      assets_dir:
+        description: Directory with static assets (usually .vercel/output/static)
+        required: false
+        default: "dist"
+        type: string
+      wrangler_action_version:
+        description: Version tag for cloudflare/wrangler-action
+        required: false
+        default: "v3"
+        type: string
+    secrets:
+      cloudflare_api_token:
+        description: Cloudflare API token with Workers + DNS permissions as needed
+        required: true
+      cloudflare_account_id:
+        description: Cloudflare Account ID
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: ${{ inputs.package_manager }}
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+            yarn install ${{ inputs.install_args }}
+          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+            corepack enable
+            pnpm install ${{ inputs.install_args }}
+          else
+            npm ci
+          fi
+
+      - name: Lint
+        if: ${{ inputs.run_lint }}
+        run: |
+          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+            yarn lint
+          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+            pnpm lint
+          else
+            npm run lint
+          fi
+
+      - name: Build Vite Project
+        run: |
+          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
+            yarn ${{ inputs.build_script }}
+          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
+            pnpm ${{ inputs.build_script }}
+          else
+            npm run ${{ inputs.build_script }}
+          fi
+
+      - name: Generate wrangler.toml
+        uses: simplify9/.github/.github/actions/generate-wrangler-config@main
+        with:
+          COMPATIBILITY_DATE: ${{ inputs.compatibility_date }}
+          ROUTE: ${{ inputs.route }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          ASSETS_DIR: ${{ inputs.assets_dir }}
+          MAIN_ENTRY: "worker.js"
+          ADD_ASSETS_BINDING: "true"         
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          command: deploy --env ${{ inputs.environment }}
+          apiToken: ${{ secrets.cloudflare_api_token }}
+          accountId: ${{ secrets.cloudflare_account_id }}

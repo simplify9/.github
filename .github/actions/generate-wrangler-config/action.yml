@@ -1,6 +1,7 @@
 name: "Generate wrangler.toml"
 description: "Generates a wrangler.toml file dynamically for Cloudflare Workers"
 author: "Simplify9"
+
 inputs:
   COMPATIBILITY_DATE:
     description: "Wrangler compatibility_date (e.g. 2024-10-20)"
@@ -21,7 +22,15 @@ inputs:
     required: false
     default: ".vercel/output/static"
   BUILD_FOR_OPENNEXT:
-    description: "Build for OpenNext (adds ASSETS binding)"
+    description: "Build for OpenNext (uses .open-next/worker.js as main and adds ASSETS binding)"
+    required: false
+    default: "false"
+  MAIN_ENTRY:
+    description: "Optional explicit Worker main entry (e.g. worker.js). If empty, no main is written unless BUILD_FOR_OPENNEXT=true."
+    required: false
+    default: ""
+  ADD_ASSETS_BINDING:
+    description: "If true, add binding = \"ASSETS\" under [assets] (in addition to OpenNext behavior)."
     required: false
     default: "false"
 
@@ -39,6 +48,8 @@ runs:
         ENVIRONMENT="${{ inputs.ENVIRONMENT }}"
         ASSETS_DIR="${{ inputs.ASSETS_DIR }}"
         BUILD_FOR_OPENNEXT="${{ inputs.BUILD_FOR_OPENNEXT }}"
+        MAIN_ENTRY_INPUT="${{ inputs.MAIN_ENTRY }}"
+        ADD_ASSETS_BINDING="${{ inputs.ADD_ASSETS_BINDING }}"
 
         [ -z "$COMPAT_DATE" ] && echo "Missing COMPATIBILITY_DATE" && exit 1
         [ -z "$ROUTE" ] && echo "Missing ROUTE" && exit 1
@@ -46,9 +57,28 @@ runs:
 
         TRIMMED="$(echo "$ROUTE" | xargs)"
 
+        # Decide main entry:
+        # - If BUILD_FOR_OPENNEXT=true: keep previous behavior -> .open-next/worker.js
+        # - Else if MAIN_ENTRY is set: use that
+        # - Else: no main line (backwards compatible for non-OpenNext callers)
+        MAIN_LINE=""
+        if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
+          MAIN_LINE='main = ".open-next/worker.js"'
+        elif [ -n "$MAIN_ENTRY_INPUT" ]; then
+          MAIN_LINE="main = \"${MAIN_ENTRY_INPUT}\""
+        fi
+
+        # Decide assets binding:
+        # - Previously only added when BUILD_FOR_OPENNEXT=true
+        # - Now can also be added when ADD_ASSETS_BINDING=true
+        ASSETS_BINDING_LINE=""
+        if [ "$BUILD_FOR_OPENNEXT" = "true" ] || [ "$ADD_ASSETS_BINDING" = "true" ]; then
+          ASSETS_BINDING_LINE='binding = "ASSETS"'
+        fi
+
         cat > wrangler.toml <<EOF
-    
         name = "${PROJECT_NAME}"
+        ${MAIN_LINE}
         compatibility_date = "${COMPAT_DATE}"
         compatibility_flags = ["nodejs_compat"]
 
@@ -58,19 +88,10 @@ runs:
         pattern = "${TRIMMED}"
         custom_domain = true
 
-        
         [assets]
         directory = "./${ASSETS_DIR}"
-
+        ${ASSETS_BINDING_LINE}
         EOF
-
-
-        # Add ASSETS binding and main entry if BUILD_FOR_OPENNEXT is true
-        if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
-          echo '' >> wrangler.toml
-          sed -i '1imain = ".open-next/worker.js"' wrangler.toml
-          echo 'binding = "ASSETS"' >> wrangler.toml
-        fi
 
         echo "Generated wrangler.toml:"
         echo "---------------------------"
