@@ -112,6 +112,16 @@ jobs:
             npm run ${{ inputs.build_script }}
           fi
 
+      - name: Generate worker.js for static Vite app
+        run: |
+          cat > worker.js << 'EOF'
+          export default {
+            async fetch(request, env, ctx) {
+              return env.ASSETS.fetch(request);
+            },
+          };
+          EOF
+          
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
