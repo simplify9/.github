@@ -135,9 +135,27 @@ jobs:
           cat > worker.js << 'EOF'
           export default {
             async fetch(request, env, ctx) {
-              return env.ASSETS.fetch(request);
+              const url = new URL(request.url);
+
+              // 1) Try to serve the static asset first
+              let response = await env.ASSETS.fetch(request);
+
+              // 2) If the asset wasn't found *and* this looks like a browser navigation,
+              //    fall back to index.html so the client-side router can take over.
+              if (
+                response.status === 404 &&
+                request.method === 'GET' &&
+                (request.headers.get('accept') || '').includes('text/html')
+              ) {
+                const indexUrl = new URL('/', url);
+                const indexRequest = new Request(indexUrl.toString(), request);
+                response = await env.ASSETS.fetch(indexRequest);
+              }
+
+              return response;
             },
           };
+
           EOF
 
       - name: Generate wrangler.toml
