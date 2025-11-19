@@ -262,7 +262,7 @@ jobs:
             image.pullSecret=sf9cr
             ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
             ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
-              ${{ inputs.helm-set-values }}
+            ${{ inputs.helm-set-values }}
               
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
