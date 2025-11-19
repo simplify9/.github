@@ -1,4 +1,4 @@
-name: Reusable — Deploy Next.js to Cloudflare Workers
+name: Deploy Vite to Cloudflare Workers
 
 on:
   workflow_call:
@@ -55,6 +55,16 @@ on:
         required: false
         default: "v3"
         type: string
+      pre_build_commands:
+        description: |-
+          Optional multi-line shell commands to run before the Vite build.
+          Example:
+            echo "Generating assets" && ./scripts/gen-assets.sh
+            yarn prisma generate
+          Leave empty for no pre-build actions.
+        required: false
+        default: ""
+        type: string
     secrets:
       cloudflare_api_token:
         description: Cloudflare API token with Workers + DNS permissions as needed
@@ -102,6 +112,14 @@ jobs:
             npm run lint
           fi
 
+      - name: Pre-Build Custom Commands
+        if: ${{ inputs.pre_build_commands != '' }}
+        run: |
+          echo "Running custom pre-build commands";
+          bash -e <<'EOF'
+          ${{ inputs.pre_build_commands }}
+          EOF
+
       - name: Build Vite Project
         run: |
           if [ "${{ inputs.package_manager }}" = "yarn" ]; then
@@ -121,7 +139,7 @@ jobs:
             },
           };
           EOF
-          
+
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
