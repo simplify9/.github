@@ -8,7 +8,7 @@ inputs:
     required: true
     default: "2024-10-20"
   ROUTE:
-    description: "Route pattern (e.g. example.com/*)"
+    description: "Route pattern or newline-separated list (e.g. example.com/*)"
     required: true
   PROJECT_NAME:
     description: "General Project Name"
@@ -43,7 +43,7 @@ runs:
         set -euo pipefail
 
         COMPAT_DATE="${{ inputs.COMPATIBILITY_DATE }}"
-        ROUTE="${{ inputs.ROUTE }}"
+        ROUTE_INPUT="${{ inputs.ROUTE }}"
         PROJECT_NAME="${{ inputs.PROJECT_NAME }}"
         ENVIRONMENT="${{ inputs.ENVIRONMENT }}"
         ASSETS_DIR="${{ inputs.ASSETS_DIR }}"
@@ -52,10 +52,30 @@ runs:
         ADD_ASSETS_BINDING="${{ inputs.ADD_ASSETS_BINDING }}"
 
         [ -z "$COMPAT_DATE" ] && echo "Missing COMPATIBILITY_DATE" && exit 1
-        [ -z "$ROUTE" ] && echo "Missing ROUTE" && exit 1
+        [ -z "$ROUTE_INPUT" ] && echo "Missing ROUTE" && exit 1
         [ -z "$PROJECT_NAME" ] && echo "Missing PROJECT_NAME" && exit 1
 
-        TRIMMED="$(echo "$ROUTE" | xargs)"
+        ROUTES=()
+        while IFS= read -r raw_route; do
+          TRIMMED_ROUTE="$(echo "$raw_route" | xargs)"
+          [ -z "$TRIMMED_ROUTE" ] && continue
+          ROUTES+=("$TRIMMED_ROUTE")
+        done <<< "$ROUTE_INPUT"
+
+        if [ "${#ROUTES[@]}" -eq 0 ]; then
+          echo "No valid ROUTE entries provided" >&2
+          exit 1
+        fi
+
+        ROUTE_BLOCKS=""
+        for ROUTE in "${ROUTES[@]}"; do
+          ROUTE_BLOCK="[[env.${ENVIRONMENT}.routes]]"$'\n'"pattern = \"${ROUTE}\""$'\n'"custom_domain = true"
+          if [ -z "$ROUTE_BLOCKS" ]; then
+            ROUTE_BLOCKS="$ROUTE_BLOCK"
+          else
+            ROUTE_BLOCKS="${ROUTE_BLOCKS}"$'\n'"$ROUTE_BLOCK"
+          fi
+        done
 
         # Decide main entry:
         # - If BUILD_FOR_OPENNEXT=true: keep previous behavior -> .open-next/worker.js
@@ -84,9 +104,7 @@ runs:
 
         [env.${ENVIRONMENT}]
         name = "${PROJECT_NAME}-${ENVIRONMENT}"
-        [[env.${ENVIRONMENT}.routes]]
-        pattern = "${TRIMMED}"
-        custom_domain = true
+        ${ROUTE_BLOCKS}
 
         [assets]
         directory = "./${ASSETS_DIR}"
