@@ -55,6 +55,11 @@ on:
         required: false
         default: "v3"
         type: string
+      build_script:
+        description: Build command
+        required: false
+        default: "build"
+        type: string
     secrets:
       cloudflare_api_token:
         description: Cloudflare API token with Workers + DNS permissions as needed
