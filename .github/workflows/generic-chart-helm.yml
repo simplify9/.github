@@ -14,6 +14,41 @@ on:
         required: false
         default: '0'
         type: string
+      package-nuget:
+        description: 'Whether to build and publish NuGet packages'
+        required: false
+        default: false
+        type: boolean
+      nuget-major-version:
+        description: 'NuGet package major version number'
+        required: false
+        default: '1'
+        type: string
+      nuget-minor-version:
+        description: 'NuGet package minor version number'
+        required: false
+        default: '0'
+        type: string
+      nuget-projects:
+        description: 'NuGet projects to pack and push (glob pattern)'
+        required: false
+        default: '**/*.csproj'
+        type: string
+      dotnet-version:
+        description: '.NET SDK version to use for NuGet packaging'
+        required: false
+        default: '8.0.x'
+        type: string
+      test-projects:
+        description: 'Test projects to run before packing (glob pattern)'
+        required: false
+        default: '**/*UnitTests/*.csproj'
+        type: string
+      run-tests:
+        description: 'Whether to run tests before packing'
+        required: false
+        default: 'false'
+        type: string
       
       # Docker configuration (for build job)
       dockerfile-path:
@@ -99,6 +134,13 @@ on:
       github-token:
         description: 'GitHub token for tagging'
         required: false
+      # NuGet secrets
+      nuget-api-key:
+        description: 'NuGet API key'
+        required: false
+      nuget-source:
+        description: 'NuGet source URL'
+        required: false
       
       # Secret deployment values (ordered by deployment stages)
       helm-set-secret-values:
@@ -167,6 +209,38 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
+
+  nuget:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.package-nuget }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine NuGet semantic version
+        id: nuget-semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: ${{ inputs.nuget-major-version }}
+          minor: ${{ inputs.nuget-minor-version }}
+
+      - name: Dotnet Restore, Build, and Test
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        with:
+          projects: '**/*.csproj'
+          test-projects: ${{ inputs.test-projects }}
+          configuration: 'Release'
+          dotnet-version: ${{ inputs.dotnet-version }}
+          run-tests: ${{ inputs.run-tests }}
+
+      - name: Pack and Push NuGet Package
+        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
+        with:
+          projects: ${{ inputs.nuget-projects }}
+          configuration: 'Release'
+          version: ${{ steps.nuget-semver.outputs.version }}
+          api-key: ${{ secrets.nuget-api-key }}
+          nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
 
   deploy:
     runs-on: ubuntu-latest
