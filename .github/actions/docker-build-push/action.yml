@@ -39,6 +39,14 @@ inputs:
     description: 'Enable build cache'
     required: false
     default: 'true'
+  build-args:
+    description: 'Newline-separated Docker build arguments (KEY=VALUE)'
+    required: false
+    default: ''
+  build-secrets:
+    description: 'Newline-separated Docker build secrets (KEY=VALUE) for BuildKit'
+    required: false
+    default: ''
 
 outputs:
   image-tags:
@@ -89,6 +97,8 @@ runs:
         cache-to: ${{ inputs.cache == 'true' && 'type=gha,mode=max' || '' }}
         provenance: false
         sbom: false
+        build-args: ${{ inputs.build-args }}
+        secrets: ${{ inputs.build-secrets }}
 
     - name: Output image information
       shell: bash
