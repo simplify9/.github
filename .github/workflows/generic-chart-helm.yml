@@ -193,15 +193,16 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
       NUGET_AUTH_TOKEN: ${{ secrets.nuget-api-key }}
+      NUGET_SOURCE: ${{ secrets.nuget-source }}
     steps:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
         uses: actions/checkout@v4
 
       - name: Configure GitHub Packages feed
-        if: ${{ inputs.package-nuget && secrets.nuget-source != '' && contains(secrets.nuget-source, 'pkg.github.com') }}
+        if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
         env:
-          FEED_URL: ${{ secrets.nuget-source }}
+          FEED_URL: ${{ env.NUGET_SOURCE }}
           FEED_USERNAME: ${{ github.actor }}
           FEED_PASSWORD: ${{ secrets.nuget-api-key }}
         run: |
