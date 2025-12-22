@@ -135,6 +135,9 @@ on:
         description: 'GitHub token for tagging'
         required: false
       # NuGet secrets
+      NUGET_PACKAGE_PAT:
+        description: 'Personal access token for GitHub Packages restores inside Docker builds'
+        required: false
       nuget-api-key:
         description: 'NuGet API key'
         required: false
@@ -266,6 +269,7 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
+          build-args: ${{ (inputs.package-nuget && secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
 
   deploy:
     runs-on: ubuntu-latest
