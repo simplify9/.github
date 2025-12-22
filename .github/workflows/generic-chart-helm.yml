@@ -190,10 +190,27 @@ jobs:
 
   nuget:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+      NUGET_AUTH_TOKEN: ${{ secrets.nuget-api-key }}
     steps:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
         uses: actions/checkout@v4
+
+      - name: Configure GitHub Packages feed
+        if: ${{ inputs.package-nuget && secrets.nuget-source != '' && contains(secrets.nuget-source, 'pkg.github.com') }}
+        env:
+          FEED_URL: ${{ secrets.nuget-source }}
+          FEED_USERNAME: ${{ github.actor }}
+          FEED_PASSWORD: ${{ secrets.nuget-api-key }}
+        run: |
+          dotnet nuget remove source github || true
+          dotnet nuget add source "$FEED_URL" \
+            --name github \
+            --username "$FEED_USERNAME" \
+            --password "$FEED_PASSWORD" \
+            --store-password-in-clear-text
 
       - name: Determine NuGet semantic version
         if: ${{ inputs.package-nuget }}
