@@ -161,6 +161,9 @@ on:
       helm-chart:
         description: 'Published Helm chart URL'
         value: ${{ jobs.build.outputs.helm-chart }}
+      nuget-version:
+        description: 'Generated NuGet package version'
+        value: ${{ jobs.nuget.outputs.version }}
 
 env:
   # Set default registry and image name
@@ -193,6 +196,8 @@ jobs:
 
   nuget:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.nuget-semver.outputs.version }}
     env:
       GITHUB_TOKEN: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
       NUGET_AUTH_TOKEN: ${{ secrets.nuget-api-key }}
@@ -243,6 +248,15 @@ jobs:
           version: ${{ steps.nuget-semver.outputs.version }}
           api-key: ${{ secrets.nuget-api-key }}
           nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
+
+      - name: Tag NuGet version on GitHub origin
+        if: ${{ inputs.package-nuget }}
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ steps.nuget-semver.outputs.version }}
+          sha: ${{ github.sha }}
 
       - name: Skip NuGet packaging
         if: ${{ !inputs.package-nuget }}
