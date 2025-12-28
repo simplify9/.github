@@ -363,7 +363,7 @@ jobs:
           chart_repo: "https://charts.sf9.io"
 
           # Helm timing/flags
-          helm_timeout: '5m'
+          helm_timeout: '10m'
           extra_args: "--wait"
 
           # Translate your previous comma-joined --set into line-based entries
