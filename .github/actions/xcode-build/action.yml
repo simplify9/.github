@@ -1,0 +1,30 @@
+name: Simplify9 Xcode Build
+description: Build and archive an iOS app using xcodebuild.
+author: simplify9
+inputs:
+  workspace:
+    required: true
+    description: Path to the Xcode workspace (.xcworkspace).
+  scheme:
+    required: true
+    description: Xcode scheme to build.
+  configuration:
+    required: true
+    description: Build configuration (e.g., Release).
+  archivePath:
+    required: true
+    description: Output path for the generated .xcarchive.
+runs:
+  using: composite
+  steps:
+    - name: Build and archive
+      shell: bash
+      run: |
+        xcodebuild \
+          -workspace "${{ inputs.workspace }}" \
+          -scheme "${{ inputs.scheme }}" \
+          -configuration "${{ inputs.configuration }}" \
+          -sdk iphoneos \
+          -archivePath "${{ inputs.archivePath }}" \
+          clean archive \
+          -verbose -showBuildTimingSummary
