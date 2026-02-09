@@ -1,0 +1,18 @@
+name: Simplify9 iOS Provisioning Profile
+description: Install an iOS provisioning profile for code signing.
+author: simplify9
+inputs:
+  mobileprovision-base64:
+    required: true
+    description: Base64-encoded .mobileprovision file.
+runs:
+  using: composite
+  steps:
+    - name: Install provisioning profile
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+        echo "${{ inputs.mobileprovision-base64 }}" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+        UUID=$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
+        cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
