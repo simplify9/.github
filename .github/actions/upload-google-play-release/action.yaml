@@ -1,0 +1,44 @@
+name: "Upload AAB to Google Play"
+description: "Uploads an Android App Bundle (AAB) to Google Play using Android Publisher API and assigns it to a track."
+
+inputs:
+  service_account_json:
+    description: "Google Play service account JSON (raw JSON string). Prefer passing from secrets."
+    required: true
+  package_name:
+    description: "Android package name (applicationId), e.g. com.example.app"
+    required: true
+  aab_path:
+    description: "Path to the .aab file (relative to GITHUB_WORKSPACE)"
+    required: true
+  track:
+    description: "Play track: internal, alpha, beta, production"
+    required: false
+    default: "internal"
+  release_name:
+    description: "Optional release name shown in Play Console"
+    required: false
+    default: ""
+  status:
+    description: "Release status. Usually 'completed'. (draft/completed/...)"
+    required: false
+    default: "completed"
+  changes_not_sent_for_review:
+    description: "If true, sets changesNotSentForReview=true when committing the edit (helps on some accounts)."
+    required: false
+    default: "false"
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  args:
+    - "--package_name=${{ inputs.package_name }}"
+    - "--aab_path=${{ inputs.aab_path }}"
+    - "--track=${{ inputs.track }}"
+    - "--release_name=${{ inputs.release_name }}"
+    - "--status=${{ inputs.status }}"
+    - "--changes_not_sent_for_review=${{ inputs.changes_not_sent_for_review }}"
+
+branding:
+  icon: "upload"
+  color: "green"
