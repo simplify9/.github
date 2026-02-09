@@ -14,6 +14,10 @@ inputs:
   archivePath:
     required: true
     description: Output path for the generated .xcarchive.
+  destination:
+    required: false
+    description: Xcode destination (e.g., generic/platform=iOS).
+    default: generic/platform=iOS
 runs:
   using: composite
   steps:
@@ -25,6 +29,7 @@ runs:
           -scheme "${{ inputs.scheme }}" \
           -configuration "${{ inputs.configuration }}" \
           -sdk iphoneos \
+          -destination "${{ inputs.destination }}" \
           -archivePath "${{ inputs.archivePath }}" \
           clean archive \
           -verbose -showBuildTimingSummary
