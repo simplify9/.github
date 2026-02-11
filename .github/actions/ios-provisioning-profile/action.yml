@@ -21,10 +21,13 @@ runs:
           echo "::error::Failed to decode 'mobileprovision-base64'. Ensure it is valid base64."
           exit 1
         fi
+        ls -l "$RUNNER_TEMP/profile.mobileprovision"
+        wc -c "$RUNNER_TEMP/profile.mobileprovision"
         if [[ ! -s "$RUNNER_TEMP/profile.mobileprovision" ]]; then
           echo "::error::Decoded provisioning profile is empty."
           exit 1
         fi
+        security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" >/dev/null
         UUID=$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
         if [[ -z "$UUID" ]]; then
           echo "::error::Failed to extract UUID from provisioning profile."
