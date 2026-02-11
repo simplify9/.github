@@ -29,6 +29,7 @@ runs:
           -scheme "${{ inputs.scheme }}" \
           -configuration "${{ inputs.configuration }}" \
           -sdk iphoneos \
+          -allowProvisioningUpdates \
           -destination "${{ inputs.destination }}" \
           -archivePath "${{ inputs.archivePath }}" \
           clean archive \
