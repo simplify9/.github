@@ -28,6 +28,11 @@ runs:
         fi
         ls -l "$RUNNER_TEMP/profile.mobileprovision"
         wc -c "$RUNNER_TEMP/profile.mobileprovision"
+        file "$RUNNER_TEMP/profile.mobileprovision" || true
+        python - <<'PY'
+        p=open(r"$RUNNER_TEMP/profile.mobileprovision","rb").read(8)
+        print("magic:", p.hex())
+        PY
         if [[ ! -s "$RUNNER_TEMP/profile.mobileprovision" ]]; then
           echo "::error::Decoded provisioning profile is empty."
           exit 1
