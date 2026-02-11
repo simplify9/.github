@@ -12,7 +12,22 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if [[ -z "${{ inputs.mobileprovision-base64 }}" ]]; then
+          echo "::error::Input 'mobileprovision-base64' is empty. Provide a base64-encoded .mobileprovision."
+          exit 1
+        fi
         mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-        echo "${{ inputs.mobileprovision-base64 }}" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+        if ! printf '%s' "${{ inputs.mobileprovision-base64 }}" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"; then
+          echo "::error::Failed to decode 'mobileprovision-base64'. Ensure it is valid base64."
+          exit 1
+        fi
+        if [[ ! -s "$RUNNER_TEMP/profile.mobileprovision" ]]; then
+          echo "::error::Decoded provisioning profile is empty."
+          exit 1
+        fi
         UUID=$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" | /usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin)
+        if [[ -z "$UUID" ]]; then
+          echo "::error::Failed to extract UUID from provisioning profile."
+          exit 1
+        fi
         cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
