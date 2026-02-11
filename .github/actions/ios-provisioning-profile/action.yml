@@ -16,8 +16,13 @@ runs:
           echo "::error::Input 'mobileprovision-base64' is empty. Provide a base64-encoded .mobileprovision."
           exit 1
         fi
+        CLEAN_BASE64=$(printf '%s' "${{ inputs.mobileprovision-base64 }}" | tr -d '\r\n ')
+        if [[ -z "$CLEAN_BASE64" ]]; then
+          echo "::error::Input 'mobileprovision-base64' contained only whitespace/newlines."
+          exit 1
+        fi
         mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-        if ! printf '%s' "${{ inputs.mobileprovision-base64 }}" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"; then
+        if ! printf '%s' "$CLEAN_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"; then
           echo "::error::Failed to decode 'mobileprovision-base64'. Ensure it is valid base64."
           exit 1
         fi
