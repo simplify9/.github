@@ -1,5 +1,5 @@
 name: Simplify9 Xcode Build
-description: Build and archive an iOS app using xcodebuild.
+description: Build and archive an iOS app using xcodebuild (CI-safe manual signing).
 author: simplify9
 
 inputs:
@@ -20,7 +20,6 @@ inputs:
     description: Xcode destination (e.g., generic/platform=iOS).
     default: generic/platform=iOS
 
-  # Signing controls
   signingStyle:
     required: false
     description: "manual or automatic"
@@ -30,19 +29,9 @@ inputs:
     required: false
     description: Apple Developer Team ID (e.g., ABCDE12345). Required for manual signing.
 
-  # Prefer UUID if you have it (most deterministic)
-  provisioningProfileUuid:
-    required: false
-    description: Provisioning profile UUID (PROVISIONING_PROFILE) for manual signing.
-
-  # Otherwise, profile name works too
-  provisioningProfileSpecifier:
-    required: false
-    description: Provisioning profile NAME (PROVISIONING_PROFILE_SPECIFIER) for manual signing.
-
   codeSignIdentity:
     required: false
-    description: Code signing identity (CODE_SIGN_IDENTITY), e.g. "Apple Distribution" or "Apple Development".
+    description: Code signing identity for manual signing, e.g. "Apple Distribution" or "Apple Development".
 
   bundleId:
     required: false
@@ -50,7 +39,17 @@ inputs:
 
   keychainPath:
     required: false
-    description: Path to the keychain that contains the signing identity (e.g. $RUNNER_TEMP/build.keychain-db). Strongly recommended in CI.
+    description: Path to keychain that contains signing identity (e.g. $RUNNER_TEMP/build.keychain-db). Strongly recommended in CI.
+
+  derivedDataPath:
+    required: false
+    description: Optional derived data path.
+    default: ""
+
+  debugBuildSettings:
+    required: false
+    description: "true/false: print build settings before archive"
+    default: "false"
 
 runs:
   using: composite
@@ -71,35 +70,26 @@ runs:
           -verbose -showBuildTimingSummary
         )
 
+        if [[ -n "${{ inputs.derivedDataPath }}" ]]; then
+          ARGS+=(-derivedDataPath "${{ inputs.derivedDataPath }}")
+        fi
+
         if [[ "${{ inputs.signingStyle }}" == "automatic" ]]; then
+          # Opt-in only
           ARGS+=(-allowProvisioningUpdates)
         else
-          # Manual signing
           if [[ -z "${{ inputs.developmentTeam }}" ]]; then
             echo "ERROR: inputs.developmentTeam is required for manual signing"
             exit 1
           fi
 
-          # Require either UUID or Specifier
-          if [[ -z "${{ inputs.provisioningProfileUuid }}" && -z "${{ inputs.provisioningProfileSpecifier }}" ]]; then
-            echo "ERROR: Provide either inputs.provisioningProfileUuid or inputs.provisioningProfileSpecifier for manual signing"
-            exit 1
-          fi
-
+          # IMPORTANT:
+          # Do NOT pass PROVISIONING_PROFILE / PROVISIONING_PROFILE_SPECIFIER here,
+          # otherwise Pods targets will error ("does not support provisioning profiles").
           ARGS+=(
             CODE_SIGN_STYLE=Manual
             DEVELOPMENT_TEAM="${{ inputs.developmentTeam }}"
           )
-
-          # If you have a UUID, prefer it
-          if [[ -n "${{ inputs.provisioningProfileUuid }}" ]]; then
-            ARGS+=(PROVISIONING_PROFILE="${{ inputs.provisioningProfileUuid }}")
-          fi
-
-          # Also allow specifier (name). Some setups need it for embedded targets.
-          if [[ -n "${{ inputs.provisioningProfileSpecifier }}" ]]; then
-            ARGS+=(PROVISIONING_PROFILE_SPECIFIER="${{ inputs.provisioningProfileSpecifier }}")
-          fi
 
           if [[ -n "${{ inputs.bundleId }}" ]]; then
             ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
@@ -109,13 +99,20 @@ runs:
             ARGS+=(CODE_SIGN_IDENTITY="${{ inputs.codeSignIdentity }}")
           fi
 
-          # CRITICAL for CI: tell codesign which keychain to use
+          # Critical for CI: point codesign at the temp keychain where cert was imported
           if [[ -n "${{ inputs.keychainPath }}" ]]; then
             ARGS+=(OTHER_CODE_SIGN_FLAGS="--keychain ${{ inputs.keychainPath }}")
           fi
+        fi
 
-          # Optional: reduce weirdness when Xcode tries to be smart
-          ARGS+=(CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES)
+        if [[ "${{ inputs.debugBuildSettings }}" == "true" ]]; then
+          echo "=== Build settings (summary) ==="
+          xcodebuild \
+            -workspace "${{ inputs.workspace }}" \
+            -scheme "${{ inputs.scheme }}" \
+            -configuration "${{ inputs.configuration }}" \
+            -sdk iphoneos \
+            -showBuildSettings | egrep -i 'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
         fi
 
         echo "Running: xcodebuild ${ARGS[*]}"
