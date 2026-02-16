@@ -31,6 +31,9 @@ inputs:
   provisioningProfileSpecifier:
     required: false
     description: Provisioning profile NAME (PROVISIONING_PROFILE_SPECIFIER) for manual signing.
+  codeSignIdentity:
+    required: false
+    description: Code signing identity (CODE_SIGN_IDENTITY) for manual signing.
   bundleId:
     required: false
     description: Bundle identifier override (PRODUCT_BUNDLE_IDENTIFIER), optional.
@@ -77,6 +80,10 @@ runs:
 
           if [[ -n "${{ inputs.bundleId }}" ]]; then
             ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
+          fi
+
+          if [[ -n "${{ inputs.codeSignIdentity }}" ]]; then
+            ARGS+=(CODE_SIGN_IDENTITY="${{ inputs.codeSignIdentity }}")
           fi
         fi
 
