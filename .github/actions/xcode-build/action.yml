@@ -25,18 +25,32 @@ inputs:
     required: false
     description: "manual or automatic"
     default: manual
+
   developmentTeam:
     required: false
     description: Apple Developer Team ID (e.g., ABCDE12345). Required for manual signing.
+
+  # Prefer UUID if you have it (most deterministic)
+  provisioningProfileUuid:
+    required: false
+    description: Provisioning profile UUID (PROVISIONING_PROFILE) for manual signing.
+
+  # Otherwise, profile name works too
   provisioningProfileSpecifier:
     required: false
     description: Provisioning profile NAME (PROVISIONING_PROFILE_SPECIFIER) for manual signing.
+
   codeSignIdentity:
     required: false
-    description: Code signing identity (CODE_SIGN_IDENTITY) for manual signing.
+    description: Code signing identity (CODE_SIGN_IDENTITY), e.g. "Apple Distribution" or "Apple Development".
+
   bundleId:
     required: false
     description: Bundle identifier override (PRODUCT_BUNDLE_IDENTIFIER), optional.
+
+  keychainPath:
+    required: false
+    description: Path to the keychain that contains the signing identity (e.g. $RUNNER_TEMP/build.keychain-db). Strongly recommended in CI.
 
 runs:
   using: composite
@@ -46,7 +60,6 @@ runs:
       run: |
         set -euo pipefail
 
-        # Base args
         ARGS=(
           -workspace "${{ inputs.workspace }}"
           -scheme "${{ inputs.scheme }}"
@@ -59,24 +72,34 @@ runs:
         )
 
         if [[ "${{ inputs.signingStyle }}" == "automatic" ]]; then
-          # Automatic signing requires Apple account / API auth; keep it opt-in only
           ARGS+=(-allowProvisioningUpdates)
         else
-          # Manual signing (CI-stable; no Accounts needed)
+          # Manual signing
           if [[ -z "${{ inputs.developmentTeam }}" ]]; then
             echo "ERROR: inputs.developmentTeam is required for manual signing"
             exit 1
           fi
-          if [[ -z "${{ inputs.provisioningProfileSpecifier }}" ]]; then
-            echo "ERROR: inputs.provisioningProfileSpecifier is required for manual signing"
+
+          # Require either UUID or Specifier
+          if [[ -z "${{ inputs.provisioningProfileUuid }}" && -z "${{ inputs.provisioningProfileSpecifier }}" ]]; then
+            echo "ERROR: Provide either inputs.provisioningProfileUuid or inputs.provisioningProfileSpecifier for manual signing"
             exit 1
           fi
 
           ARGS+=(
             CODE_SIGN_STYLE=Manual
             DEVELOPMENT_TEAM="${{ inputs.developmentTeam }}"
-            PROVISIONING_PROFILE_SPECIFIER="${{ inputs.provisioningProfileSpecifier }}"
           )
+
+          # If you have a UUID, prefer it
+          if [[ -n "${{ inputs.provisioningProfileUuid }}" ]]; then
+            ARGS+=(PROVISIONING_PROFILE="${{ inputs.provisioningProfileUuid }}")
+          fi
+
+          # Also allow specifier (name). Some setups need it for embedded targets.
+          if [[ -n "${{ inputs.provisioningProfileSpecifier }}" ]]; then
+            ARGS+=(PROVISIONING_PROFILE_SPECIFIER="${{ inputs.provisioningProfileSpecifier }}")
+          fi
 
           if [[ -n "${{ inputs.bundleId }}" ]]; then
             ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
@@ -85,6 +108,14 @@ runs:
           if [[ -n "${{ inputs.codeSignIdentity }}" ]]; then
             ARGS+=(CODE_SIGN_IDENTITY="${{ inputs.codeSignIdentity }}")
           fi
+
+          # CRITICAL for CI: tell codesign which keychain to use
+          if [[ -n "${{ inputs.keychainPath }}" ]]; then
+            ARGS+=(OTHER_CODE_SIGN_FLAGS="--keychain ${{ inputs.keychainPath }}")
+          fi
+
+          # Optional: reduce weirdness when Xcode tries to be smart
+          ARGS+=(CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES)
         fi
 
         echo "Running: xcodebuild ${ARGS[*]}"
