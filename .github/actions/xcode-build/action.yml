@@ -122,4 +122,10 @@ runs:
         fi
 
         echo "Running: xcodebuild ${ARGS[*]}"
-        xcodebuild "${ARGS[@]}"
+
+        if command -v xcpretty >/dev/null 2>&1; then
+          xcodebuild "${ARGS[@]}" | xcpretty --color
+        else
+          echo "WARN: xcpretty not found; falling back to raw xcodebuild output"
+          xcodebuild "${ARGS[@]}"
+        fi
