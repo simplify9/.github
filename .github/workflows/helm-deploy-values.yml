@@ -1,4 +1,4 @@
-name: Helm Deploy (values file) - reusable
+name: Helm Deploy with values file - reusable
 
 on:
   workflow_call:
@@ -49,14 +49,8 @@ on:
         required: false
         default: ""
 
-      # One key=value per line. Each line becomes: --set <line>
-      extra-set-values:
-        type: string
-        required: false
-        default: ""
-
-      # Extra raw args appended to helm (--debug)
-      extra-helm-args:
+      # DB connection is an INPUT (not a secret)
+      db-connection:
         type: string
         required: false
         default: ""
@@ -96,8 +90,8 @@ on:
         required: false
         default: true
 
-      # Optional (some apps might not need DB)
-      db-connection:
+      # One key=value per line, each becomes: --set <line>
+      extra-set-values:
         type: string
         required: false
         default: ""
@@ -105,8 +99,6 @@ on:
     secrets:
       kubeconfig64:
         required: true
-      db-connection:
-        required: false
 
 permissions:
   contents: read
@@ -131,126 +123,63 @@ jobs:
 
       - name: Configure kubeconfig (from secret)
         env:
-          KUBECONFIG_DATA: ${{ secrets.kubeconfig64 }}
+          KUBECONFIG_B64: ${{ secrets.kubeconfig64 }}
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/.kube"
-
-          # Accept either raw YAML kubeconfig or base64
-          if echo "${KUBECONFIG_DATA}" | grep -q 'apiVersion:'; then
-            printf '%s' "${KUBECONFIG_DATA}" > "${HOME}/.kube/config"
-          else
-            echo "${KUBECONFIG_DATA}" | base64 -d > "${HOME}/.kube/config"
-          fi
-
+          echo "${KUBECONFIG_B64}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
 
       - name: Verify cluster access
         if: ${{ inputs.verify-cluster }}
-        env:
-          NAMESPACE: ${{ inputs.namespace }}
         run: |
           set -euo pipefail
           kubectl version --client=true
           kubectl cluster-info
-          kubectl get ns "${NAMESPACE}" || true
+          kubectl get ns "${{ inputs.namespace }}" || true
 
       - name: Deploy with Helm (upgrade/install)
         env:
-          RELEASE_NAME: ${{ inputs.release-name }}
-          CHART_NAME: ${{ inputs.chart-name }}
-          CHART_REPO: ${{ inputs.chart-repo }}
-          NAMESPACE: ${{ inputs.namespace }}
-          VALUES_FILE: ${{ inputs.values-file }}
-
-          GLOBAL_ENVIRONMENT: ${{ inputs.global-environment }}
-          INGRESS_HOST: ${{ inputs.ingress-host }}
-          INGRESS_TLS_SECRET: ${{ inputs.ingress-tls-secret }}
-          INGRESS_PATH: ${{ inputs.ingress-path }}
-
           IMAGE_TAG_INPUT: ${{ inputs.image-tag }}
+          DB_CONNECTION: ${{ inputs.db-connection }}
           EXTRA_SET_VALUES: ${{ inputs.extra-set-values }}
-          EXTRA_HELM_ARGS: ${{ inputs.extra-helm-args }}
-
-          HELM_TIMEOUT: ${{ inputs.helm-timeout }}
-          ATOMIC: ${{ inputs.atomic }}
-          WAIT: ${{ inputs.wait }}
-          CREATE_NAMESPACE: ${{ inputs.create-namespace }}
-
-          DB_CONNECTION_SECRET: ${{ secrets.db-connection }}
-          DB_CONNECTION_INPUT: ${{ inputs.db-connection }}
         run: |
           set -euo pipefail
 
-          # Prefer secret over input (so values are masked in logs)
-          DB_CONNECTION="${DB_CONNECTION_SECRET:-}"
-          if [ -z "${DB_CONNECTION}" ]; then
-            DB_CONNECTION="${DB_CONNECTION_INPUT:-}"
-          fi
-
-          ARGS=(
-            upgrade --install "${RELEASE_NAME}" "${CHART_NAME}"
-            --repo "${CHART_REPO}"
-            --namespace "${NAMESPACE}"
-            --values "${VALUES_FILE}"
-            --timeout "${HELM_TIMEOUT}"
-          )
-
-          if [ "${CREATE_NAMESPACE}" = "true" ]; then
-            ARGS+=(--create-namespace)
-          fi
-          if [ "${ATOMIC}" = "true" ]; then
-            ARGS+=(--atomic)
-          fi
-          if [ "${WAIT}" = "true" ]; then
-            ARGS+=(--wait)
-          fi
-
-          if [ -n "${GLOBAL_ENVIRONMENT}" ]; then
-            ARGS+=(--set "global.environment=${GLOBAL_ENVIRONMENT}")
-          fi
-          if [ -n "${INGRESS_HOST}" ]; then
-            ARGS+=(--set "ingress.hosts={${INGRESS_HOST}}")
-          fi
-          if [ -n "${INGRESS_TLS_SECRET}" ]; then
-            ARGS+=(--set "ingress.tls[0].secretName=${INGRESS_TLS_SECRET}")
-          fi
-          if [ -n "${INGRESS_PATH}" ]; then
-            ARGS+=(--set "ingress.path=${INGRESS_PATH}")
-          fi
-          if [ -n "${DB_CONNECTION}" ]; then
-            ARGS+=(--set-string "db=${DB_CONNECTION}")
-          fi
-
+          EXTRA_IMAGE_SET_ARGS=""
           if [ -n "${IMAGE_TAG_INPUT}" ]; then
-            ARGS+=(--set "image.tag=${IMAGE_TAG_INPUT}")
+            EXTRA_IMAGE_SET_ARGS="--set image.tag=${IMAGE_TAG_INPUT}"
           fi
 
-          # extra-set-values: one key=value per line
+          EXTRA_SET_ARGS=""
           if [ -n "${EXTRA_SET_VALUES// /}" ]; then
             while IFS= read -r line; do
               line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
               [ -z "$line" ] && continue
-              ARGS+=(--set "$line")
+              EXTRA_SET_ARGS="${EXTRA_SET_ARGS} --set ${line}"
             done <<< "${EXTRA_SET_VALUES}"
           fi
 
-          # extra raw args (space-separated)
-          if [ -n "${EXTRA_HELM_ARGS// /}" ]; then
-            # shellcheck disable=SC2206
-            EXTRA_ARR=(${EXTRA_HELM_ARGS})
-            ARGS+=("${EXTRA_ARR[@]}")
-          fi
-
-          helm "${ARGS[@]}"
+          helm upgrade --install "${{ inputs.release-name }}" "${{ inputs.chart-name }}" \
+            --repo "${{ inputs.chart-repo }}" \
+            --namespace "${{ inputs.namespace }}" \
+            ${{ inputs.create-namespace && '--create-namespace' || '' }} \
+            --values "${{ inputs.values-file }}" \
+            ${{ inputs.global-environment != '' && format('--set global.environment={0}', inputs.global-environment) || '' }} \
+            ${{ inputs.ingress-host != '' && format('--set ingress.hosts={{{0}}}', inputs.ingress-host) || '' }} \
+            ${{ inputs.ingress-tls-secret != '' && format('--set ingress.tls[0].secretName={0}', inputs.ingress-tls-secret) || '' }} \
+            ${{ inputs.ingress-path != '' && format('--set ingress.path={0}', inputs.ingress-path) || '' }} \
+            $( [ -n "${DB_CONNECTION}" ] && printf '%s' "--set-string db=${DB_CONNECTION}" ) \
+            ${EXTRA_IMAGE_SET_ARGS} \
+            ${EXTRA_SET_ARGS} \
+            ${{ inputs.atomic && '--atomic' || '' }} \
+            ${{ inputs.wait && '--wait' || '' }} \
+            --timeout "${{ inputs.helm-timeout }}"
 
       - name: Show release status
         if: always()
-        env:
-          RELEASE_NAME: ${{ inputs.release-name }}
-          NAMESPACE: ${{ inputs.namespace }}
         run: |
           set -euo pipefail
-          helm status "${RELEASE_NAME}" --namespace "${NAMESPACE}" || true
-          kubectl get pods --namespace "${NAMESPACE}" -l app.kubernetes.io/instance="${RELEASE_NAME}" || true
-          kubectl get ingress --namespace "${NAMESPACE}" || true
+          helm status "${{ inputs.release-name }}" --namespace "${{ inputs.namespace }}" || true
+          kubectl get pods --namespace "${{ inputs.namespace }}" -l app.kubernetes.io/instance="${{ inputs.release-name }}" || true
+          kubectl get ingress --namespace "${{ inputs.namespace }}" || true
