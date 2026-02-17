@@ -33,6 +33,10 @@ inputs:
     required: false
     description: Code signing identity for manual signing, e.g. "Apple Distribution" or "Apple Development".
 
+  provisioningProfileUuid:
+    required: false
+    description: Provisioning profile UUID (CI-only, binds profile to app target like Azure DevOps).
+
   bundleId:
     required: false
     description: Bundle identifier override (PRODUCT_BUNDLE_IDENTIFIER), optional.
@@ -75,7 +79,6 @@ runs:
         fi
 
         if [[ "${{ inputs.signingStyle }}" == "automatic" ]]; then
-          # Opt-in only
           ARGS+=(-allowProvisioningUpdates)
         else
           if [[ -z "${{ inputs.developmentTeam }}" ]]; then
@@ -83,23 +86,25 @@ runs:
             exit 1
           fi
 
-          # IMPORTANT:
-          # Do NOT pass PROVISIONING_PROFILE / PROVISIONING_PROFILE_SPECIFIER here,
-          # otherwise Pods targets will error ("does not support provisioning profiles").
           ARGS+=(
             CODE_SIGN_STYLE=Manual
             DEVELOPMENT_TEAM="${{ inputs.developmentTeam }}"
           )
 
-          if [[ -n "${{ inputs.bundleId }}" ]]; then
-            ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
-          fi
-
           if [[ -n "${{ inputs.codeSignIdentity }}" ]]; then
             ARGS+=(CODE_SIGN_IDENTITY="${{ inputs.codeSignIdentity }}")
           fi
 
-          # Critical for CI: point codesign at the temp keychain where cert was imported
+          # 🔑 THIS IS THE AZURE DEVOPS BEHAVIOR
+          # UUID-based profile binding is safe for Pods
+          if [[ -n "${{ inputs.provisioningProfileUuid }}" ]]; then
+            ARGS+=(PROVISIONING_PROFILE="${{ inputs.provisioningProfileUuid }}")
+          fi
+
+          if [[ -n "${{ inputs.bundleId }}" ]]; then
+            ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
+          fi
+
           if [[ -n "${{ inputs.keychainPath }}" ]]; then
             ARGS+=(OTHER_CODE_SIGN_FLAGS="--keychain ${{ inputs.keychainPath }}")
           fi
@@ -112,7 +117,8 @@ runs:
             -scheme "${{ inputs.scheme }}" \
             -configuration "${{ inputs.configuration }}" \
             -sdk iphoneos \
-            -showBuildSettings | egrep -i 'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
+            -showBuildSettings | egrep -i \
+            'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
         fi
 
         echo "Running: xcodebuild ${ARGS[*]}"
