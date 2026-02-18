@@ -1,4 +1,4 @@
-name: Helm Deploy with values file - reusable
+name: Helm Deploy (values file) - reusable
 
 on:
   workflow_call:
@@ -49,8 +49,14 @@ on:
         required: false
         default: ""
 
-      # DB connection is an INPUT (not a secret)
+      # Keep DB as a normal input (not a secret)
       db-connection:
+        type: string
+        required: false
+        default: ""
+
+      # One key=value per line each becomes --set <line>
+      extra-set-values:
         type: string
         required: false
         default: ""
@@ -89,12 +95,6 @@ on:
         type: boolean
         required: false
         default: true
-
-      # One key=value per line, each becomes: --set <line>
-      extra-set-values:
-        type: string
-        required: false
-        default: ""
 
     secrets:
       kubeconfig64:
@@ -143,38 +143,69 @@ jobs:
           IMAGE_TAG_INPUT: ${{ inputs.image-tag }}
           DB_CONNECTION: ${{ inputs.db-connection }}
           EXTRA_SET_VALUES: ${{ inputs.extra-set-values }}
+          HELM_TIMEOUT: ${{ inputs.helm-timeout }}
+          ATOMIC: ${{ inputs.atomic }}
+          WAIT: ${{ inputs.wait }}
+          CREATE_NAMESPACE: ${{ inputs.create-namespace }}
         run: |
           set -euo pipefail
 
-          EXTRA_IMAGE_SET_ARGS=""
-          if [ -n "${IMAGE_TAG_INPUT}" ]; then
-            EXTRA_IMAGE_SET_ARGS="--set image.tag=${IMAGE_TAG_INPUT}"
+          # Build helm command safely using an array (prevents word splitting and ; command breaks)
+          ARGS=(
+            upgrade --install
+            "${{ inputs.release-name }}"
+            "${{ inputs.chart-name }}"
+            --repo "${{ inputs.chart-repo }}"
+            --namespace "${{ inputs.namespace }}"
+            --values "${{ inputs.values-file }}"
+            --timeout "${HELM_TIMEOUT}"
+          )
+
+          if [ "${CREATE_NAMESPACE}" = "true" ]; then
+            ARGS+=(--create-namespace)
+          fi
+          if [ "${ATOMIC}" = "true" ]; then
+            ARGS+=(--atomic)
+          fi
+          if [ "${WAIT}" = "true" ]; then
+            ARGS+=(--wait)
           fi
 
-          EXTRA_SET_ARGS=""
+          if [ -n "${{ inputs.global-environment }}" ]; then
+            ARGS+=(--set "global.environment=${{ inputs.global-environment }}")
+          fi
+
+          if [ -n "${{ inputs.ingress-host }}" ]; then
+            ARGS+=(--set "ingress.hosts={${{ inputs.ingress-host }}}")
+          fi
+
+          if [ -n "${{ inputs.ingress-tls-secret }}" ]; then
+            ARGS+=(--set "ingress.tls[0].secretName=${{ inputs.ingress-tls-secret }}")
+          fi
+
+          if [ -n "${{ inputs.ingress-path }}" ]; then
+            ARGS+=(--set "ingress.path=${{ inputs.ingress-path }}")
+          fi
+
+          # Quote as one argument so spaces or semicolons don't break the command
+          if [ -n "${DB_CONNECTION}" ]; then
+            ARGS+=(--set-string "db=${DB_CONNECTION}")
+          fi
+
+          if [ -n "${IMAGE_TAG_INPUT}" ]; then
+            ARGS+=(--set "image.tag=${IMAGE_TAG_INPUT}")
+          fi
+
+          # extra-set-values: one key=value per line
           if [ -n "${EXTRA_SET_VALUES// /}" ]; then
             while IFS= read -r line; do
               line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
               [ -z "$line" ] && continue
-              EXTRA_SET_ARGS="${EXTRA_SET_ARGS} --set ${line}"
+              ARGS+=(--set "$line")
             done <<< "${EXTRA_SET_VALUES}"
           fi
 
-          helm upgrade --install "${{ inputs.release-name }}" "${{ inputs.chart-name }}" \
-            --repo "${{ inputs.chart-repo }}" \
-            --namespace "${{ inputs.namespace }}" \
-            ${{ inputs.create-namespace && '--create-namespace' || '' }} \
-            --values "${{ inputs.values-file }}" \
-            ${{ inputs.global-environment != '' && format('--set global.environment={0}', inputs.global-environment) || '' }} \
-            ${{ inputs.ingress-host != '' && format('--set ingress.hosts={{{0}}}', inputs.ingress-host) || '' }} \
-            ${{ inputs.ingress-tls-secret != '' && format('--set ingress.tls[0].secretName={0}', inputs.ingress-tls-secret) || '' }} \
-            ${{ inputs.ingress-path != '' && format('--set ingress.path={0}', inputs.ingress-path) || '' }} \
-            $( [ -n "${DB_CONNECTION}" ] && printf '%s' "--set-string db=${DB_CONNECTION}" ) \
-            ${EXTRA_IMAGE_SET_ARGS} \
-            ${EXTRA_SET_ARGS} \
-            ${{ inputs.atomic && '--atomic' || '' }} \
-            ${{ inputs.wait && '--wait' || '' }} \
-            --timeout "${{ inputs.helm-timeout }}"
+          helm "${ARGS[@]}"
 
       - name: Show release status
         if: always()
