@@ -1,4 +1,5 @@
 name: Install iOS Signing Certificate
+description: Installs an iOS signing certificate (.p12) into a temporary keychain for code signing
 runs:
   using: composite
   steps:

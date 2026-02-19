@@ -1,4 +1,5 @@
 name: Install iOS Provisioning Profile
+description: Installs an iOS provisioning profile from a base64-encoded string
 runs:
   using: composite
   steps:
