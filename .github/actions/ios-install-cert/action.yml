@@ -1,0 +1,44 @@
+name: Install iOS Signing Certificate
+runs:
+  using: composite
+  steps:
+    - name: Install signing certificate (.p12) into temp keychain
+      shell: bash
+      env:
+        IOS_P12_BASE64: ${{ inputs.p12Base64 }}
+        IOS_P12_PASSWORD: ${{ inputs.p12Password }}
+      run: |
+        set -euo pipefail
+
+        KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+        KEYCHAIN_PASS="ci-pass"
+
+        echo "$IOS_P12_BASE64" | base64 -D > "$RUNNER_TEMP/cert.p12"
+
+        security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+
+        # Make it the default and searchable
+        security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+        security default-keychain -s "$KEYCHAIN_PATH"
+
+        # Import cert + private key
+        security import "$RUNNER_TEMP/cert.p12" \
+          -k "$KEYCHAIN_PATH" \
+          -P "$IOS_P12_PASSWORD" \
+          -T /usr/bin/codesign \
+          -T /usr/bin/security
+
+        # Allow codesign to access the private key non-interactively
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+
+        echo "=== Available code signing identities ==="
+        security find-identity -v -p codesigning
+inputs:
+  p12Base64:
+    description: Base64-encoded .p12 certificate
+    required: true
+  p12Password:
+    description: Password for the .p12 certificate
+    required: true
