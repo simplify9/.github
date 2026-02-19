@@ -1,0 +1,40 @@
+name: Simplify9 Xcode Setup
+description: Prepare Xcode environment and CocoaPods for iOS build.
+author: simplify9
+runs:
+  using: composite
+  steps:
+    - name: Install CocoaPods
+      shell: bash
+      run: sudo gem install cocoapods
+
+    - name: Clean and Reinstall Pods
+      shell: bash
+      run: |
+        echo "Resetting CocoaPods integration..."
+        cd ios
+        pod deintegrate
+        rm -rf Pods Podfile.lock
+        pod install --repo-update
+
+        echo "Verifying .xcconfig files:"
+        find . -name "*.xcconfig"
+
+    - name: Check .xcfilelist presence
+      shell: bash
+      run: |
+        find . -name "*.xcfilelist"
+
+    - name: List .xcconfig files
+      shell: bash
+      run: |
+        echo "Listing all Pod target support files..."
+        find ios/Pods/Target\ Support\ Files -name "*.xcconfig"
+
+    - name: Select Xcode 16.4
+      shell: bash
+      run: sudo xcode-select -s /Applications/Xcode_16.4.app
+
+    - name: Check Xcode version
+      shell: bash
+      run: xcodebuild -version

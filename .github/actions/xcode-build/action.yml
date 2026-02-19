@@ -1,0 +1,131 @@
+name: Simplify9 Xcode Build
+description: Build and archive an iOS app using xcodebuild (CI-safe manual signing).
+author: simplify9
+
+inputs:
+  workspace:
+    required: true
+    description: Path to the Xcode workspace (.xcworkspace).
+  scheme:
+    required: true
+    description: Xcode scheme to build.
+  configuration:
+    required: true
+    description: Build configuration (e.g., Release).
+  archivePath:
+    required: true
+    description: Output path for the generated .xcarchive.
+  destination:
+    required: false
+    description: Xcode destination (e.g., generic/platform=iOS).
+    default: generic/platform=iOS
+
+  signingStyle:
+    required: false
+    description: "manual or automatic"
+    default: manual
+
+  developmentTeam:
+    required: false
+    description: Apple Developer Team ID (e.g., ABCDE12345). Required for manual signing.
+
+  codeSignIdentity:
+    required: false
+    description: Code signing identity for manual signing, e.g. "Apple Distribution" or "Apple Development".
+
+  provisioningProfileUuid:
+    required: false
+    description: Provisioning profile UUID (CI-only, binds profile to app target like Azure DevOps).
+
+  bundleId:
+    required: false
+    description: Bundle identifier override (PRODUCT_BUNDLE_IDENTIFIER), optional.
+
+  keychainPath:
+    required: false
+    description: Path to keychain that contains signing identity (e.g. $RUNNER_TEMP/build.keychain-db). Strongly recommended in CI.
+
+  derivedDataPath:
+    required: false
+    description: Optional derived data path.
+    default: ""
+
+  debugBuildSettings:
+    required: false
+    description: "true/false: print build settings before archive"
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Build and archive
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ARGS=(
+          -workspace "${{ inputs.workspace }}"
+          -scheme "${{ inputs.scheme }}"
+          -configuration "${{ inputs.configuration }}"
+          -sdk iphoneos
+          -destination "${{ inputs.destination }}"
+          -archivePath "${{ inputs.archivePath }}"
+          clean archive
+          -verbose -showBuildTimingSummary
+        )
+
+        if [[ -n "${{ inputs.derivedDataPath }}" ]]; then
+          ARGS+=(-derivedDataPath "${{ inputs.derivedDataPath }}")
+        fi
+
+        if [[ "${{ inputs.signingStyle }}" == "automatic" ]]; then
+          ARGS+=(-allowProvisioningUpdates)
+        else
+          if [[ -z "${{ inputs.developmentTeam }}" ]]; then
+            echo "ERROR: inputs.developmentTeam is required for manual signing"
+            exit 1
+          fi
+
+          ARGS+=(
+            CODE_SIGN_STYLE=Manual
+            DEVELOPMENT_TEAM="${{ inputs.developmentTeam }}"
+          )
+
+          if [[ -n "${{ inputs.codeSignIdentity }}" ]]; then
+            ARGS+=(CODE_SIGN_IDENTITY="${{ inputs.codeSignIdentity }}")
+          fi
+
+          # 🔑 THIS IS THE AZURE DEVOPS BEHAVIOR
+          # UUID-based profile binding is safe for Pods
+          if [[ -n "${{ inputs.provisioningProfileUuid }}" ]]; then
+            ARGS+=(PROVISIONING_PROFILE="${{ inputs.provisioningProfileUuid }}")
+          fi
+
+          if [[ -n "${{ inputs.bundleId }}" ]]; then
+            ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
+          fi
+
+          if [[ -n "${{ inputs.keychainPath }}" ]]; then
+            ARGS+=(OTHER_CODE_SIGN_FLAGS="--keychain ${{ inputs.keychainPath }}")
+          fi
+        fi
+
+        if [[ "${{ inputs.debugBuildSettings }}" == "true" ]]; then
+          echo "=== Build settings (summary) ==="
+          xcodebuild \
+            -workspace "${{ inputs.workspace }}" \
+            -scheme "${{ inputs.scheme }}" \
+            -configuration "${{ inputs.configuration }}" \
+            -sdk iphoneos \
+            -showBuildSettings | egrep -i \
+            'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
+        fi
+
+        echo "Running: xcodebuild ${ARGS[*]}"
+
+        if command -v xcpretty >/dev/null 2>&1; then
+          xcodebuild "${ARGS[@]}" | xcpretty --color
+        else
+          echo "WARN: xcpretty not found; falling back to raw xcodebuild output"
+          xcodebuild "${ARGS[@]}"
+        fi

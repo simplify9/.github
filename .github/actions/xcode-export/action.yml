@@ -1,0 +1,25 @@
+name: Simplify9 Xcode Export
+description: Export an IPA from an Xcode archive using export options.
+author: simplify9
+inputs:
+  archivePath:
+    required: true
+    description: Path to the .xcarchive to export.
+  exportOptionsPlist:
+    required: true
+    description: Path to exportOptions.plist.
+  exportPath:
+    required: true
+    description: Output directory for the exported IPA.
+runs:
+  using: composite
+  steps:
+    - name: Export IPA
+      shell: bash
+      run: |
+        mkdir -p "${{ inputs.exportPath }}"
+        xcodebuild \
+          -exportArchive \
+          -archivePath "${{ inputs.archivePath }}" \
+          -exportOptionsPlist "${{ inputs.exportOptionsPlist }}" \
+          -exportPath "${{ inputs.exportPath }}"
