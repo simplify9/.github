@@ -80,6 +80,11 @@ on:
         required: false
         default: 'development'
         type: string
+      helm-timeout-minutes:
+        description: 'Optional Helm timeout in minutes (e.g., 15). If empty, defaults to 10 minutes.'
+        required: false
+        default: ''
+        type: string
       helm-set-values:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
@@ -363,7 +368,7 @@ jobs:
           chart_repo: "https://charts.sf9.io"
 
           # Helm timing/flags
-          helm_timeout: '10m'
+          helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
           extra_args: "--wait"
 
           # Translate your previous comma-joined --set into line-based entries
