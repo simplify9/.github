@@ -1,0 +1,31 @@
+name: Install iOS Provisioning Profile
+description: Installs an iOS provisioning profile from a base64-encoded string
+runs:
+  using: composite
+  steps:
+    - name: Install provisioning profile (manual)
+      shell: bash
+      env:
+        IOS_MOBILEPROVISION_BASE64: ${{ inputs.profileBase64 }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+        printf '%s' "${IOS_MOBILEPROVISION_BASE64}" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
+        security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+
+        UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+        NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
+
+        echo "Profile UUID: $UUID"
+        echo "Profile Name: $NAME"
+
+        cp "$RUNNER_TEMP/profile.mobileprovision" \
+          "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+
+        echo "IOS_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+inputs:
+  profileBase64:
+    description: Base64-encoded provisioning profile
+    required: true
