@@ -1,0 +1,750 @@
+name: Generic iOS Build and TestFlight (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      macos-runner:
+        description: GitHub-hosted macOS runner label
+        required: false
+        type: string
+        default: macos-15
+      node-version:
+        description: Node version for React Native dependency installation
+        required: false
+        type: string
+        default: "20.19.4"
+      install-react-native-cli:
+        description: Install react-native-cli globally
+        required: false
+        type: boolean
+        default: true
+      xcode-version:
+        description: "Optional Xcode major or major.minor selector (for example: 26 or 16.4)"
+        required: false
+        type: string
+        default: ""
+      use-simplify9-xcode-setup:
+        description: Use simplify9 xcode-setup composite action (pods + selected Xcode)
+        required: false
+        type: boolean
+        default: true
+      verify-cocoapods:
+        description: Run `pod --version` check
+        required: false
+        type: boolean
+        default: false
+      clean-reinstall-pods:
+        description: Perform `pod deintegrate` and `pod install --repo-update`
+        required: false
+        type: boolean
+        default: false
+      ios-dir:
+        description: iOS directory used for pods operations
+        required: false
+        type: string
+        default: ios
+
+      workspace:
+        description: Path to .xcworkspace
+        required: true
+        type: string
+      scheme:
+        description: Xcode scheme to archive
+        required: true
+        type: string
+      configuration:
+        description: Build configuration
+        required: false
+        type: string
+        default: Release
+      archive-path:
+        description: Output xcarchive path
+        required: false
+        type: string
+        default: output/app.xcarchive
+      export-path:
+        description: IPA export directory
+        required: false
+        type: string
+        default: output/package
+      export-options-plist:
+        description: Path to static exportOptions.plist. If empty and generate-export-options=true, one is generated.
+        required: false
+        type: string
+        default: ""
+      generate-export-options:
+        description: Generate exportOptions.plist from profile metadata
+        required: false
+        type: boolean
+        default: false
+
+      signing-style:
+        description: Signing style for xcode-build action (manual or automatic)
+        required: false
+        type: string
+        default: manual
+      code-sign-identity:
+        description: Code sign identity, for example Apple Distribution
+        required: false
+        type: string
+        default: Apple Distribution
+      build-destination:
+        description: Xcode destination
+        required: false
+        type: string
+        default: generic/platform=iOS
+      debug-build-settings:
+        description: Print selected signing build settings from xcode-build action
+        required: false
+        type: boolean
+        default: false
+      use-manual-inline-archive:
+        description: Use direct xcodebuild archive command (profile NAME) instead of simplify9 xcode-build action (profile UUID)
+        required: false
+        type: boolean
+        default: false
+      bundle-id-override:
+        description: Optional bundle id override when using simplify9 xcode-build action
+        required: false
+        type: string
+        default: ""
+
+      versioning-strategy:
+        description: none or pbxproj-counter
+        required: false
+        type: string
+        default: none
+      pbxproj-path:
+        description: Path to project.pbxproj when using pbxproj-counter
+        required: false
+        type: string
+        default: ""
+      marketing-prefix:
+        description: Marketing version prefix. Final version becomes {prefix}.{run_number}
+        required: false
+        type: string
+        default: "1.0"
+      build-number-offset:
+        description: Offset applied when computing CURRENT_PROJECT_VERSION in pbxproj-counter mode
+        required: false
+        type: string
+        default: "100"
+
+      ipa-name-pattern:
+        description: Output IPA file name pattern with tokens {scheme},{version},{build_number},{run_number}
+        required: false
+        type: string
+        default: "{scheme}{run_number}.ipa"
+      artifact-name:
+        description: Upload artifact name
+        required: false
+        type: string
+        default: ipa
+
+      upload-tool:
+        description: "TestFlight upload tool: transporter or altool"
+        required: false
+        type: string
+        default: transporter
+      appstore-key-format:
+        description: "API key secret format: raw or base64"
+        required: false
+        type: string
+        default: raw
+
+      release-environment:
+        description: Optional GitHub environment for release job
+        required: false
+        type: string
+        default: ""
+
+    secrets:
+      ios-p12-base64:
+        description: Base64 encoded signing certificate (.p12)
+        required: true
+      ios-p12-password:
+        description: Password for signing certificate
+        required: true
+      ios-mobileprovision-base64:
+        description: Base64 encoded provisioning profile
+        required: true
+      ios-team-id:
+        description: Optional explicit Apple Team ID for manual signing
+        required: false
+
+      appstore-api-key-id:
+        description: App Store Connect API key id
+        required: true
+      appstore-issuer-id:
+        description: App Store Connect issuer id
+        required: true
+      appstore-api-private-key:
+        description: Raw API private key contents (PEM) for transporter/raw mode
+        required: false
+      appstore-api-private-key-base64:
+        description: Base64 API private key for altool/base64 mode
+        required: false
+
+    outputs:
+      version:
+        description: Marketing version used for this build
+        value: ${{ jobs.build.outputs.version }}
+      build-number:
+        description: Build number used for this build
+        value: ${{ jobs.build.outputs.build-number }}
+      ipa-file:
+        description: IPA file name uploaded and released
+        value: ${{ jobs.build.outputs.ipa-file }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: ${{ inputs.macos-runner }}
+    outputs:
+      version: ${{ steps.final_version.outputs.version }}
+      build-number: ${{ steps.final_version.outputs.build_number }}
+      ipa-file: ${{ steps.rename_ipa.outputs.ipa_file }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize runtime paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "KEYCHAIN_PATH=${RUNNER_TEMP}/build.keychain-db" >> "$GITHUB_ENV"
+
+      - name: Select Xcode (optional)
+        if: ${{ inputs.xcode-version != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XCODE_VERSION="${{ inputs.xcode-version }}"
+          CANDIDATES=(
+            "/Applications/Xcode_${XCODE_VERSION}.app"
+            "/Applications/Xcode${XCODE_VERSION}.app"
+            "/Applications/Xcode-${XCODE_VERSION}.app"
+            "/Applications/Xcode_${XCODE_VERSION}.0.app"
+            "/Applications/Xcode${XCODE_VERSION}.0.app"
+          )
+
+          XCODE_APP=""
+          for p in "${CANDIDATES[@]}"; do
+            if [[ -d "$p" ]]; then
+              XCODE_APP="$p"
+              break
+            fi
+          done
+
+          if [[ -z "${XCODE_APP}" ]]; then
+            echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+
+          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
+          xcode-select -p
+          xcodebuild -version
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: yarn
+
+      - name: Install node dependencies
+        shell: bash
+        run: yarn
+
+      - name: Install React Native CLI
+        if: ${{ inputs.install-react-native-cli }}
+        shell: bash
+        run: npm install -g react-native-cli
+
+      - name: Xcode setup (simplify9 action)
+        if: ${{ inputs.use-simplify9-xcode-setup }}
+        uses: simplify9/.github/.github/actions/xcode-setup@main
+        with:
+          xcodeVersion: ${{ inputs.xcode-version != '' && inputs.xcode-version || '26' }}
+
+      - name: Verify CocoaPods
+        if: ${{ inputs.verify-cocoapods }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pod --version
+
+      - name: Clean and reinstall Pods
+        if: ${{ inputs.clean-reinstall-pods }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ inputs.ios-dir }}"
+          pod deintegrate
+          rm -rf Pods Podfile.lock
+          pod install --repo-update
+
+      - name: Install signing certificate
+        uses: simplify9/.github/.github/actions/ios-install-cert@main
+        with:
+          p12Base64: ${{ secrets.ios-p12-base64 }}
+          p12Password: ${{ secrets.ios-p12-password }}
+
+      - name: Install provisioning profile
+        id: install_profile
+        uses: simplify9/.github/.github/actions/ios-install-profile@main
+        with:
+          profileBase64: ${{ secrets.ios-mobileprovision-base64 }}
+
+      - name: Enrich profile metadata (bundle/team)
+        id: profile_meta
+        shell: bash
+        env:
+          PROFILE_B64: ${{ secrets.ios-mobileprovision-base64 }}
+        run: |
+          set -euo pipefail
+
+          PROFILE_PATH="${RUNNER_TEMP}/profile.mobileprovision"
+          PROFILE_PLIST="${RUNNER_TEMP}/profile.plist"
+
+          printf '%s' "${PROFILE_B64}" | base64 -D > "${PROFILE_PATH}"
+          security cms -D -i "${PROFILE_PATH}" > "${PROFILE_PLIST}"
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${PROFILE_PLIST}")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "${PROFILE_PLIST}")
+          TEAM_ID_FROM_PROFILE=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${PROFILE_PLIST}")
+          TEAM_NAME=$(/usr/libexec/PlistBuddy -c 'Print :TeamName' "${PROFILE_PLIST}")
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${PROFILE_PLIST}")
+          BUNDLE_ID="${APP_ID#*.}"
+
+          echo "profile_uuid=${PROFILE_UUID}" >> "$GITHUB_OUTPUT"
+          echo "profile_name=${PROFILE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "team_id=${TEAM_ID_FROM_PROFILE}" >> "$GITHUB_OUTPUT"
+          echo "team_name=${TEAM_NAME}" >> "$GITHUB_OUTPUT"
+          echo "bundle_id=${BUNDLE_ID}" >> "$GITHUB_OUTPUT"
+
+          echo "IOS_PROFILE_UUID=${PROFILE_UUID}" >> "$GITHUB_ENV"
+          echo "IOS_PROFILE_NAME=${PROFILE_NAME}" >> "$GITHUB_ENV"
+          echo "TEAM_ID_FROM_PROFILE=${TEAM_ID_FROM_PROFILE}" >> "$GITHUB_ENV"
+          echo "TEAM_NAME=${TEAM_NAME}" >> "$GITHUB_ENV"
+          echo "IOS_BUNDLE_ID=${BUNDLE_ID}" >> "$GITHUB_ENV"
+
+      - name: Compute version variables
+        id: version_vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Update pbxproj versions (pbxproj-counter)
+        if: ${{ inputs.versioning-strategy == 'pbxproj-counter' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PBXPROJ_PATH="${{ inputs.pbxproj-path }}"
+          if [[ -z "${PBXPROJ_PATH}" || ! -f "${PBXPROJ_PATH}" ]]; then
+            echo "ERROR: pbxproj-counter requires a valid pbxproj-path input"
+            exit 1
+          fi
+
+          BASE_BUILD=$(
+            grep -m 1 "CURRENT_PROJECT_VERSION = " "${PBXPROJ_PATH}" \
+              | sed -E 's/.*CURRENT_PROJECT_VERSION = ([^;]+);.*/\1/'
+          )
+
+          if ! [[ "${BASE_BUILD}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Could not parse numeric CURRENT_PROJECT_VERSION. Got '${BASE_BUILD}'"
+            exit 1
+          fi
+
+          OFFSET="${{ inputs.build-number-offset }}"
+          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
+            exit 1
+          fi
+
+          NEW_MARKETING_VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
+          NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
+
+          perl -pi -e "s/\\bMARKETING_VERSION = [^;]+;/MARKETING_VERSION = ${NEW_MARKETING_VERSION};/g" "${PBXPROJ_PATH}"
+          perl -pi -e "s/\\bCURRENT_PROJECT_VERSION = [^;]+;/CURRENT_PROJECT_VERSION = ${NEW_BUILD_NUMBER};/g" "${PBXPROJ_PATH}"
+
+          echo "VERSION=${NEW_MARKETING_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${NEW_BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Finalize version outputs
+        id: final_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Archive (simplify9 xcode-build action)
+        if: ${{ !inputs.use-manual-inline-archive }}
+        uses: simplify9/.github/.github/actions/xcode-build@main
+        with:
+          workspace: ${{ inputs.workspace }}
+          scheme: ${{ inputs.scheme }}
+          configuration: ${{ inputs.configuration }}
+          archivePath: ${{ inputs.archive-path }}
+          destination: ${{ inputs.build-destination }}
+          signingStyle: ${{ inputs.signing-style }}
+          developmentTeam: ${{ secrets.ios-team-id != '' && secrets.ios-team-id || steps.profile_meta.outputs.team_id }}
+          codeSignIdentity: ${{ inputs.code-sign-identity }}
+          provisioningProfileUuid: ${{ steps.profile_meta.outputs.profile_uuid }}
+          bundleId: ${{ inputs.bundle-id-override }}
+          keychainPath: ${{ runner.temp }}/build.keychain-db
+          debugBuildSettings: ${{ inputs.debug-build-settings && 'true' || 'false' }}
+
+      - name: Archive (manual inline xcodebuild, profile name)
+        if: ${{ inputs.use-manual-inline-archive }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+
+          TEAM_ID="${{ secrets.ios-team-id }}"
+          if [[ -z "${TEAM_ID}" ]]; then
+            TEAM_ID="${TEAM_ID_FROM_PROFILE}"
+          fi
+
+          xcodebuild \
+            -workspace "${{ inputs.workspace }}" \
+            -scheme "${{ inputs.scheme }}" \
+            -configuration "${{ inputs.configuration }}" \
+            -sdk iphoneos \
+            -destination "${{ inputs.build-destination }}" \
+            -archivePath "${{ inputs.archive-path }}" \
+            archive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="${TEAM_ID}" \
+            CODE_SIGN_IDENTITY="${{ inputs.code-sign-identity }}" \
+            PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
+            OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
+            -verbose -showBuildTimingSummary
+
+      - name: Generate exportOptions.plist
+        if: ${{ inputs.generate-export-options }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TEAM_ID="${{ secrets.ios-team-id }}"
+          if [[ -z "${TEAM_ID}" ]]; then
+            TEAM_ID="${TEAM_ID_FROM_PROFILE}"
+          fi
+
+          EXPORT_PLIST="${RUNNER_TEMP}/exportOptions.plist"
+          cat > "${EXPORT_PLIST}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${{ steps.profile_meta.outputs.bundle_id }}</key>
+              <string>${{ steps.profile_meta.outputs.profile_name }}</string>
+            </dict>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+          echo "EXPORT_PLIST=${EXPORT_PLIST}" >> "$GITHUB_ENV"
+          /usr/bin/plutil -p "${EXPORT_PLIST}" >/dev/null
+
+      - name: Resolve export plist
+        id: resolve_export
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ inputs.export-options-plist }}" ]]; then
+            echo "EXPORT_PLIST=${{ inputs.export-options-plist }}" >> "$GITHUB_ENV"
+            echo "export_plist=${{ inputs.export-options-plist }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ inputs.generate-export-options }}" != "true" ]]; then
+            echo "ERROR: Either export-options-plist must be provided, or generate-export-options must be true."
+            exit 1
+          fi
+
+          echo "export_plist=${EXPORT_PLIST}" >> "$GITHUB_OUTPUT"
+
+      - name: Export IPA
+        uses: simplify9/.github/.github/actions/xcode-export@main
+        with:
+          archivePath: ${{ inputs.archive-path }}
+          exportOptionsPlist: ${{ steps.resolve_export.outputs.export_plist }}
+          exportPath: ${{ inputs.export-path }}
+
+      - name: Rename IPA
+        id: rename_ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IPA_SRC="$(ls -1 "${{ inputs.export-path }}"/*.ipa | head -n 1)"
+          PATTERN='${{ inputs.ipa-name-pattern }}'
+
+          IPA_OUT="${PATTERN//\{scheme\}/${{ inputs.scheme }}}"
+          IPA_OUT="${IPA_OUT//\{version\}/${VERSION}}"
+          IPA_OUT="${IPA_OUT//\{build_number\}/${BUILD_NUMBER}}"
+          IPA_OUT="${IPA_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
+
+          mv "${IPA_SRC}" "${IPA_OUT}"
+
+          echo "ipa_file=${IPA_OUT}" >> "$GITHUB_OUTPUT"
+          echo "IPA_FILE=${IPA_OUT}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ steps.rename_ipa.outputs.ipa_file }}
+
+  release:
+    name: Upload to TestFlight
+    runs-on: ${{ inputs.macos-runner }}
+    needs: build
+    if: ${{ inputs.release-environment == '' }}
+
+    steps:
+      - name: Select Xcode (optional)
+        if: ${{ inputs.xcode-version != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XCODE_VERSION="${{ inputs.xcode-version }}"
+          CANDIDATES=(
+            "/Applications/Xcode_${XCODE_VERSION}.app"
+            "/Applications/Xcode${XCODE_VERSION}.app"
+            "/Applications/Xcode-${XCODE_VERSION}.app"
+            "/Applications/Xcode_${XCODE_VERSION}.0.app"
+            "/Applications/Xcode${XCODE_VERSION}.0.app"
+          )
+
+          XCODE_APP=""
+          for p in "${CANDIDATES[@]}"; do
+            if [[ -d "$p" ]]; then
+              XCODE_APP="$p"
+              break
+            fi
+          done
+
+          if [[ -z "${XCODE_APP}" ]]; then
+            echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+
+          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
+          xcodebuild -version
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .
+
+      - name: Install App Store Connect API key (raw)
+        if: ${{ inputs.appstore-key-format == 'raw' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEY_CONTENT='${{ secrets.appstore-api-private-key }}'
+          if [[ -z "${KEY_CONTENT}" ]]; then
+            echo "ERROR: appstore-key-format=raw requires secret appstore-api-private-key"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
+          printf '%s' "${KEY_CONTENT}" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+      - name: Install App Store Connect API key (base64)
+        if: ${{ inputs.appstore-key-format == 'base64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          KEY_B64='${{ secrets.appstore-api-private-key-base64 }}'
+          if [[ -z "${KEY_B64}" ]]; then
+            echo "ERROR: appstore-key-format=base64 requires secret appstore-api-private-key-base64"
+            exit 1
+          fi
+
+          PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$PRIVATE_KEYS_DIR"
+
+          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
+          printf '%s' "$KEY_B64" | base64 -D > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+      - name: Upload to TestFlight (iTMSTransporter)
+        if: ${{ inputs.upload-tool == 'transporter' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IPA='${{ needs.build.outputs.ipa-file }}'
+          xcrun iTMSTransporter \
+            -m upload \
+            -assetFile "${IPA}" \
+            -apiKey "${{ secrets.appstore-api-key-id }}" \
+            -apiIssuer "${{ secrets.appstore-issuer-id }}" \
+            -v informational
+
+      - name: Upload to TestFlight (altool)
+        if: ${{ inputs.upload-tool == 'altool' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IPA='${{ needs.build.outputs.ipa-file }}'
+          xcrun altool --upload-app \
+            -f "${IPA}" \
+            -t ios \
+            --apiKey "${{ secrets.appstore-api-key-id }}" \
+            --apiIssuer "${{ secrets.appstore-issuer-id }}" \
+            --output-format xml
+
+  release_with_environment:
+    name: Upload to TestFlight
+    runs-on: ${{ inputs.macos-runner }}
+    needs: build
+    if: ${{ inputs.release-environment != '' }}
+    environment: ${{ inputs.release-environment }}
+
+    steps:
+      - name: Select Xcode (optional)
+        if: ${{ inputs.xcode-version != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XCODE_VERSION="${{ inputs.xcode-version }}"
+          CANDIDATES=(
+            "/Applications/Xcode_${XCODE_VERSION}.app"
+            "/Applications/Xcode${XCODE_VERSION}.app"
+            "/Applications/Xcode-${XCODE_VERSION}.app"
+            "/Applications/Xcode_${XCODE_VERSION}.0.app"
+            "/Applications/Xcode${XCODE_VERSION}.0.app"
+          )
+
+          XCODE_APP=""
+          for p in "${CANDIDATES[@]}"; do
+            if [[ -d "$p" ]]; then
+              XCODE_APP="$p"
+              break
+            fi
+          done
+
+          if [[ -z "${XCODE_APP}" ]]; then
+            echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+
+          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
+          xcodebuild -version
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .
+
+      - name: Install App Store Connect API key (raw)
+        if: ${{ inputs.appstore-key-format == 'raw' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEY_CONTENT='${{ secrets.appstore-api-private-key }}'
+          if [[ -z "${KEY_CONTENT}" ]]; then
+            echo "ERROR: appstore-key-format=raw requires secret appstore-api-private-key"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
+          printf '%s' "${KEY_CONTENT}" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+      - name: Install App Store Connect API key (base64)
+        if: ${{ inputs.appstore-key-format == 'base64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          KEY_B64='${{ secrets.appstore-api-private-key-base64 }}'
+          if [[ -z "${KEY_B64}" ]]; then
+            echo "ERROR: appstore-key-format=base64 requires secret appstore-api-private-key-base64"
+            exit 1
+          fi
+
+          PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$PRIVATE_KEYS_DIR"
+
+          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
+          printf '%s' "$KEY_B64" | base64 -D > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+      - name: Upload to TestFlight (iTMSTransporter)
+        if: ${{ inputs.upload-tool == 'transporter' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IPA='${{ needs.build.outputs.ipa-file }}'
+          xcrun iTMSTransporter \
+            -m upload \
+            -assetFile "${IPA}" \
+            -apiKey "${{ secrets.appstore-api-key-id }}" \
+            -apiIssuer "${{ secrets.appstore-issuer-id }}" \
+            -v informational
+
+      - name: Upload to TestFlight (altool)
+        if: ${{ inputs.upload-tool == 'altool' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IPA='${{ needs.build.outputs.ipa-file }}'
+          xcrun altool --upload-app \
+            -f "${IPA}" \
+            -t ios \
+            --apiKey "${{ secrets.appstore-api-key-id }}" \
+            --apiIssuer "${{ secrets.appstore-issuer-id }}" \
+            --output-format xml
