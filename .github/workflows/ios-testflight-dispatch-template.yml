@@ -1,0 +1,98 @@
+name: iOS TestFlight Dispatch Template
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  staging:
+    name: iOS Staging Build and Release
+    if: ${{ github.ref_name == 'staging' }}
+    uses: ./.github/workflows/generic-ios-testflight.yml
+    with:
+      macos-runner: macos-15
+      node-version: "20.10.0"
+      xcode-version: "26"
+
+      use-simplify9-xcode-setup: false
+      verify-cocoapods: true
+      clean-reinstall-pods: true
+
+      workspace: ios/funrideapp.xcworkspace
+      scheme: funrideapp
+      configuration: Release
+      archive-path: output/funrideapp.xcarchive
+      export-path: output/package
+
+      versioning-strategy: pbxproj-counter
+      pbxproj-path: ios/funrideapp.xcodeproj/project.pbxproj
+      marketing-prefix: "4.0"
+      build-number-offset: "100"
+
+      use-manual-inline-archive: true
+      generate-export-options: true
+
+      ipa-name-pattern: "funride-{version}({build_number}).ipa"
+      artifact-name: ipa
+
+      upload-tool: altool
+      appstore-key-format: base64
+      release-environment: ios-staging
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+
+  production:
+    name: iOS Production Build and Release
+    if: ${{ github.ref_name == 'main' }}
+    uses: ./.github/workflows/generic-ios-testflight.yml
+    with:
+      macos-runner: macos-15
+      node-version: "20.10.0"
+      xcode-version: "26"
+
+      use-simplify9-xcode-setup: false
+      verify-cocoapods: true
+      clean-reinstall-pods: true
+
+      workspace: ios/funrideapp.xcworkspace
+      scheme: funrideapp
+      configuration: Release
+      archive-path: output/funrideapp.xcarchive
+      export-path: output/package
+
+      versioning-strategy: pbxproj-counter
+      pbxproj-path: ios/funrideapp.xcodeproj/project.pbxproj
+      marketing-prefix: "4.0"
+      build-number-offset: "100"
+
+      use-manual-inline-archive: true
+      generate-export-options: true
+
+      ipa-name-pattern: "funride-{version}({build_number}).ipa"
+      artifact-name: ipa
+
+      upload-tool: altool
+      appstore-key-format: base64
+      release-environment: ios-production
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}

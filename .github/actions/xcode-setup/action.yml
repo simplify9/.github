@@ -1,6 +1,11 @@
 name: Simplify9 Xcode Setup
 description: Prepare Xcode environment and CocoaPods for iOS build.
 author: simplify9
+inputs:
+  xcodeVersion:
+    description: "Xcode major or major.minor version selector (for example: 26 or 16.4)"
+    required: false
+    default: "26"
 runs:
   using: composite
   steps:
@@ -31,9 +36,36 @@ runs:
         echo "Listing all Pod target support files..."
         find ios/Pods/Target\ Support\ Files -name "*.xcconfig"
 
-    - name: Select Xcode 16.4
+    - name: Select Xcode
       shell: bash
-      run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      run: |
+        set -euo pipefail
+
+        XCODE_VERSION="${{ inputs.xcodeVersion }}"
+        CANDIDATES=(
+          "/Applications/Xcode_${XCODE_VERSION}.app"
+          "/Applications/Xcode${XCODE_VERSION}.app"
+          "/Applications/Xcode-${XCODE_VERSION}.app"
+          "/Applications/Xcode_${XCODE_VERSION}.0.app"
+          "/Applications/Xcode${XCODE_VERSION}.0.app"
+        )
+
+        XCODE_APP=""
+        for p in "${CANDIDATES[@]}"; do
+          if [[ -d "$p" ]]; then
+            XCODE_APP="$p"
+            break
+          fi
+        done
+
+        if [[ -z "${XCODE_APP}" ]]; then
+          echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
+          ls -d /Applications/Xcode*.app || true
+          exit 1
+        fi
+
+        echo "Selecting Xcode: ${XCODE_APP}"
+        sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
 
     - name: Check Xcode version
       shell: bash
