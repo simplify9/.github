@@ -43,6 +43,16 @@ on:
         required: false
         type: string
         default: ios
+      pre-build-script:
+        description: Optional bash script to run before dependency install (for example, env file mutation)
+        required: false
+        type: string
+        default: ""
+      pre-build-working-directory:
+        description: Working directory for pre-build-script
+        required: false
+        type: string
+        default: "."
 
       workspace:
         description: Path to .xcworkspace
@@ -250,6 +260,15 @@ jobs:
           sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
           xcode-select -p
           xcodebuild -version
+
+      - name: Run pre-build mutation script (optional)
+        if: ${{ inputs.pre-build-script != '' }}
+        shell: bash
+        working-directory: ${{ inputs.pre-build-working-directory }}
+        run: |
+          set -euo pipefail
+          echo "Running configured pre-build script in: $PWD"
+          ${{ inputs.pre-build-script }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
