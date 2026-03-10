@@ -120,12 +120,12 @@ on:
         default: ""
 
       versioning-strategy:
-        description: none or pbxproj-counter
+        description: none, pbxproj-counter, or pbxproj-auto-increment
         required: false
         type: string
         default: none
       pbxproj-path:
-        description: Path to project.pbxproj when using pbxproj-counter
+        description: Path to project.pbxproj when using pbxproj-driven versioning
         required: false
         type: string
         default: ""
@@ -134,6 +134,16 @@ on:
         required: false
         type: string
         default: "1.0"
+      marketing-version-bump:
+        description: For pbxproj-auto-increment, which segment to bump (patch, minor, or major)
+        required: false
+        type: string
+        default: patch
+      marketing-version-floor:
+        description: Optional minimum marketing version (for example 4.1 or 4.1.0)
+        required: false
+        type: string
+        default: ""
       build-number-offset:
         description: Offset applied when computing CURRENT_PROJECT_VERSION in pbxproj-counter mode
         required: false
@@ -298,6 +308,131 @@ jobs:
           set -euo pipefail
           pod --version
 
+      - name: Update pbxproj versions (automated)
+        if: ${{ inputs.versioning-strategy == 'pbxproj-counter' || inputs.versioning-strategy == 'pbxproj-auto-increment' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PBXPROJ_PATH="${{ inputs.pbxproj-path }}"
+          if [[ -z "${PBXPROJ_PATH}" || ! -f "${PBXPROJ_PATH}" ]]; then
+            echo "ERROR: pbxproj versioning requires a valid pbxproj-path input"
+            exit 1
+          fi
+
+          normalize_semver() {
+            local v="$1"
+            if [[ "$v" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+              echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0"
+              return 0
+            fi
+            if [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "$v"
+              return 0
+            fi
+            return 1
+          }
+
+          version_lt() {
+            local a="$1"
+            local b="$2"
+            local a1 a2 a3 b1 b2 b3
+            IFS='.' read -r a1 a2 a3 <<< "$a"
+            IFS='.' read -r b1 b2 b3 <<< "$b"
+            if (( a1 < b1 )); then return 0; fi
+            if (( a1 > b1 )); then return 1; fi
+            if (( a2 < b2 )); then return 0; fi
+            if (( a2 > b2 )); then return 1; fi
+            if (( a3 < b3 )); then return 0; fi
+            return 1
+          }
+
+          CURRENT_MARKETING_RAW=$(
+            grep -m 1 "MARKETING_VERSION = " "${PBXPROJ_PATH}" \
+              | sed -E 's/.*MARKETING_VERSION = ([^;]+);.*/\1/'
+          )
+
+          if [[ -z "${CURRENT_MARKETING_RAW}" ]]; then
+            echo "ERROR: Could not parse MARKETING_VERSION from ${PBXPROJ_PATH}"
+            exit 1
+          fi
+
+          CURRENT_MARKETING="$(normalize_semver "${CURRENT_MARKETING_RAW}")" || {
+            echo "ERROR: Unsupported MARKETING_VERSION format '${CURRENT_MARKETING_RAW}'. Expected X.Y or X.Y.Z"
+            exit 1
+          }
+
+          BASE_BUILD=$(
+            grep -m 1 "CURRENT_PROJECT_VERSION = " "${PBXPROJ_PATH}" \
+              | sed -E 's/.*CURRENT_PROJECT_VERSION = ([^;]+);.*/\1/'
+          )
+
+          if ! [[ "${BASE_BUILD}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Could not parse numeric CURRENT_PROJECT_VERSION. Got '${BASE_BUILD}'"
+            exit 1
+          fi
+
+          STRATEGY="${{ inputs.versioning-strategy }}"
+          NEW_MARKETING_VERSION=""
+          NEW_BUILD_NUMBER=""
+
+          if [[ "${STRATEGY}" == "pbxproj-counter" ]]; then
+            OFFSET="${{ inputs.build-number-offset }}"
+            if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
+              exit 1
+            fi
+
+            NEW_MARKETING_VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
+            NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
+          else
+            CUR_NORM="${CURRENT_MARKETING}"
+            IFS='.' read -r M m p <<< "${CUR_NORM}"
+
+            BUMP="${{ inputs.marketing-version-bump }}"
+            case "${BUMP}" in
+              major)
+                M=$((M + 1)); m=0; p=0 ;;
+              minor)
+                m=$((m + 1)); p=0 ;;
+              patch)
+                p=$((p + 1)) ;;
+              *)
+                echo "ERROR: Unsupported marketing-version-bump '${BUMP}'. Use patch, minor, or major."
+                exit 1 ;;
+            esac
+
+            NEW_MARKETING_VERSION="${M}.${m}.${p}"
+
+            FLOOR_RAW="${{ inputs.marketing-version-floor }}"
+            if [[ -n "${FLOOR_RAW}" ]]; then
+              FLOOR_NORM="$(normalize_semver "${FLOOR_RAW}")" || {
+                echo "ERROR: Invalid marketing-version-floor '${FLOOR_RAW}'. Expected X.Y or X.Y.Z"
+                exit 1
+              }
+
+              if version_lt "${NEW_MARKETING_VERSION}" "${FLOOR_NORM}"; then
+                NEW_MARKETING_VERSION="${FLOOR_NORM}"
+              fi
+            fi
+
+            NEW_BUILD_NUMBER=$((BASE_BUILD + 1))
+          fi
+
+          echo "CURRENT_MARKETING_VERSION=${CURRENT_MARKETING_RAW}"
+          echo "NEW_MARKETING_VERSION=${NEW_MARKETING_VERSION}"
+          echo "BASE_BUILD=${BASE_BUILD}"
+          echo "NEW_BUILD_NUMBER=${NEW_BUILD_NUMBER}"
+
+          perl -pi -e "s/\\bMARKETING_VERSION = [^;]+;/MARKETING_VERSION = ${NEW_MARKETING_VERSION};/g" "${PBXPROJ_PATH}"
+          perl -pi -e "s/\\bCURRENT_PROJECT_VERSION = [^;]+;/CURRENT_PROJECT_VERSION = ${NEW_BUILD_NUMBER};/g" "${PBXPROJ_PATH}"
+
+          echo "VERSION=${NEW_MARKETING_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${NEW_BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+          echo "Updated pbxproj (diff):"
+          git --no-pager diff -- "${PBXPROJ_PATH}" || true
+
       - name: Clean and reinstall Pods
         if: ${{ inputs.clean-reinstall-pods }}
         shell: bash
@@ -367,43 +502,6 @@ jobs:
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
-
-      - name: Update pbxproj versions (pbxproj-counter)
-        if: ${{ inputs.versioning-strategy == 'pbxproj-counter' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PBXPROJ_PATH="${{ inputs.pbxproj-path }}"
-          if [[ -z "${PBXPROJ_PATH}" || ! -f "${PBXPROJ_PATH}" ]]; then
-            echo "ERROR: pbxproj-counter requires a valid pbxproj-path input"
-            exit 1
-          fi
-
-          BASE_BUILD=$(
-            grep -m 1 "CURRENT_PROJECT_VERSION = " "${PBXPROJ_PATH}" \
-              | sed -E 's/.*CURRENT_PROJECT_VERSION = ([^;]+);.*/\1/'
-          )
-
-          if ! [[ "${BASE_BUILD}" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: Could not parse numeric CURRENT_PROJECT_VERSION. Got '${BASE_BUILD}'"
-            exit 1
-          fi
-
-          OFFSET="${{ inputs.build-number-offset }}"
-          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-            exit 1
-          fi
-
-          NEW_MARKETING_VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
-          NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
-
-          perl -pi -e "s/\\bMARKETING_VERSION = [^;]+;/MARKETING_VERSION = ${NEW_MARKETING_VERSION};/g" "${PBXPROJ_PATH}"
-          perl -pi -e "s/\\bCURRENT_PROJECT_VERSION = [^;]+;/CURRENT_PROJECT_VERSION = ${NEW_BUILD_NUMBER};/g" "${PBXPROJ_PATH}"
-
-          echo "VERSION=${NEW_MARKETING_VERSION}" >> "$GITHUB_ENV"
-          echo "BUILD_NUMBER=${NEW_BUILD_NUMBER}" >> "$GITHUB_ENV"
 
       - name: Finalize version outputs
         id: final_version
@@ -650,12 +748,27 @@ jobs:
           set -euo pipefail
 
           IPA='${{ needs.build.outputs.ipa-file }}'
+          OUTPUT_FILE="$(mktemp)"
+
+          set +e
           xcrun altool --upload-app \
             -f "${IPA}" \
             -t ios \
             --apiKey "${{ secrets.appstore-api-key-id }}" \
             --apiIssuer "${{ secrets.appstore-issuer-id }}" \
-            --output-format xml
+            --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
+          ALTOOL_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
+            echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"
+            exit ${ALTOOL_EXIT}
+          fi
+
+          if grep -qiE "Validation failed|STATE_ERROR\.VALIDATION_ERROR|Invalid Version|CFBundleShortVersionString" "${OUTPUT_FILE}"; then
+            echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
+            exit 1
+          fi
 
   release_with_environment:
     name: Upload to TestFlight
@@ -761,9 +874,24 @@ jobs:
           set -euo pipefail
 
           IPA='${{ needs.build.outputs.ipa-file }}'
+          OUTPUT_FILE="$(mktemp)"
+
+          set +e
           xcrun altool --upload-app \
             -f "${IPA}" \
             -t ios \
             --apiKey "${{ secrets.appstore-api-key-id }}" \
             --apiIssuer "${{ secrets.appstore-issuer-id }}" \
-            --output-format xml
+            --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
+          ALTOOL_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
+            echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"
+            exit ${ALTOOL_EXIT}
+          fi
+
+          if grep -qiE "Validation failed|STATE_ERROR\.VALIDATION_ERROR|Invalid Version|CFBundleShortVersionString" "${OUTPUT_FILE}"; then
+            echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
+            exit 1
+          fi
