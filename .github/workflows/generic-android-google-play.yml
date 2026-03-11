@@ -264,7 +264,26 @@ jobs:
           AAB_OUT="${AAB_OUT//\{version_name\}/${VERSION_NAME}}"
           AAB_OUT="${AAB_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
 
+          if [[ -z "${AAB_OUT}" ]]; then
+            echo "ERROR: Resolved output AAB name is empty. Check aab-name-pattern input."
+            exit 1
+          fi
+
+          SRC_DIR="$(dirname '${{ inputs.aab-source-path }}')"
+          echo "Looking for built AAB in: ${SRC_DIR}"
+          ls -lah "${SRC_DIR}" || true
+
+          if [[ ! -f "${{ inputs.aab-source-path }}" ]]; then
+            echo "ERROR: Expected AAB not found at '${{ inputs.aab-source-path }}'."
+            exit 1
+          fi
+
           mv "${{ inputs.aab-source-path }}" "${AAB_OUT}"
+
+          if [[ ! -f "${AAB_OUT}" ]]; then
+            echo "ERROR: Rename succeeded but output AAB '${AAB_OUT}' is missing."
+            exit 1
+          fi
 
           echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
 
@@ -292,7 +311,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          AAB_FILE="$(basename '${{ needs.build.outputs.aab-file }}')"
+          CANDIDATE='${{ needs.build.outputs.aab-file }}'
+          AAB_FILE=""
+
+          if [[ -n "${CANDIDATE}" ]]; then
+            AAB_FILE="$(basename "${CANDIDATE}")"
+          fi
+
+          # Fallback for cases where reusable output is empty or path does not match release runner context.
+          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
+            AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
+            echo "ERROR: No .aab file found in release workspace."
+            ls -lah
+            exit 1
+          fi
+
           echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Verify AAB exists
@@ -332,7 +368,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          AAB_FILE="$(basename '${{ needs.build.outputs.aab-file }}')"
+          CANDIDATE='${{ needs.build.outputs.aab-file }}'
+          AAB_FILE=""
+
+          if [[ -n "${CANDIDATE}" ]]; then
+            AAB_FILE="$(basename "${CANDIDATE}")"
+          fi
+
+          # Fallback for cases where reusable output is empty or path does not match release runner context.
+          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
+            AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
+            echo "ERROR: No .aab file found in release workspace."
+            ls -lah
+            exit 1
+          fi
+
           echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Verify AAB exists
