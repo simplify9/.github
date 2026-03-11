@@ -1,0 +1,90 @@
+name: Android Google Play Dispatch Template
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  staging:
+    name: Android Staging Build and Release
+    if: ${{ github.ref_name == 'staging' }}
+    uses: ./.github/workflows/generic-android-google-play.yml
+    with:
+      ubuntu-runner: ubuntu-latest
+      node-version: "20.19.4"
+      java-version: "17"
+      java-distribution: temurin
+
+      app-id: com.itgsolution.quranicthoughts
+      app-slug: quranicthoughts
+      version-prefix: "2.0"
+      version-code-offset: "0"
+
+      install-command: yarn
+      install-jetifier: true
+      run-jetifier: true
+
+      build-root-directory: android
+      gradle-task: bundleRelease
+      gradle-version: wrapper
+
+      keystore-output-path: android/app/release.keystore
+      aab-source-path: android/app/build/outputs/bundle/release/app-release.aab
+      aab-name-pattern: "quranicthoughts-release-{version_name}.aab"
+      artifact-name: aab
+
+      play-track: internal
+      release-status: completed
+      changes-not-sent-for-review: false
+      release-environment: staging
+    secrets:
+      android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      android-keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+
+  production:
+    name: Android Production Build and Release
+    if: ${{ github.ref_name == 'main' }}
+    uses: ./.github/workflows/generic-android-google-play.yml
+    with:
+      ubuntu-runner: ubuntu-latest
+      node-version: "20.19.4"
+      java-version: "17"
+      java-distribution: temurin
+
+      app-id: com.itgsolution.quranicthoughts
+      app-slug: quranicthoughts
+      version-prefix: "2.0"
+      version-code-offset: "0"
+
+      install-command: yarn
+      install-jetifier: true
+      run-jetifier: true
+
+      build-root-directory: android
+      gradle-task: bundleRelease
+      gradle-version: wrapper
+
+      keystore-output-path: android/app/release.keystore
+      aab-source-path: android/app/build/outputs/bundle/release/app-release.aab
+      aab-name-pattern: "quranicthoughts-release-{version_name}.aab"
+      artifact-name: aab
+
+      play-track: production
+      release-status: completed
+      changes-not-sent-for-review: false
+      release-environment: production
+    secrets:
+      android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      android-keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}

@@ -1,0 +1,338 @@
+name: Generic Android Build and Google Play Release (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ubuntu-runner:
+        description: GitHub-hosted Ubuntu runner label
+        required: false
+        type: string
+        default: ubuntu-latest
+      node-version:
+        description: Node version for JS dependency install
+        required: false
+        type: string
+        default: "20.19.4"
+      java-version:
+        description: Java version for Android builds
+        required: false
+        type: string
+        default: "17"
+      java-distribution:
+        description: Java distribution for setup-java
+        required: false
+        type: string
+        default: temurin
+
+      app-id:
+        description: Android applicationId / package name
+        required: true
+        type: string
+      app-slug:
+        description: App slug used in output AAB file naming
+        required: false
+        type: string
+        default: app
+      version-prefix:
+        description: Version prefix used for VERSION_NAME (for example 2.0)
+        required: false
+        type: string
+        default: "1.0"
+      version-name-override:
+        description: Optional explicit VERSION_NAME; if empty uses {version-prefix}.{run_number}
+        required: false
+        type: string
+        default: ""
+      version-code-offset:
+        description: Numeric offset added to github.run_number for VERSION_CODE
+        required: false
+        type: string
+        default: "0"
+
+      install-command:
+        description: Dependency install command
+        required: false
+        type: string
+        default: yarn
+      install-jetifier:
+        description: Install jetifier as dev dependency
+        required: false
+        type: boolean
+        default: true
+      run-jetifier:
+        description: Run npx jetify
+        required: false
+        type: boolean
+        default: true
+
+      build-root-directory:
+        description: Android project root for Gradle
+        required: false
+        type: string
+        default: android
+      gradle-task:
+        description: Gradle task to build release artifact
+        required: false
+        type: string
+        default: bundleRelease
+      gradle-version:
+        description: Gradle version input for gradle-build-action
+        required: false
+        type: string
+        default: wrapper
+      gradle-extra-arguments:
+        description: Optional extra Gradle args
+        required: false
+        type: string
+        default: ""
+
+      keystore-output-path:
+        description: Where to write decoded keystore
+        required: false
+        type: string
+        default: android/app/release.keystore
+      aab-source-path:
+        description: Built AAB path to rename/upload
+        required: false
+        type: string
+        default: android/app/build/outputs/bundle/release/app-release.aab
+      aab-name-pattern:
+        description: Output AAB name pattern with tokens {app_slug},{version_name},{run_number}
+        required: false
+        type: string
+        default: "{app_slug}-release-{version_name}.aab"
+      artifact-name:
+        description: Artifact name for upload/download
+        required: false
+        type: string
+        default: aab
+
+      play-track:
+        description: Google Play track (internal, alpha, beta, production)
+        required: false
+        type: string
+        default: internal
+      release-status:
+        description: Google Play release status
+        required: false
+        type: string
+        default: completed
+      changes-not-sent-for-review:
+        description: If true, use changesNotSentForReview
+        required: false
+        type: boolean
+        default: false
+      release-environment:
+        description: Optional GitHub environment for release job
+        required: false
+        type: string
+        default: ""
+
+    secrets:
+      android-keystore-base64:
+        description: Base64 encoded Android keystore
+        required: true
+      android-keystore-password:
+        description: Android keystore password
+        required: true
+      android-key-alias:
+        description: Android signing key alias
+        required: true
+      android-key-password:
+        description: Android signing key password
+        required: true
+      google-play-service-account-json:
+        description: Google Play service account JSON
+        required: true
+
+    outputs:
+      version-name:
+        description: Version name used for this release
+        value: ${{ jobs.build.outputs.version-name }}
+      version-code:
+        description: Version code used for this release
+        value: ${{ jobs.build.outputs.version-code }}
+      aab-file:
+        description: Output AAB file uploaded and released
+        value: ${{ jobs.build.outputs.aab-file }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build AAB
+    runs-on: ${{ inputs.ubuntu-runner }}
+    outputs:
+      version-name: ${{ steps.compute.outputs.version_name }}
+      version-code: ${{ steps.compute.outputs.version_code }}
+      aab-file: ${{ steps.rename.outputs.aab_file }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version values
+        id: compute
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OFFSET="${{ inputs.version-code-offset }}"
+          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: version-code-offset must be numeric. Got '${OFFSET}'"
+            exit 1
+          fi
+
+          VERSION_CODE=$((GITHUB_RUN_NUMBER + OFFSET))
+          VERSION_NAME="${{ inputs.version-prefix }}.${GITHUB_RUN_NUMBER}"
+
+          if [[ -n "${{ inputs.version-name-override }}" ]]; then
+            VERSION_NAME="${{ inputs.version-name-override }}"
+          fi
+
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: yarn
+
+      - name: Setup Java (Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+          cache: gradle
+
+      - name: Install node dependencies
+        shell: bash
+        run: ${{ inputs.install-command }}
+
+      - name: Install jetifier
+        if: ${{ inputs.install-jetifier }}
+        shell: bash
+        run: yarn add -D jetifier
+
+      - name: Jetify
+        if: ${{ inputs.run-jetifier }}
+        shell: bash
+        run: npx jetify
+
+      - name: Restore keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname '${{ inputs.keystore-output-path }}')"
+          echo "${{ secrets.android-keystore-base64 }}" | base64 -d > "${{ inputs.keystore-output-path }}"
+
+      - name: Verify keystore exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah "$(dirname '${{ inputs.keystore-output-path }}')"
+          test -f "${{ inputs.keystore-output-path }}"
+
+      - name: Build Release Bundle (AAB)
+        uses: gradle/gradle-build-action@v3
+        with:
+          build-root-directory: ${{ inputs.build-root-directory }}
+          arguments: >
+            ${{ inputs.gradle-task }}
+            -PversionName=${{ steps.compute.outputs.version_name }}
+            -PversionCode=${{ steps.compute.outputs.version_code }}
+            -PapplicationId=${{ inputs.app-id }}
+            -Pandroid.injected.signing.store.file=${{ github.workspace }}/${{ inputs.keystore-output-path }}
+            -Pandroid.injected.signing.store.password=${{ secrets.android-keystore-password }}
+            -Pandroid.injected.signing.key.alias=${{ secrets.android-key-alias }}
+            -Pandroid.injected.signing.key.password=${{ secrets.android-key-password }}
+            ${{ inputs.gradle-extra-arguments }}
+          gradle-version: ${{ inputs.gradle-version }}
+
+      - name: Rename bundle
+        id: rename
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATTERN='${{ inputs.aab-name-pattern }}'
+          AAB_OUT="${PATTERN//\{app_slug\}/${{ inputs.app-slug }}}"
+          AAB_OUT="${AAB_OUT//\{version_name\}/${VERSION_NAME}}"
+          AAB_OUT="${AAB_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
+
+          mv "${{ inputs.aab-source-path }}" "${AAB_OUT}"
+
+          echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ steps.rename.outputs.aab_file }}
+
+  release:
+    name: Release to Google Play
+    runs-on: ${{ inputs.ubuntu-runner }}
+    needs: build
+    if: ${{ inputs.release-environment == '' }}
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .
+
+      - name: Verify AAB exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah
+          test -f "${{ needs.build.outputs.aab-file }}"
+
+      - name: Upload to Google Play
+        uses: simplify9/.github/.github/actions/upload-google-play-release@main
+        with:
+          service_account_json: ${{ secrets.google-play-service-account-json }}
+          package_name: ${{ inputs.app-id }}
+          aab_path: ${{ needs.build.outputs.aab-file }}
+          track: ${{ inputs.play-track }}
+          release_name: ${{ needs.build.outputs.version-name }}
+          status: ${{ inputs.release-status }}
+          changes_not_sent_for_review: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
+
+  release_with_environment:
+    name: Release to Google Play
+    runs-on: ${{ inputs.ubuntu-runner }}
+    needs: build
+    if: ${{ inputs.release-environment != '' }}
+    environment: ${{ inputs.release-environment }}
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .
+
+      - name: Verify AAB exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lah
+          test -f "${{ needs.build.outputs.aab-file }}"
+
+      - name: Upload to Google Play
+        uses: simplify9/.github/.github/actions/upload-google-play-release@main
+        with:
+          service_account_json: ${{ secrets.google-play-service-account-json }}
+          package_name: ${{ inputs.app-id }}
+          aab_path: ${{ needs.build.outputs.aab-file }}
+          track: ${{ inputs.play-track }}
+          release_name: ${{ needs.build.outputs.version-name }}
+          status: ${{ inputs.release-status }}
+          changes_not_sent_for_review: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
