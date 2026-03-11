@@ -287,19 +287,27 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: .
 
+      - name: Resolve AAB path for release runner
+        id: aab
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAB_FILE="$(basename '${{ needs.build.outputs.aab-file }}')"
+          echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
+
       - name: Verify AAB exists
         shell: bash
         run: |
           set -euo pipefail
           ls -lah
-          test -f "${{ needs.build.outputs.aab-file }}"
+          test -f "${{ steps.aab.outputs.path }}"
 
       - name: Upload to Google Play
         uses: simplify9/.github/.github/actions/upload-google-play-release@main
         with:
           service_account_json: ${{ secrets.google-play-service-account-json }}
           package_name: ${{ inputs.app-id }}
-          aab_path: ${{ needs.build.outputs.aab-file }}
+          aab_path: ${{ steps.aab.outputs.path }}
           track: ${{ inputs.play-track }}
           release_name: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
@@ -319,19 +327,27 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: .
 
+      - name: Resolve AAB path for release runner
+        id: aab
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAB_FILE="$(basename '${{ needs.build.outputs.aab-file }}')"
+          echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
+
       - name: Verify AAB exists
         shell: bash
         run: |
           set -euo pipefail
           ls -lah
-          test -f "${{ needs.build.outputs.aab-file }}"
+          test -f "${{ steps.aab.outputs.path }}"
 
       - name: Upload to Google Play
         uses: simplify9/.github/.github/actions/upload-google-play-release@main
         with:
           service_account_json: ${{ secrets.google-play-service-account-json }}
           package_name: ${{ inputs.app-id }}
-          aab_path: ${{ needs.build.outputs.aab-file }}
+          aab_path: ${{ steps.aab.outputs.path }}
           track: ${{ inputs.play-track }}
           release_name: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
