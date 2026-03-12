@@ -21,9 +21,9 @@ jobs:
       java-version: "17"
       java-distribution: temurin
 
-      app-id: com.itgsolution.quranicthoughts
-      app-slug: quranicthoughts
-      version-prefix: "2.0"
+      app-id: com.example.app
+      app-slug: app
+      version-prefix: "1.0"
       version-code-offset: "0"
 
       install-command: yarn
@@ -36,7 +36,7 @@ jobs:
 
       keystore-output-path: android/app/release.keystore
       aab-source-path: android/app/build/outputs/bundle/release/app-release.aab
-      aab-name-pattern: "quranicthoughts-release-{version_name}.aab"
+      aab-name-pattern: "app-release-{version_name}.aab"
       artifact-name: aab
 
       play-track: internal
@@ -60,9 +60,9 @@ jobs:
       java-version: "17"
       java-distribution: temurin
 
-      app-id: com.itgsolution.quranicthoughts
-      app-slug: quranicthoughts
-      version-prefix: "2.0"
+      app-id: com.example.app
+      app-slug: app
+      version-prefix: "1.0"
       version-code-offset: "0"
 
       install-command: yarn
@@ -75,7 +75,7 @@ jobs:
 
       keystore-output-path: android/app/release.keystore
       aab-source-path: android/app/build/outputs/bundle/release/app-release.aab
-      aab-name-pattern: "quranicthoughts-release-{version_name}.aab"
+      aab-name-pattern: "app-release-{version_name}.aab"
       artifact-name: aab
 
       play-track: production

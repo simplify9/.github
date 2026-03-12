@@ -24,21 +24,21 @@ jobs:
       verify-cocoapods: true
       clean-reinstall-pods: true
 
-      workspace: ios/funrideapp.xcworkspace
-      scheme: funrideapp
+      workspace: ios/App.xcworkspace
+      scheme: App
       configuration: Release
-      archive-path: output/funrideapp.xcarchive
+      archive-path: output/App.xcarchive
       export-path: output/package
 
       versioning-strategy: pbxproj-counter
-      pbxproj-path: ios/funrideapp.xcodeproj/project.pbxproj
-      marketing-prefix: "4.0"
+      pbxproj-path: ios/App.xcodeproj/project.pbxproj
+      marketing-prefix: "1.0"
       build-number-offset: "100"
 
       use-manual-inline-archive: true
       generate-export-options: true
 
-      ipa-name-pattern: "funride-{version}({build_number}).ipa"
+      ipa-name-pattern: "app-{version}({build_number}).ipa"
       artifact-name: ipa
 
       upload-tool: altool
@@ -67,21 +67,21 @@ jobs:
       verify-cocoapods: true
       clean-reinstall-pods: true
 
-      workspace: ios/funrideapp.xcworkspace
-      scheme: funrideapp
+      workspace: ios/App.xcworkspace
+      scheme: App
       configuration: Release
-      archive-path: output/funrideapp.xcarchive
+      archive-path: output/App.xcarchive
       export-path: output/package
 
       versioning-strategy: pbxproj-counter
-      pbxproj-path: ios/funrideapp.xcodeproj/project.pbxproj
-      marketing-prefix: "4.0"
+      pbxproj-path: ios/App.xcodeproj/project.pbxproj
+      marketing-prefix: "1.0"
       build-number-offset: "100"
 
       use-manual-inline-archive: true
       generate-export-options: true
 
-      ipa-name-pattern: "funride-{version}({build_number}).ipa"
+      ipa-name-pattern: "app-{version}({build_number}).ipa"
       artifact-name: ipa
 
       upload-tool: altool
