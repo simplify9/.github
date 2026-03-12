@@ -16,7 +16,7 @@ jobs:
     if: ${{ github.ref_name == 'staging' }}
     uses: ./.github/workflows/generic-ios-testflight.yml
     with:
-      macos-runner: macos-15
+      macos-runner: macos-latest
       node-version: "24"
       xcode-version: "26"
 
@@ -59,7 +59,7 @@ jobs:
     if: ${{ github.ref_name == 'main' }}
     uses: ./.github/workflows/generic-ios-testflight.yml
     with:
-      macos-runner: macos-15
+      macos-runner: macos-latest
       node-version: "24"
       xcode-version: "26"
 

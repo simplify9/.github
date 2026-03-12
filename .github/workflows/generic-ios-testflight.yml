@@ -7,7 +7,7 @@ on:
         description: GitHub-hosted macOS runner label
         required: false
         type: string
-        default: macos-15
+        default: macos-latest
       node-version:
         description: Node version for React Native dependency installation
         required: false
@@ -690,6 +690,31 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: .
 
+      - name: Resolve IPA path for release runner
+        id: ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CANDIDATE='${{ needs.build.outputs.ipa-file }}'
+          IPA_FILE=""
+
+          if [[ -n "${CANDIDATE}" ]]; then
+            IPA_FILE="$(basename "${CANDIDATE}")"
+          fi
+
+          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
+            IPA_FILE="$(ls -1 *.ipa 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
+            echo "ERROR: No .ipa file found in release workspace."
+            ls -lah
+            exit 1
+          fi
+
+          echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
+
       - name: Install App Store Connect API key (raw)
         if: ${{ inputs.appstore-key-format == 'raw' }}
         shell: bash
@@ -733,7 +758,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          IPA='${{ needs.build.outputs.ipa-file }}'
+          IPA='${{ steps.ipa.outputs.path }}'
+
+          if ! command -v xcrun >/dev/null 2>&1; then
+            echo "ERROR: xcrun is not available on this runner."
+            exit 1
+          fi
+
+          if ! xcrun --find iTMSTransporter >/dev/null 2>&1; then
+            echo "ERROR: iTMSTransporter is not available in selected Xcode on this runner."
+            exit 1
+          fi
+
           xcrun iTMSTransporter \
             -m upload \
             -assetFile "${IPA}" \
@@ -747,7 +783,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          IPA='${{ needs.build.outputs.ipa-file }}'
+          IPA='${{ steps.ipa.outputs.path }}'
           OUTPUT_FILE="$(mktemp)"
 
           set +e
@@ -816,6 +852,31 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: .
 
+      - name: Resolve IPA path for release runner
+        id: ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CANDIDATE='${{ needs.build.outputs.ipa-file }}'
+          IPA_FILE=""
+
+          if [[ -n "${CANDIDATE}" ]]; then
+            IPA_FILE="$(basename "${CANDIDATE}")"
+          fi
+
+          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
+            IPA_FILE="$(ls -1 *.ipa 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
+            echo "ERROR: No .ipa file found in release workspace."
+            ls -lah
+            exit 1
+          fi
+
+          echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
+
       - name: Install App Store Connect API key (raw)
         if: ${{ inputs.appstore-key-format == 'raw' }}
         shell: bash
@@ -859,7 +920,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          IPA='${{ needs.build.outputs.ipa-file }}'
+          IPA='${{ steps.ipa.outputs.path }}'
+
+          if ! command -v xcrun >/dev/null 2>&1; then
+            echo "ERROR: xcrun is not available on this runner."
+            exit 1
+          fi
+
+          if ! xcrun --find iTMSTransporter >/dev/null 2>&1; then
+            echo "ERROR: iTMSTransporter is not available in selected Xcode on this runner."
+            exit 1
+          fi
+
           xcrun iTMSTransporter \
             -m upload \
             -assetFile "${IPA}" \
@@ -873,7 +945,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          IPA='${{ needs.build.outputs.ipa-file }}'
+          IPA='${{ steps.ipa.outputs.path }}'
           OUTPUT_FILE="$(mktemp)"
 
           set +e
