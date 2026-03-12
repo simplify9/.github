@@ -17,7 +17,7 @@ jobs:
     uses: ./.github/workflows/generic-ios-testflight.yml
     with:
       macos-runner: macos-15
-      node-version: "20.10.0"
+      node-version: "24"
       xcode-version: "26"
 
       use-simplify9-xcode-setup: false
@@ -60,7 +60,7 @@ jobs:
     uses: ./.github/workflows/generic-ios-testflight.yml
     with:
       macos-runner: macos-15
-      node-version: "20.10.0"
+      node-version: "24"
       xcode-version: "26"
 
       use-simplify9-xcode-setup: false

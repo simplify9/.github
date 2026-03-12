@@ -12,7 +12,7 @@ on:
         description: Node version for JS dependency install
         required: false
         type: string
-        default: "20.19.4"
+        default: "24"
       java-version:
         description: Java version for Android builds
         required: false
