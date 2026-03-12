@@ -17,7 +17,7 @@ jobs:
     uses: ./.github/workflows/generic-android-google-play.yml
     with:
       ubuntu-runner: ubuntu-latest
-      node-version: "20.19.4"
+      node-version: "24"
       java-version: "17"
       java-distribution: temurin
 
@@ -56,7 +56,7 @@ jobs:
     uses: ./.github/workflows/generic-android-google-play.yml
     with:
       ubuntu-runner: ubuntu-latest
-      node-version: "20.19.4"
+      node-version: "24"
       java-version: "17"
       java-distribution: temurin
 
