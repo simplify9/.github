@@ -43,11 +43,16 @@ on:
         required: false
         type: string
         default: ""
-      version-code-offset:
-        description: Numeric offset added to github.run_number for VERSION_CODE
+      version-name-offset:
+        description: Numeric offset added to github.run_number when computing VERSION_NAME
         required: false
         type: string
         default: "0"
+      version-code-offset:
+        description: Numeric offset added to github.run_number for VERSION_CODE (set high for CI migrations)
+        required: false
+        type: string
+        default: "1000000"
 
       install-command:
         description: Dependency install command
@@ -178,17 +183,46 @@ jobs:
         run: |
           set -euo pipefail
 
-          OFFSET="${{ inputs.version-code-offset }}"
-          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: version-code-offset must be numeric. Got '${OFFSET}'"
+          # Keep versionName and versionCode intentionally decoupled:
+          # - versionName is human-readable for release visibility.
+          # - versionCode is a strictly increasing integer for Play upgrade-path checks.
+          NAME_OFFSET_RAW="${{ inputs.version-name-offset }}"
+          CODE_OFFSET_RAW="${{ inputs.version-code-offset }}"
+          MAX_PLAY_VERSION_CODE=2100000000
+
+          if ! [[ "${NAME_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: version-name-offset must be a non-negative integer. Got '${NAME_OFFSET_RAW}'."
             exit 1
           fi
 
-          VERSION_CODE=$((GITHUB_RUN_NUMBER + OFFSET))
-          VERSION_NAME="${{ inputs.version-prefix }}.${GITHUB_RUN_NUMBER}"
+          if ! [[ "${CODE_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: version-code-offset must be a non-negative integer. Got '${CODE_OFFSET_RAW}'."
+            exit 1
+          fi
+
+          NAME_OFFSET=$((NAME_OFFSET_RAW))
+          CODE_OFFSET=$((CODE_OFFSET_RAW))
+
+          VERSION_NAME_NUMBER=$((GITHUB_RUN_NUMBER + NAME_OFFSET))
+          VERSION_CODE=$((GITHUB_RUN_NUMBER + CODE_OFFSET))
+          VERSION_NAME="${{ inputs.version-prefix }}.${VERSION_NAME_NUMBER}"
+          VERSION_NAME_SOURCE="computed"
+          OVERRIDE_DISPLAY="<empty>"
 
           if [[ -n "${{ inputs.version-name-override }}" ]]; then
             VERSION_NAME="${{ inputs.version-name-override }}"
+            VERSION_NAME_SOURCE="override"
+            OVERRIDE_DISPLAY="${{ inputs.version-name-override }}"
+          fi
+
+          if ! [[ "${VERSION_CODE}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "ERROR: Computed VERSION_CODE must be a positive integer. Got '${VERSION_CODE}'."
+            exit 1
+          fi
+
+          if (( VERSION_CODE > MAX_PLAY_VERSION_CODE )); then
+            echo "ERROR: Computed VERSION_CODE '${VERSION_CODE}' exceeds Play-safe limit '${MAX_PLAY_VERSION_CODE}'."
+            exit 1
           fi
 
           echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
@@ -196,6 +230,19 @@ jobs:
 
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Android Version Computation"
+            echo ""
+            echo "- versionName source: ${VERSION_NAME_SOURCE}"
+            echo "- versionPrefix: ${{ inputs.version-prefix }}"
+            echo "- versionName override: ${OVERRIDE_DISPLAY}"
+            echo "- versionName offset: ${NAME_OFFSET}"
+            echo "- versionCode offset: ${CODE_OFFSET}"
+            echo "- github.run_number: ${GITHUB_RUN_NUMBER}"
+            echo "- final versionName: ${VERSION_NAME}"
+            echo "- final versionCode: ${VERSION_CODE}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
         uses: actions/setup-node@v4
