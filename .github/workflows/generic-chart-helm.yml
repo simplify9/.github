@@ -288,7 +288,7 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
-          build-args: ${{ (inputs.package-nuget && secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
+          build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
 
   deploy:
     runs-on: ubuntu-latest
