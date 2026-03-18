@@ -34,8 +34,9 @@ on:
         default: "2024-10-20"
         type: string
       route:
-        description: Route / custom domain for the Worker (e.g., example.com)
-        required: true
+        description: Route / custom domain for the Worker (e.g., example.com). If blank, falls back to repo vars CLOUDFLARE_ROUTE then ROUTE.
+        required: false
+        default: ""
         type: string
       project_name:
         description: Base Worker project name (without env suffix)
@@ -112,6 +113,28 @@ jobs:
             npm run ${{ inputs.build_script }}
           fi
 
+      - name: Validate middleware compatibility for Cloudflare
+        run: |
+          set -euo pipefail
+
+          if [ -f "src/proxy.ts" ] || [ -f "proxy.ts" ]; then
+            echo "::error::Node-style middleware entry detected (proxy.ts). Cloudflare/OpenNext requires middleware.ts with edge runtime."
+            echo "Rename proxy.ts to middleware.ts and export config.runtime = \"edge\"."
+            exit 1
+          fi
+
+          MIDDLEWARE_FILE=""
+          if [ -f "src/middleware.ts" ]; then
+            MIDDLEWARE_FILE="src/middleware.ts"
+          elif [ -f "middleware.ts" ]; then
+            MIDDLEWARE_FILE="middleware.ts"
+          fi
+
+          if [ -n "$MIDDLEWARE_FILE" ] && grep -Eq 'runtime[[:space:]]*:[[:space:]]*["'"'"']nodejs["'"'"']' "$MIDDLEWARE_FILE"; then
+            echo "::error::Node.js middleware runtime detected in $MIDDLEWARE_FILE. Use runtime = \"edge\" for Cloudflare/OpenNext."
+            exit 1
+          fi
+
       - name: Create OpenNext.js configuration
         run: |
           cat > open-next.config.ts << 'EOF'
@@ -127,7 +150,7 @@ jobs:
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
           COMPATIBILITY_DATE: ${{ inputs.compatibility_date }}
-          ROUTE: ${{ inputs.route }}
+          ROUTE: ${{ inputs.route != '' && inputs.route || vars.CLOUDFLARE_ROUTE || vars.ROUTE }}
           PROJECT_NAME: ${{ inputs.project_name }}
           ENVIRONMENT: ${{ inputs.environment }}
           ASSETS_DIR: ${{ inputs.assets_dir }}
