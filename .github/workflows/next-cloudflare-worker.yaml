@@ -6,7 +6,7 @@ on:
       node_version:
         description: Node.js version to use
         required: false
-        default: "20"
+        default: "24"
         type: string
       package_manager:
         description: One of npm|yarn|pnpm (used for caching + install command)
@@ -49,11 +49,6 @@ on:
         description: Directory with static assets (usually .open-next/assets)
         required: false
         default: ".open-next/assets"
-        type: string
-      wrangler_action_version:
-        description: Version tag for cloudflare/wrangler-action
-        required: false
-        default: "v3"
         type: string
       build_script:
         description: Build command
@@ -139,7 +134,7 @@ jobs:
           BUILD_FOR_OPENNEXT: "true"
 
       - name: Install OpenNext.js Cloudflare adapter
-        run: npm install @opennextjs/cloudflare@1.11.0 --no-save --force --no-package-lock
+        run: npm install @opennextjs/cloudflare@${{ inputs.opennextjs_version }} --no-save --force --no-package-lock
 
       - name: List local binaries
         run: ls -la node_modules/.bin
