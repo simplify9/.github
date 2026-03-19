@@ -728,13 +728,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${APPSTORE_API_KEY_ID}" ]]; then
+          if [ -z "${APPSTORE_API_KEY_ID:-}" ]; then
             echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
           fi
 
-          if [[ -z "${APPSTORE_ISSUER_ID}" ]]; then
+          if [ -z "${APPSTORE_ISSUER_ID:-}" ]; then
             echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
@@ -910,13 +910,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${APPSTORE_API_KEY_ID}" ]]; then
+          if [ -z "${APPSTORE_API_KEY_ID:-}" ]; then
             echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
           fi
 
-          if [[ -z "${APPSTORE_ISSUER_ID}" ]]; then
+          if [ -z "${APPSTORE_ISSUER_ID:-}" ]; then
             echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
