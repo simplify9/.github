@@ -33,13 +33,17 @@ on:
         required: false
         type: string
         default: app
+      # Versioning inputs:
+      # - version-prefix is the base release line.
+      # - version-name-offset moves the run counter for versionName.
+      # - version-code-offset keeps Play versionCode strictly increasing.
       version-prefix:
-        description: Version prefix used for VERSION_NAME (for example 2.0)
+        description: Base version for VERSION_NAME (X.Y or X.Y.Z, for example 4.0.0)
         required: false
         type: string
-        default: "1.0"
+        default: "1.0.0"
       version-name-override:
-        description: Optional explicit VERSION_NAME; if empty uses {version-prefix}.{run_number}
+        description: Optional explicit VERSION_NAME; if empty uses base version + increment with single-digit carry
         required: false
         type: string
         default: ""
@@ -132,6 +136,7 @@ on:
         required: false
         type: string
         default: ""
+      # Build-only toggle. When true, both Google Play release jobs are skipped.
       disable-release:
         description: If true, skip Google Play release jobs and run build-only
         required: false
@@ -202,6 +207,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          # versionName uses carry-based progression from base version + run count.
+          # versionCode remains the Play-safe monotonic counter.
           # Keep versionName and versionCode intentionally decoupled:
           # - versionName is human-readable for release visibility.
           # - versionCode is a strictly increasing integer for Play upgrade-path checks.
@@ -222,9 +229,8 @@ jobs:
           NAME_OFFSET=$((NAME_OFFSET_RAW))
           CODE_OFFSET=$((CODE_OFFSET_RAW))
 
-          VERSION_NAME_NUMBER=$((GITHUB_RUN_NUMBER + NAME_OFFSET))
           VERSION_CODE=$((GITHUB_RUN_NUMBER + CODE_OFFSET))
-          VERSION_NAME="${{ inputs.version-prefix }}.${VERSION_NAME_NUMBER}"
+          INCREMENT_COUNT=$((GITHUB_RUN_NUMBER + NAME_OFFSET))
           VERSION_NAME_SOURCE="computed"
           OVERRIDE_DISPLAY="<empty>"
 
@@ -232,6 +238,40 @@ jobs:
             VERSION_NAME="${{ inputs.version-name-override }}"
             VERSION_NAME_SOURCE="override"
             OVERRIDE_DISPLAY="${{ inputs.version-name-override }}"
+          else
+            BASE_VERSION_RAW="${{ inputs.version-prefix }}"
+            BASE_MAJOR=""
+            BASE_MINOR=""
+            BASE_PATCH=""
+
+            if [[ "${BASE_VERSION_RAW}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              BASE_MAJOR="${BASH_REMATCH[1]}"
+              BASE_MINOR="${BASH_REMATCH[2]}"
+              BASE_PATCH="${BASH_REMATCH[3]}"
+            elif [[ "${BASE_VERSION_RAW}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+              BASE_MAJOR="${BASH_REMATCH[1]}"
+              BASE_MINOR="${BASH_REMATCH[2]}"
+              BASE_PATCH="0"
+            else
+              echo "ERROR: version-prefix must be in X.Y or X.Y.Z format. Got '${BASE_VERSION_RAW}'."
+              exit 1
+            fi
+
+            if (( BASE_MINOR > 9 || BASE_PATCH > 9 )); then
+              echo "ERROR: version-prefix minor and patch must be single digits (0-9). Got '${BASE_VERSION_RAW}'."
+              exit 1
+            fi
+
+            PATCH_TOTAL=$((BASE_PATCH + INCREMENT_COUNT))
+            PATCH_CARRY=$((PATCH_TOTAL / 10))
+            FINAL_PATCH=$((PATCH_TOTAL % 10))
+
+            MINOR_TOTAL=$((BASE_MINOR + PATCH_CARRY))
+            MINOR_CARRY=$((MINOR_TOTAL / 10))
+            FINAL_MINOR=$((MINOR_TOTAL % 10))
+
+            FINAL_MAJOR=$((BASE_MAJOR + MINOR_CARRY))
+            VERSION_NAME="${FINAL_MAJOR}.${FINAL_MINOR}.${FINAL_PATCH}"
           fi
 
           if ! [[ "${VERSION_CODE}" =~ ^[1-9][0-9]*$ ]]; then
@@ -254,9 +294,10 @@ jobs:
             echo "## Android Version Computation"
             echo ""
             echo "- versionName source: ${VERSION_NAME_SOURCE}"
-            echo "- versionPrefix: ${{ inputs.version-prefix }}"
+            echo "- base version: ${{ inputs.version-prefix }}"
             echo "- versionName override: ${OVERRIDE_DISPLAY}"
             echo "- versionName offset: ${NAME_OFFSET}"
+            echo "- versionName increment count: ${INCREMENT_COUNT}"
             echo "- versionCode offset: ${CODE_OFFSET}"
             echo "- github.run_number: ${GITHUB_RUN_NUMBER}"
             echo "- final versionName: ${VERSION_NAME}"
@@ -363,6 +404,7 @@ jobs:
     name: Release to Google Play
     runs-on: ${{ inputs.ubuntu-runner }}
     needs: build
+    # Release path without GitHub Environment protection.
     if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
 
     steps:
@@ -431,6 +473,7 @@ jobs:
     name: Release to Google Play
     runs-on: ${{ inputs.ubuntu-runner }}
     needs: build
+    # Release path with GitHub Environment protection/approvals.
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
 
