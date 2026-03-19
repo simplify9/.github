@@ -21,8 +21,8 @@ concurrency:
 #   (github.run_number + version-code-offset), while versionName stays human-readable.
 # - For Azure/Jenkins migration, set version-code-offset above your last shipped versionCode.
 # - Example to continue after last release 4.0.225:
-#   version-prefix: "4.0"
-#   version-name-offset: "225"    # computed name starts at 4.0.226 on run_number=1
+#   version-prefix: "4.0.0"
+#   version-name-offset: "225"    # computed name starts at 4.2.6 on run_number=1 with single-digit carry
 #   version-code-offset: "1000000" # or another safely higher baseline than legacy versionCode
 # - Re-runs keep the same github.run_number (run attempt does not increment it).
 
@@ -39,9 +39,9 @@ jobs:
 
       app-id: com.example.app
       app-slug: app
-      # versionName is human-readable and can be migrated with version-name-offset.
+      # versionName uses base version + increment count with single-digit carry.
       # versionCode is Play-upgrade critical and should stay strictly increasing.
-      version-prefix: "1.0"
+      version-prefix: "1.0.0"
       version-name-override: ""
       version-name-offset: "0"
       version-code-offset: "1000000"
@@ -83,9 +83,9 @@ jobs:
 
       app-id: com.example.app
       app-slug: app
-      # versionName is human-readable and can be migrated with version-name-offset.
+      # versionName uses base version + increment count with single-digit carry.
       # versionCode is Play-upgrade critical and should stay strictly increasing.
-      version-prefix: "1.0"
+      version-prefix: "1.0.0"
       version-name-override: ""
       version-name-offset: "0"
       version-code-offset: "1000000"
