@@ -392,9 +392,11 @@ jobs:
 
       - name: Validate release credentials
         shell: bash
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
         run: |
           set -euo pipefail
-          if [[ -z "${{ secrets.google-play-service-account-json }}" ]]; then
+          if [[ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON}" ]]; then
             echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
             echo "Set disable-release=true to run build-only without Google Play publish."
             exit 1
@@ -459,9 +461,11 @@ jobs:
 
       - name: Validate release credentials
         shell: bash
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
         run: |
           set -euo pipefail
-          if [[ -z "${{ secrets.google-play-service-account-json }}" ]]; then
+          if [[ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON}" ]]; then
             echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
             echo "Set disable-release=true to run build-only without Google Play publish."
             exit 1
