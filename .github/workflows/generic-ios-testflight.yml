@@ -722,16 +722,19 @@ jobs:
 
       - name: Validate release credentials
         shell: bash
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
+          APPSTORE_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${{ secrets.appstore-api-key-id }}" ]]; then
+          if [[ -z "${APPSTORE_API_KEY_ID}" ]]; then
             echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
           fi
 
-          if [[ -z "${{ secrets.appstore-issuer-id }}" ]]; then
+          if [[ -z "${APPSTORE_ISSUER_ID}" ]]; then
             echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
@@ -901,16 +904,19 @@ jobs:
 
       - name: Validate release credentials
         shell: bash
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
+          APPSTORE_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${{ secrets.appstore-api-key-id }}" ]]; then
+          if [[ -z "${APPSTORE_API_KEY_ID}" ]]; then
             echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
           fi
 
-          if [[ -z "${{ secrets.appstore-issuer-id }}" ]]; then
+          if [[ -z "${APPSTORE_ISSUER_ID}" ]]; then
             echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
             echo "Set disable-release=true to run build-only without TestFlight upload."
             exit 1
