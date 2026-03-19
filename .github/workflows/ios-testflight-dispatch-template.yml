@@ -2,6 +2,12 @@ name: iOS TestFlight Dispatch Template
 
 on:
   workflow_dispatch:
+    inputs:
+      disable_release:
+        description: Build IPA only and skip TestFlight upload jobs
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,6 +50,7 @@ jobs:
       upload-tool: altool
       appstore-key-format: base64
       release-environment: ios-staging
+      disable-release: ${{ inputs.disable_release }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
       ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
@@ -87,6 +94,7 @@ jobs:
       upload-tool: altool
       appstore-key-format: base64
       release-environment: ios-production
+      disable-release: ${{ inputs.disable_release }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
       ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}

@@ -177,6 +177,11 @@ on:
         required: false
         type: string
         default: ""
+      disable-release:
+        description: If true, skip TestFlight upload jobs and run build-only
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       ios-p12-base64:
@@ -194,10 +199,10 @@ on:
 
       appstore-api-key-id:
         description: App Store Connect API key id
-        required: true
+        required: false
       appstore-issuer-id:
         description: App Store Connect issuer id
-        required: true
+        required: false
       appstore-api-private-key:
         description: Raw API private key contents (PEM) for transporter/raw mode
         required: false
@@ -649,7 +654,7 @@ jobs:
     name: Upload to TestFlight
     runs-on: ${{ inputs.macos-runner }}
     needs: build
-    if: ${{ inputs.release-environment == '' }}
+    if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
 
     steps:
       - name: Select Xcode (optional)
@@ -714,6 +719,23 @@ jobs:
           fi
 
           echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${{ secrets.appstore-api-key-id }}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
+            echo "Set disable-release=true to run build-only without TestFlight upload."
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.appstore-issuer-id }}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
+            echo "Set disable-release=true to run build-only without TestFlight upload."
+            exit 1
+          fi
 
       - name: Install App Store Connect API key (raw)
         if: ${{ inputs.appstore-key-format == 'raw' }}
@@ -810,7 +832,7 @@ jobs:
     name: Upload to TestFlight
     runs-on: ${{ inputs.macos-runner }}
     needs: build
-    if: ${{ inputs.release-environment != '' }}
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
 
     steps:
@@ -876,6 +898,23 @@ jobs:
           fi
 
           echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${{ secrets.appstore-api-key-id }}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
+            echo "Set disable-release=true to run build-only without TestFlight upload."
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.appstore-issuer-id }}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
+            echo "Set disable-release=true to run build-only without TestFlight upload."
+            exit 1
+          fi
 
       - name: Install App Store Connect API key (raw)
         if: ${{ inputs.appstore-key-format == 'raw' }}
