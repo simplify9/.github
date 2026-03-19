@@ -182,6 +182,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Record workflow provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Reusable Workflow Provenance"
+            echo ""
+            echo "- workflow_ref: ${GITHUB_WORKFLOW_REF}"
+            echo "- workflow_sha: ${GITHUB_WORKFLOW_SHA}"
+            echo "- repository: ${GITHUB_REPOSITORY}"
+            echo "- run_id: ${GITHUB_RUN_ID}"
+            echo "- run_attempt: ${GITHUB_RUN_ATTEMPT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Compute version values
         id: compute
         shell: bash
@@ -396,7 +410,7 @@ jobs:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
         run: |
           set -euo pipefail
-          if [[ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON}" ]]; then
+          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
             echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
             echo "Set disable-release=true to run build-only without Google Play publish."
             exit 1
@@ -465,7 +479,7 @@ jobs:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
         run: |
           set -euo pipefail
-          if [[ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON}" ]]; then
+          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
             echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
             echo "Set disable-release=true to run build-only without Google Play publish."
             exit 1
