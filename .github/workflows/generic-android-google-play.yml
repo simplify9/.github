@@ -52,7 +52,7 @@ on:
         description: Numeric offset added to github.run_number for VERSION_CODE (set high for CI migrations)
         required: false
         type: string
-        default: "1000000"
+        default: "80000"
 
       install-command:
         description: Dependency install command
@@ -132,6 +132,11 @@ on:
         required: false
         type: string
         default: ""
+      disable-release:
+        description: If true, skip Google Play release jobs and run build-only
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       android-keystore-base64:
@@ -148,7 +153,7 @@ on:
         required: true
       google-play-service-account-json:
         description: Google Play service account JSON
-        required: true
+        required: false
 
     outputs:
       version-name:
@@ -344,7 +349,7 @@ jobs:
     name: Release to Google Play
     runs-on: ${{ inputs.ubuntu-runner }}
     needs: build
-    if: ${{ inputs.release-environment == '' }}
+    if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
 
     steps:
       - name: Download artifact
@@ -385,6 +390,16 @@ jobs:
           ls -lah
           test -f "${{ steps.aab.outputs.path }}"
 
+      - name: Validate release credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.google-play-service-account-json }}" ]]; then
+            echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
+            echo "Set disable-release=true to run build-only without Google Play publish."
+            exit 1
+          fi
+
       - name: Upload to Google Play
         uses: simplify9/.github/.github/actions/upload-google-play-release@main
         with:
@@ -400,7 +415,7 @@ jobs:
     name: Release to Google Play
     runs-on: ${{ inputs.ubuntu-runner }}
     needs: build
-    if: ${{ inputs.release-environment != '' }}
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
 
     steps:
@@ -441,6 +456,16 @@ jobs:
           set -euo pipefail
           ls -lah
           test -f "${{ steps.aab.outputs.path }}"
+
+      - name: Validate release credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.google-play-service-account-json }}" ]]; then
+            echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
+            echo "Set disable-release=true to run build-only without Google Play publish."
+            exit 1
+          fi
 
       - name: Upload to Google Play
         uses: simplify9/.github/.github/actions/upload-google-play-release@main
