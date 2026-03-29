@@ -43,7 +43,7 @@ jobs:
       versioning-strategy: pbxproj-counter-rollover
       pbxproj-path: ios/App.xcodeproj/project.pbxproj
       marketing-prefix: "1.0"
-      build-number-offset: "100"
+      build-number-offset: "1"
 
       use-manual-inline-archive: true
       generate-export-options: true
@@ -91,7 +91,7 @@ jobs:
       versioning-strategy: pbxproj-counter-rollover
       pbxproj-path: ios/App.xcodeproj/project.pbxproj
       marketing-prefix: "1.0"
-      build-number-offset: "100"
+      build-number-offset: "1"
 
       use-manual-inline-archive: true
       generate-export-options: true
