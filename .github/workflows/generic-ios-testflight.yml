@@ -151,10 +151,10 @@ on:
         type: string
         default: ""
       build-number-offset:
-        description: Offset applied when computing CURRENT_PROJECT_VERSION in pbxproj-counter family modes
+        description: Offset applied when computing CURRENT_PROJECT_VERSION in pbxproj-counter family modes (default 1)
         required: false
         type: string
-        default: "100"
+        default: "1"
 
       ipa-name-pattern:
         description: Output IPA file name pattern with tokens {scheme},{version},{build_number},{run_number}
