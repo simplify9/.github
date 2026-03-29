@@ -874,6 +874,11 @@ jobs:
             exit ${ALTOOL_EXIT}
           fi
 
+          if grep -qiE "NOT_AUTHORIZED|failed to authenticate|Authentication credentials are missing or invalid|received status code 401|Unable to authenticate|auth issue" "${OUTPUT_FILE}"; then
+            echo "ERROR: App Store authentication error detected in altool output. Failing workflow by policy."
+            exit 1
+          fi
+
           if grep -qiE "Validation failed|STATE_ERROR\.VALIDATION_ERROR|Invalid Version|CFBundleShortVersionString" "${OUTPUT_FILE}"; then
             echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
             exit 1
@@ -1054,6 +1059,11 @@ jobs:
           if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
             echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"
             exit ${ALTOOL_EXIT}
+          fi
+
+          if grep -qiE "NOT_AUTHORIZED|failed to authenticate|Authentication credentials are missing or invalid|received status code 401|Unable to authenticate|auth issue" "${OUTPUT_FILE}"; then
+            echo "ERROR: App Store authentication error detected in altool output. Failing workflow by policy."
+            exit 1
           fi
 
           if grep -qiE "Validation failed|STATE_ERROR\.VALIDATION_ERROR|Invalid Version|CFBundleShortVersionString" "${OUTPUT_FILE}"; then
