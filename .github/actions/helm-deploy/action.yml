@@ -1,5 +1,5 @@
 name: 'Helm Deploy to Kubernetes'
-description: 'Deploy Helm chart from OCI registry to Kubernetes cluster'
+description: 'Deploy Helm chart from OCI registry or ChartMuseum to Kubernetes cluster'
 author: 'Simplify9'
 
 inputs:
@@ -51,6 +51,19 @@ inputs:
   set-string-values:
     description: 'Additional --set-string values (comma-separated: key1=value1,key2=value2)'
     required: false
+  chart-source-type:
+    description: 'Chart source type: oci or chartmuseum'
+    required: false
+    default: 'oci'
+  chart-repo-url:
+    description: 'Helm chart repository URL (required when chart-source-type is chartmuseum)'
+    required: false
+  chart-repo-username:
+    description: 'Helm chart repository username (optional for private chart repositories)'
+    required: false
+  chart-repo-password:
+    description: 'Helm chart repository password/token (optional for private chart repositories)'
+    required: false
   timeout:
     description: 'Helm deployment timeout'
     required: false
@@ -77,7 +90,7 @@ outputs:
     description: 'Status of the Helm release'
     value: ${{ steps.deploy.outputs.status }}
   chart-url:
-    description: 'Full OCI URL of the deployed chart'
+    description: 'Source chart URL used for deployment'
     value: ${{ steps.deploy.outputs.chart-url }}
   namespace:
     description: 'Namespace where the release was deployed'
@@ -117,7 +130,39 @@ runs:
         echo "Creating namespace: ${{ inputs.namespace }}"
         kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
 
+    - name: Validate chart source inputs
+      shell: bash
+      run: |
+        chart_source_type="${{ inputs.chart-source-type }}"
+        case "$chart_source_type" in
+          oci)
+            if [ -z "${{ inputs.repository }}" ]; then
+              echo "Error: repository is required when chart-source-type is oci."
+              exit 1
+            fi
+            if [ -z "${{ inputs.registry-username }}" ]; then
+              echo "Error: registry-username is required when chart-source-type is oci."
+              exit 1
+            fi
+            if [ -z "${{ inputs.registry-password }}" ]; then
+              echo "Error: registry-password is required when chart-source-type is oci."
+              exit 1
+            fi
+            ;;
+          chartmuseum)
+            if [ -z "${{ inputs.chart-repo-url }}" ]; then
+              echo "Error: chart-repo-url is required when chart-source-type is chartmuseum."
+              exit 1
+            fi
+            ;;
+          *)
+            echo "Error: Unsupported chart-source-type '$chart_source_type'. Use 'oci' or 'chartmuseum'."
+            exit 1
+            ;;
+        esac
+
     - name: Configure Helm registry authentication
+      if: inputs.chart-source-type == 'oci'
       shell: bash
       run: |
         echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
@@ -143,16 +188,28 @@ runs:
       id: deploy
       shell: bash
       run: |
-        # Construct chart URL
-        if [ "${{ inputs.registry }}" != "docker.io" ]; then
-          CHART_URL="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+        chart_source_type="${{ inputs.chart-source-type }}"
+        CHART_SOURCE=""
+        CHART_URL=""
+
+        if [ "$chart_source_type" = "oci" ]; then
+          # Construct OCI chart URL
+          if [ "${{ inputs.registry }}" != "docker.io" ]; then
+            CHART_URL="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          else
+            CHART_URL="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          fi
+          CHART_SOURCE="${CHART_URL}"
         else
-          CHART_URL="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          # Deploy from a classic Helm chart repository (e.g., ChartMuseum)
+          CHART_SOURCE="${{ inputs.chart-name }}"
+          CHART_URL="${{ inputs.chart-repo-url }}"
         fi
         
         echo "chart-url=${CHART_URL}" >> $GITHUB_OUTPUT
         
         echo "Deploying Helm chart..."
+        echo "Chart source type: ${chart_source_type}"
         echo "Chart URL: ${CHART_URL}"
         echo "Release name: ${{ inputs.release-name }}"
         echo "Namespace: ${{ inputs.namespace }}"
@@ -173,7 +230,18 @@ runs:
         echo "======================================"
         
         # Build helm command as array to properly handle arguments with spaces and special characters
-        HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_URL}" "--namespace" "${{ inputs.namespace }}")
+        HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_SOURCE}" "--namespace" "${{ inputs.namespace }}")
+
+        if [ "$chart_source_type" = "chartmuseum" ]; then
+          HELM_ARGS+=("--repo" "${{ inputs.chart-repo-url }}")
+          HELM_ARGS+=("--version" "${{ inputs.chart-version }}")
+          if [ -n "${{ inputs.chart-repo-username }}" ]; then
+            HELM_ARGS+=("--username" "${{ inputs.chart-repo-username }}")
+          fi
+          if [ -n "${{ inputs.chart-repo-password }}" ]; then
+            HELM_ARGS+=("--password" "${{ inputs.chart-repo-password }}")
+          fi
+        fi
         
         # Add timeout and wait options
         if [ "${{ inputs.wait }}" == "true" ]; then
@@ -273,8 +341,13 @@ runs:
         echo "- **Release:** ${{ inputs.release-name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Namespace:** ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Chart:** ${{ inputs.chart-name }}:${{ inputs.chart-version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Chart Source Type:** ${{ inputs.chart-source-type }}" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ inputs.chart-source-type }}" = "oci" ]; then
+          echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Chart Repository URL:** ${{ inputs.chart-repo-url }}" >> $GITHUB_STEP_SUMMARY
+        fi
         if [ -n "${{ inputs.image-repository }}" ] && [ -n "${{ inputs.image-tag }}" ]; then
           echo "- **Image:** ${{ inputs.image-repository }}:${{ inputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
         fi

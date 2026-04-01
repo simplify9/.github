@@ -64,6 +64,15 @@ on:
         description: 'Helm chart name'
         required: true
         type: string
+      chart-publish-method:
+        description: 'Chart publish method: oci or chartmuseum'
+        required: false
+        default: 'oci'
+        type: string
+      chart-repo-url:
+        description: 'Helm chart repository URL (required when chart-publish-method is chartmuseum, e.g. https://charts.sf9.io)'
+        required: false
+        type: string
       
       # Deployment configuration
       deploy-to-development:
@@ -124,6 +133,12 @@ on:
       helm-set-secret-values:
         description: 'Additional Helm set secret values (comma-separated: key1=value1,key2=value2)'
         required: false
+      chartmuseum-username:
+        description: 'ChartMuseum username (required when chart-publish-method is chartmuseum)'
+        required: false
+      chartmuseum-password:
+        description: 'ChartMuseum password/token (required when chart-publish-method is chartmuseum)'
+        required: false
 
     outputs:
       version:
@@ -140,6 +155,8 @@ env:
   # Set default registry and image name
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+  CHART_PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+  CHART_REPO_URL: ${{ inputs.chart-repo-url }}
 
 jobs:
   version:
@@ -196,10 +213,35 @@ jobs:
     needs: version
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
-      helm-chart: ${{ steps.helm.outputs.chart-url }}
+      helm-chart: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Validate chart publish configuration
+        run: |
+          case "${{ inputs.chart-publish-method }}" in
+            oci)
+              ;;
+            chartmuseum)
+              if [ -z "${{ inputs.chart-repo-url }}" ]; then
+                echo "Error: chart-repo-url is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              if [ -z "${{ secrets.chartmuseum-username }}" ]; then
+                echo "Error: chartmuseum-username secret is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              if [ -z "${{ secrets.chartmuseum-password }}" ]; then
+                echo "Error: chartmuseum-password secret is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Error: Unsupported chart-publish-method '${{ inputs.chart-publish-method }}'. Use 'oci' or 'chartmuseum'."
+              exit 1
+              ;;
+          esac
 
       - name: Build and push Docker image
         id: docker
@@ -214,13 +256,37 @@ jobs:
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
 
-      - name: Package and push Helm chart
-        id: helm
+      - name: Package and push Helm chart (OCI)
+        if: inputs.chart-publish-method == 'oci'
+        id: helm_oci
         uses: simplify9/.github/.github/actions/helm-package-push@main
         with:
           chart-name: ${{ inputs.chart-name }}
           chart-path: ${{ inputs.chart-path }}
           version: ${{ needs.version.outputs.version }}
+          publish-method: 'oci'
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          repository: ${{ github.repository_owner }}/charts
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          image-repository: ${{ env.CONTAINER_REGISTRY }}/${{ github.repository }}
+          image-tag: ${{ needs.version.outputs.version }}
+          update-image-values: 'true'
+
+      - name: Package and push Helm chart (ChartMuseum)
+        if: inputs.chart-publish-method == 'chartmuseum'
+        id: helm_chartmuseum
+        uses: simplify9/.github/.github/actions/helm-package-push@main
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-path: ${{ inputs.chart-path }}
+          version: ${{ needs.version.outputs.version }}
+          helm-version: '3.2.4'
+          update-dependencies: 'true'
+          publish-method: 'chartmuseum'
+          chartmuseum-url: ${{ env.CHART_REPO_URL }}
+          chartmuseum-username: ${{ secrets.chartmuseum-username }}
+          chartmuseum-password: ${{ secrets.chartmuseum-password }}
           registry: ${{ env.CONTAINER_REGISTRY }}
           repository: ${{ github.repository_owner }}/charts
           username: ${{ secrets.registry-username || github.actor }}
@@ -244,13 +310,37 @@ jobs:
         env:
           SECRET_VAL: "${{ secrets.helm-set-secret-values }}"
       
-      - name: Deploy to Development
+      - name: Deploy to Development (OCI)
+        if: inputs.chart-publish-method == 'oci'
         uses: simplify9/.github/.github/actions/helm-deploy@main
         env:
           SECRET_VALUES: "${{ secrets.helm-set-secret-values }}"
         with:
           chart-name: ${{ inputs.chart-name }}
           chart-version: ${{ needs.version.outputs.version }}
+          chart-source-type: 'oci'
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          repository: ${{ github.repository_owner }}/charts
+          registry-username: ${{ secrets.registry-username || github.actor }}
+          registry-password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          kubeconfig: ${{ secrets.kubeconfig }}
+          release-name: ${{ inputs.chart-name }}-dev
+          namespace: ${{ inputs.development-namespace }}
+          set-values: ${{ inputs.helm-set-values }}
+          timeout: '3m'
+
+      - name: Deploy to Development (ChartMuseum)
+        if: inputs.chart-publish-method == 'chartmuseum'
+        uses: simplify9/.github/.github/actions/helm-deploy@main
+        env:
+          SECRET_VALUES: "${{ secrets.helm-set-secret-values }}"
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-version: ${{ needs.version.outputs.version }}
+          chart-source-type: 'chartmuseum'
+          chart-repo-url: ${{ env.CHART_REPO_URL }}
+          chart-repo-username: ${{ secrets.chartmuseum-username }}
+          chart-repo-password: ${{ secrets.chartmuseum-password }}
           registry: ${{ env.CONTAINER_REGISTRY }}
           repository: ${{ github.repository_owner }}/charts
           registry-username: ${{ secrets.registry-username || github.actor }}

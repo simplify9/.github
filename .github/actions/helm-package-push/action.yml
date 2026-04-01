@@ -1,5 +1,5 @@
 name: 'Helm Chart Package and Push'
-description: 'Package and push Helm chart to OCI registry'
+description: 'Package and publish Helm chart to OCI registry or ChartMuseum'
 author: 'Simplify9'
 
 inputs:
@@ -34,6 +34,10 @@ inputs:
     description: 'Directory to store packaged charts'
     required: false
     default: './helm-packages'
+  update-dependencies:
+    description: 'Update chart dependencies during package (--dependency-update)'
+    required: false
+    default: 'false'
   helm-version:
     description: 'Helm version to install'
     required: false
@@ -48,14 +52,27 @@ inputs:
     description: 'Update image repository and tag in values.yaml'
     required: false
     default: 'false'
+  publish-method:
+    description: 'Chart publish method: oci or chartmuseum'
+    required: false
+    default: 'oci'
+  chartmuseum-url:
+    description: 'ChartMuseum base URL (required when publish-method is chartmuseum)'
+    required: false
+  chartmuseum-username:
+    description: 'ChartMuseum username (required when publish-method is chartmuseum)'
+    required: false
+  chartmuseum-password:
+    description: 'ChartMuseum password/token (required when publish-method is chartmuseum)'
+    required: false
 
 outputs:
   chart-package:
     description: 'Path to the packaged chart file'
     value: ${{ steps.package.outputs.package-path }}
   chart-url:
-    description: 'OCI URL where the chart was pushed'
-    value: ${{ steps.push.outputs.chart-url }}
+    description: 'Published chart location (OCI URL or ChartMuseum URL)'
+    value: ${{ steps.push_oci.outputs.chart-url || steps.push_chartmuseum.outputs.chart-url }}
 
 runs:
   using: 'composite'
@@ -119,7 +136,12 @@ runs:
       shell: bash
       run: |
         echo "Packaging Helm chart from ${{ inputs.chart-path }}"
-        helm package ${{ inputs.chart-path }} --destination ${{ inputs.package-destination }}/
+        if [ "${{ inputs.update-dependencies }}" = "true" ]; then
+          echo "Running helm package with dependency update enabled"
+          helm package ${{ inputs.chart-path }} --dependency-update --destination ${{ inputs.package-destination }}/
+        else
+          helm package ${{ inputs.chart-path }} --destination ${{ inputs.package-destination }}/
+        fi
         
         PACKAGE_FILE="${{ inputs.package-destination }}/${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
         echo "package-path=${PACKAGE_FILE}" >> $GITHUB_OUTPUT
@@ -127,7 +149,36 @@ runs:
         echo "Packaged chart: ${PACKAGE_FILE}"
         ls -la ${{ inputs.package-destination }}/
 
+    - name: Validate publish configuration
+      shell: bash
+      run: |
+        publish_method="${{ inputs.publish-method }}"
+        case "$publish_method" in
+          oci|chartmuseum)
+            ;;
+          *)
+            echo "Error: Unsupported publish-method '$publish_method'. Use 'oci' or 'chartmuseum'."
+            exit 1
+            ;;
+        esac
+
+        if [ "$publish_method" = "chartmuseum" ]; then
+          if [ -z "${{ inputs.chartmuseum-url }}" ]; then
+            echo "Error: chartmuseum-url is required when publish-method is chartmuseum."
+            exit 1
+          fi
+          if [ -z "${{ inputs.chartmuseum-username }}" ]; then
+            echo "Error: chartmuseum-username is required when publish-method is chartmuseum."
+            exit 1
+          fi
+          if [ -z "${{ inputs.chartmuseum-password }}" ]; then
+            echo "Error: chartmuseum-password is required when publish-method is chartmuseum."
+            exit 1
+          fi
+        fi
+
     - name: Configure Helm registry authentication
+      if: inputs.publish-method == 'oci'
       shell: bash
       run: |
         echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
@@ -138,8 +189,9 @@ runs:
         fi
         helm registry login "$registry_host" -u ${{ inputs.username }} -p ${{ inputs.password }}
 
-    - name: Push Helm chart to registry
-      id: push
+    - name: Push Helm chart to OCI registry
+      if: inputs.publish-method == 'oci'
+      id: push_oci
       shell: bash
       run: |
         PACKAGE_FILE="${{ inputs.package-destination }}/${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
@@ -155,18 +207,55 @@ runs:
         
         echo "chart-url=${CHART_URL}/${{ inputs.chart-name }}:${{ inputs.version }}" >> $GITHUB_OUTPUT
 
+    - name: Push Helm chart to ChartMuseum
+      if: inputs.publish-method == 'chartmuseum'
+      id: push_chartmuseum
+      shell: bash
+      run: |
+        CHARTMUSEUM_URL="${{ inputs.chartmuseum-url }}"
+        CHARTMUSEUM_API_URL="${CHARTMUSEUM_URL%/}/api/charts"
+        shopt -s nullglob
+        chart_packages=("${{ inputs.package-destination }}"/*.tgz)
+
+        if [ ${#chart_packages[@]} -eq 0 ]; then
+          echo "Error: No packaged charts found under ${{ inputs.package-destination }}"
+          exit 1
+        fi
+
+        echo "Uploading chart to ChartMuseum: ${CHARTMUSEUM_API_URL}"
+        for f in "${chart_packages[@]}"; do
+          echo "Uploading @${f}"
+          curl --fail --show-error --silent --data-binary "@${f}" \
+            "${CHARTMUSEUM_API_URL}" \
+            --user "${{ inputs.chartmuseum-username }}:${{ inputs.chartmuseum-password }}"
+        done
+
+        echo "chart-url=${CHARTMUSEUM_URL%/}" >> $GITHUB_OUTPUT
+
     - name: Output chart information
       shell: bash
       run: |
+        PUBLISH_METHOD="${{ inputs.publish-method }}"
+        PUBLISHED_CHART_URL="${{ steps.push_oci.outputs.chart-url || steps.push_chartmuseum.outputs.chart-url }}"
+
         echo "### ⚙️ Helm Chart Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Chart Name:** ${{ inputs.chart-name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Publish Method:** ${PUBLISH_METHOD}" >> $GITHUB_STEP_SUMMARY
+        if [ "$PUBLISH_METHOD" = "oci" ]; then
+          echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **ChartMuseum URL:** ${{ inputs.chartmuseum-url }}" >> $GITHUB_STEP_SUMMARY
+        fi
         echo "- **Package:** ${{ steps.package.outputs.package-path }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart URL:** ${{ steps.push.outputs.chart-url }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Chart URL:** ${PUBLISHED_CHART_URL}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Installation Command:**" >> $GITHUB_STEP_SUMMARY
         echo '```bash' >> $GITHUB_STEP_SUMMARY
-        echo "helm install my-release ${{ steps.push.outputs.chart-url }}" >> $GITHUB_STEP_SUMMARY
+        if [ "$PUBLISH_METHOD" = "oci" ]; then
+          echo "helm install my-release ${PUBLISHED_CHART_URL}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "helm install my-release ${{ inputs.chart-name }} --repo ${{ inputs.chartmuseum-url }} --version ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        fi
         echo '```' >> $GITHUB_STEP_SUMMARY
