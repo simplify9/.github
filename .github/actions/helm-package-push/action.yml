@@ -131,11 +131,12 @@ runs:
       shell: bash
       run: |
         echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
-        if [ "${{ inputs.registry }}" != "docker.io" ]; then
-          helm registry login ${{ inputs.registry }} -u ${{ inputs.username }} -p ${{ inputs.password }}
-        else
-          helm registry login -u ${{ inputs.username }} -p ${{ inputs.password }}
+        registry_host="${{ inputs.registry }}"
+        if [ "$registry_host" = "docker.io" ]; then
+          # Docker Hub's Helm/OCI endpoint requires this hostname for registry login.
+          registry_host="registry-1.docker.io"
         fi
+        helm registry login "$registry_host" -u ${{ inputs.username }} -p ${{ inputs.password }}
 
     - name: Push Helm chart to registry
       id: push
