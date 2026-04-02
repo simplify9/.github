@@ -45,6 +45,14 @@ jobs:
       marketing-prefix: "1.0"
       build-number-offset: "1"
 
+      # Defaults keep existing Yarn behavior. For npm monorepo usage, set:
+      # package-manager: npm
+      # package-manager-directory: WiseWellMobile
+      package-manager: yarn
+      package-manager-directory: "."
+      cache-dependency-path: ""
+      install-command: ""
+
       use-manual-inline-archive: true
       generate-export-options: true
 
@@ -92,6 +100,14 @@ jobs:
       pbxproj-path: ios/App.xcodeproj/project.pbxproj
       marketing-prefix: "1.0"
       build-number-offset: "1"
+
+      # Defaults keep existing Yarn behavior. For npm monorepo usage, set:
+      # package-manager: npm
+      # package-manager-directory: WiseWellMobile
+      package-manager: yarn
+      package-manager-directory: "."
+      cache-dependency-path: ""
+      install-command: ""
 
       use-manual-inline-archive: true
       generate-export-options: true

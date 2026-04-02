@@ -13,6 +13,30 @@ on:
         required: false
         type: string
         default: "24"
+      # Package manager inputs keep setup-node cache and install commands aligned.
+      # Defaults preserve legacy behavior (Yarn at repository root).
+      package-manager:
+        description: Node package manager used for cache and default dependency commands (yarn or npm)
+        required: false
+        type: string
+        default: yarn
+      package-manager-directory:
+        description: Directory containing package.json and lockfile for selected package manager
+        required: false
+        type: string
+        default: "."
+      cache-dependency-path:
+        description: Optional explicit lockfile path used by setup-node cache
+        required: false
+        type: string
+        default: ""
+      # Leave install-command empty to use package-manager defaults.
+      # Set this only when a caller needs a fully custom install command.
+      install-command:
+        description: Optional explicit dependency install command; if empty uses package-manager default
+        required: false
+        type: string
+        default: ""
       install-react-native-cli:
         description: Install react-native-cli globally
         required: false
@@ -292,15 +316,94 @@ jobs:
           echo "Running configured pre-build script in: $PWD"
           ${{ inputs.pre-build-script }}
 
+      - name: Resolve package manager settings
+        id: package_manager
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Normalize inputs so package-manager value handling is case-insensitive.
+          PACKAGE_MANAGER_RAW="${{ inputs.package-manager }}"
+          PACKAGE_MANAGER="$(echo "${PACKAGE_MANAGER_RAW}" | tr '[:upper:]' '[:lower:]')"
+          PACKAGE_DIR_RAW="${{ inputs.package-manager-directory }}"
+          PACKAGE_DIR="${PACKAGE_DIR_RAW:-.}"
+
+          if [[ -z "${PACKAGE_DIR}" ]]; then
+            PACKAGE_DIR="."
+          fi
+
+          if [[ "${PACKAGE_DIR}" == "." ]]; then
+            DISPLAY_DIR="repository root"
+          else
+            DISPLAY_DIR="${PACKAGE_DIR}"
+          fi
+
+          # Keep cache type and install commands tied to the selected package manager.
+          case "${PACKAGE_MANAGER}" in
+            yarn)
+              DEFAULT_LOCKFILE="yarn.lock"
+              if [[ "${PACKAGE_DIR}" == "." ]]; then
+                DEFAULT_INSTALL_COMMAND="yarn"
+              else
+                DEFAULT_INSTALL_COMMAND="yarn --cwd '${PACKAGE_DIR}'"
+              fi
+              ;;
+            npm)
+              DEFAULT_LOCKFILE="package-lock.json"
+              if [[ "${PACKAGE_DIR}" == "." ]]; then
+                DEFAULT_INSTALL_COMMAND="npm ci"
+              else
+                DEFAULT_INSTALL_COMMAND="npm ci --prefix '${PACKAGE_DIR}'"
+              fi
+              ;;
+            *)
+              echo "ERROR: Unsupported package-manager '${PACKAGE_MANAGER_RAW}'. Supported values: yarn, npm."
+              exit 1
+              ;;
+          esac
+
+          # Infer lockfile path from package-manager + directory when no explicit override is provided.
+          CACHE_DEPENDENCY_PATH_INPUT="${{ inputs.cache-dependency-path }}"
+          CACHE_DEPENDENCY_PATH="${CACHE_DEPENDENCY_PATH_INPUT}"
+
+          if [[ -z "${CACHE_DEPENDENCY_PATH}" ]]; then
+            if [[ "${PACKAGE_DIR}" == "." ]]; then
+              CACHE_DEPENDENCY_PATH="${DEFAULT_LOCKFILE}"
+            else
+              CACHE_DEPENDENCY_PATH="${PACKAGE_DIR}/${DEFAULT_LOCKFILE}"
+            fi
+          fi
+
+          # Fail fast with a clear message rather than letting setup-node fail later.
+          if [[ ! -f "${CACHE_DEPENDENCY_PATH}" ]]; then
+            echo "ERROR: Expected lockfile '${CACHE_DEPENDENCY_PATH}' was not found."
+            echo "Set package-manager-directory or cache-dependency-path to the correct location."
+            exit 1
+          fi
+
+          echo "cache=${PACKAGE_MANAGER}" >> "$GITHUB_OUTPUT"
+          echo "cache_dependency_path=${CACHE_DEPENDENCY_PATH}" >> "$GITHUB_OUTPUT"
+          echo "default_install_command=${DEFAULT_INSTALL_COMMAND}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Node Package Manager Resolution"
+            echo ""
+            echo "- package manager: ${PACKAGE_MANAGER}"
+            echo "- package directory: ${DISPLAY_DIR}"
+            echo "- cache dependency path: ${CACHE_DEPENDENCY_PATH}"
+            echo "- default install command: ${DEFAULT_INSTALL_COMMAND}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: yarn
+          cache: ${{ steps.package_manager.outputs.cache }}
+          cache-dependency-path: ${{ steps.package_manager.outputs.cache_dependency_path }}
 
       - name: Install node dependencies
         shell: bash
-        run: yarn
+        run: ${{ inputs.install-command != '' && inputs.install-command || steps.package_manager.outputs.default_install_command }}
 
       - name: Install React Native CLI
         if: ${{ inputs.install-react-native-cli }}
