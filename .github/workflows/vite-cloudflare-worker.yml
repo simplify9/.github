@@ -167,7 +167,23 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           ASSETS_DIR: ${{ inputs.assets_dir }}
           MAIN_ENTRY: "worker.js"
-          ADD_ASSETS_BINDING: "true"         
+          ADD_ASSETS_BINDING: "true"
+
+      - name: Validate generated wrangler.toml for Vite static worker
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f wrangler.toml
+          grep -F "name = \"${{ inputs.project_name }}\"" wrangler.toml
+          grep -F "main = \"worker.js\"" wrangler.toml
+          grep -F "compatibility_date = \"${{ inputs.compatibility_date }}\"" wrangler.toml
+          grep -F "[env.${{ inputs.environment }}]" wrangler.toml
+          grep -F "name = \"${{ inputs.project_name }}-${{ inputs.environment }}\"" wrangler.toml
+          grep -F "pattern = \"" wrangler.toml
+          grep -F "custom_domain = true" wrangler.toml
+          grep -F "directory = \"./${{ inputs.assets_dir }}\"" wrangler.toml
+          grep -F "binding = \"ASSETS\"" wrangler.toml
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
