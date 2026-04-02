@@ -46,7 +46,13 @@ jobs:
       version-name-offset: "0"
       version-code-offset: "1000000"
 
-      install-command: yarn
+      # Defaults keep existing Yarn behavior. For npm monorepo usage, set:
+      # package-manager: npm
+      # package-manager-directory: Example
+      package-manager: yarn
+      package-manager-directory: "."
+      cache-dependency-path: ""
+      install-command: ""
       install-jetifier: true
       run-jetifier: true
 
@@ -90,7 +96,13 @@ jobs:
       version-name-offset: "0"
       version-code-offset: "1000000"
 
-      install-command: yarn
+      # Defaults keep existing Yarn behavior. For npm monorepo usage, set:
+      # package-manager: npm
+      # package-manager-directory: Example
+      package-manager: yarn
+      package-manager-directory: "."
+      cache-dependency-path: ""
+      install-command: ""
       install-jetifier: true
       run-jetifier: true
 
