@@ -146,7 +146,7 @@ on:
       # Versioning modes:
       # - none: compute VERSION/BUILD_NUMBER from run number only.
       # - pbxproj-counter: write prefix.run_number into MARKETING_VERSION.
-      # - pbxproj-counter-rollover: X.Y release line with run-based carry to X.Y.Z.
+      # - pbxproj-counter-rollover: X.Y[.Z] start version with run-based carry to X.Y.Z.
       # - pbxproj-auto-increment: semver-like bump from current pbxproj value.
       versioning-strategy:
         description: none, pbxproj-counter, pbxproj-counter-rollover, or pbxproj-auto-increment
@@ -158,9 +158,9 @@ on:
         required: false
         type: string
         default: ""
-      # For rollover strategy, this is the manual release line in X.Y format.
+      # For rollover strategy, this is the manual start version in X.Y or X.Y.Z format.
       marketing-prefix:
-        description: Marketing version prefix. For pbxproj-counter-rollover use X.Y as the release line.
+        description: Marketing version prefix. For pbxproj-counter-rollover use X.Y or X.Y.Z as the start version.
         required: false
         type: string
         default: "1.0"
@@ -508,7 +508,7 @@ jobs:
             NEW_MARKETING_VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
             NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
           elif [[ "${STRATEGY}" == "pbxproj-counter-rollover" ]]; then
-            # Rollover mode: marketing-prefix X.Y + run counter -> X.Y.Z with single-digit carry.
+            # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
             OFFSET="${{ inputs.build-number-offset }}"
             if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
               echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
@@ -516,17 +516,23 @@ jobs:
             fi
 
             PREFIX_RAW="${{ inputs.marketing-prefix }}"
-            if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
+            if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
               BASE_MAJOR="${BASH_REMATCH[1]}"
               BASE_MINOR="${BASH_REMATCH[2]}"
+              BASE_PATCH="${BASH_REMATCH[3]}"
+            elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
+              BASE_MAJOR="${BASH_REMATCH[1]}"
+              BASE_MINOR="${BASH_REMATCH[2]}"
+              BASE_PATCH="0"
             else
-              echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y format with single-digit minor (0-9). Got '${PREFIX_RAW}'."
+              echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y or X.Y.Z format with single-digit minor/patch (0-9). Got '${PREFIX_RAW}'."
               exit 1
             fi
 
             INCREMENT=$((GITHUB_RUN_NUMBER))
-            PATCH=$((INCREMENT % 10))
-            MINOR_CARRY=$((INCREMENT / 10))
+            TOTAL_PATCH=$((BASE_PATCH + INCREMENT))
+            PATCH=$((TOTAL_PATCH % 10))
+            MINOR_CARRY=$((TOTAL_PATCH / 10))
             TOTAL_MINOR=$((BASE_MINOR + MINOR_CARRY))
             FINAL_MINOR=$((TOTAL_MINOR % 10))
             MAJOR_CARRY=$((TOTAL_MINOR / 10))
@@ -537,6 +543,7 @@ jobs:
 
             echo "Rollover base major: ${BASE_MAJOR}"
             echo "Rollover base minor: ${BASE_MINOR}"
+            echo "Rollover base patch: ${BASE_PATCH}"
             echo "Rollover increment: ${INCREMENT}"
             echo "Rollover computed patch: ${PATCH}"
             echo "Rollover computed minor carry: ${MINOR_CARRY}"
