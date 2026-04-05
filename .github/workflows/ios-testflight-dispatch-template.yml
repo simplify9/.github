@@ -37,7 +37,7 @@ jobs:
       export-path: output/package
 
       # MARKETING_VERSION strategy:
-      # - marketing-prefix is the manually controlled X.Y release line.
+      # - marketing-prefix is the manually controlled X.Y or X.Y.Z start version.
       # - patch comes from github.run_number with carry (..9 then minor+1).
       # - minor carry at 9 rolls into major (for example 4.9.9 -> 5.0.0).
       versioning-strategy: pbxproj-counter-rollover
@@ -93,7 +93,7 @@ jobs:
       export-path: output/package
 
       # MARKETING_VERSION strategy:
-      # - marketing-prefix is the manually controlled X.Y release line.
+      # - marketing-prefix is the manually controlled X.Y or X.Y.Z start version.
       # - patch comes from github.run_number with carry (..9 then minor+1).
       # - minor carry at 9 rolls into major (for example 4.9.9 -> 5.0.0).
       versioning-strategy: pbxproj-counter-rollover
