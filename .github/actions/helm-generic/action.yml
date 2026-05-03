@@ -54,6 +54,26 @@ inputs:
       in controlled contexts. Provide either the full YAML (containing apiVersion, clusters, users, etc.) or a base64 string
       that decodes to the kubeconfig file contents.
     required: true
+  init_job_image:
+    description: |-
+      If set, a Kubernetes Job is created before the Helm deploy that runs this image with the
+      argument '--migrate'. The Job uses the connection string from init_job_secret_name to run
+      EF Core migrations with elevated (doadmin) credentials before the main container starts.
+      Example: registry.digitalocean.com/mealiverycr/mealivery-api:latest
+    required: false
+    default: ''
+  init_job_secret_name:
+    description: |-
+      Name of the Kubernetes Secret (in the target namespace) whose 'connection-string' key is
+      injected as ConnectionStrings__ShanapDb into the migration Job. Required when init_job_image is set.
+    required: false
+    default: ''
+  environment:
+    description: |-
+      ASP.NET Core environment name injected into the migration Job (e.g. Production, Staging).
+      Defaults to 'Production' if not set.
+    required: false
+    default: 'Production'
 
 runs:
   using: 'composite'
@@ -111,6 +131,63 @@ runs:
       uses: azure/setup-kubectl@v4
       with:
         version: 'latest'
+
+    - name: Run DB migration Job (init container equivalent)
+      if: ${{ inputs.init_job_image != '' }}
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        INIT_JOB_IMAGE: ${{ inputs.init_job_image }}
+        INIT_JOB_SECRET_NAME: ${{ inputs.init_job_secret_name }}
+      run: |
+        set -euo pipefail
+
+        JOB_NAME="${APP_NAME}-db-migrate-${GITHUB_RUN_NUMBER}"
+
+        echo "Applying migration Job: $JOB_NAME"
+        kubectl apply -f - <<EOF
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: "${JOB_NAME}"
+          namespace: "${NAMESPACE}"
+          labels:
+            app: "${APP_NAME}"
+            role: db-migrate
+        spec:
+          ttlSecondsAfterFinished: 300
+          backoffLimit: 2
+          template:
+            spec:
+              restartPolicy: Never
+              containers:
+                - name: db-migrate
+                  image: "${INIT_JOB_IMAGE}"
+                  imagePullPolicy: Always
+                  command: ["dotnet", "SW.Shanap.Web.dll", "--migrate"]
+                  env:
+                    - name: ConnectionStrings__ShanapDb
+                      valueFrom:
+                        secretKeyRef:
+                          name: "${INIT_JOB_SECRET_NAME}"
+                          key: connection-string
+                    - name: ASPNETCORE_ENVIRONMENT
+                      value: "${{ inputs.environment }}"
+        EOF
+
+        echo "Waiting for migration Job to complete (timeout 5m)..."
+        kubectl wait job/"${JOB_NAME}" \
+          --for=condition=complete \
+          --namespace="${NAMESPACE}" \
+          --timeout=5m || {
+            echo "Migration Job failed. Fetching logs:"
+            POD=$(kubectl get pods -n "${NAMESPACE}" -l job-name="${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            [ -n "$POD" ] && kubectl logs -n "${NAMESPACE}" "$POD" || true
+            exit 1
+          }
+
+        echo "Migration Job completed successfully."
 
     - name: Helm upgrade / install
       shell: bash
