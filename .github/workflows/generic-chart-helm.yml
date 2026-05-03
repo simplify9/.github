@@ -120,6 +120,22 @@ on:
         description: 'Comma or newline separated list of TLS secrets matching ingress-hosts by index; falls back to ingress-tls-secret if absent'
         required: false
         type: string
+      init-job-image:
+        description: |-
+          If set, a Kubernetes Job is run before the Helm deploy that runs EF Core migrations.
+          The image must support the '--migrate' argument (see Program.cs init container mode).
+          Example: registry.digitalocean.com/mealiverycr/mealivery-api:latest
+        required: false
+        default: ''
+        type: string
+      init-job-secret-name:
+        description: |-
+          Name of the Kubernetes Secret (in the target namespace) containing a 'connection-string'
+          key with the doadmin credentials. Required when init-job-image is set.
+          Example: mealivery-db-admin-secret
+        required: false
+        default: ''
+        type: string
 
     secrets:
       # Container registry secrets
@@ -388,3 +404,6 @@ jobs:
               
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
+          init_job_image: ${{ inputs.init-job-image }}
+          init_job_secret_name: ${{ inputs.init-job-secret-name }}
+          environment: ${{ inputs.environment }}
