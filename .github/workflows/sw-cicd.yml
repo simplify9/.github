@@ -165,7 +165,7 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Determine semantic version
         id: semver
@@ -188,7 +188,7 @@ jobs:
     if: ${{ inputs.nuget-projects != '' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Dotnet Restore, Build, and Test
         uses: simplify9/.github/.github/actions/dotnet-build@main
@@ -216,7 +216,7 @@ jobs:
       helm-chart: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate chart publish configuration
         run: |

@@ -175,7 +175,7 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Determine semantic version
         id: semver
@@ -202,7 +202,7 @@ jobs:
       chart-path-for-deployment: ${{ steps.detect-chart.outputs.chart-path-for-deployment }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Detect chart source and configure deployment
         id: detect-chart

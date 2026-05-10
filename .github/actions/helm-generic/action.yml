@@ -78,7 +78,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Derive sanitized branch name
       id: branch
@@ -207,11 +207,7 @@ runs:
         if [ -n "$CHART_REPO" ]; then
           helm repo add s9generic "$CHART_REPO" 2>/dev/null || true
           helm repo update >/dev/null
-          if [ "$CHART" = "s9genericchart" ]; then
-            CHART_REF="s9generic/$CHART"
-          else
-            CHART_REF="$CHART"
-          fi
+          CHART_REF="s9generic/$CHART"
         else
           CHART_REF="$CHART"
         fi

@@ -273,7 +273,7 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Determine semantic version
         id: semver
@@ -301,7 +301,7 @@ jobs:
     steps:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure GitHub Packages feed
         if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
@@ -365,7 +365,7 @@ jobs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build and push Docker image
         id: docker
