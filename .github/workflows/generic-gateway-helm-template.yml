@@ -788,6 +788,7 @@ jobs:
             service.port=${{ inputs.service-port }}
             ${{ steps.routing.outputs.routing-values }}
             ${{ inputs.helm-set-values }}
+            ${{ secrets.helm-set-secret-values }}
           kubeconfig_data: ${{ secrets.kubeconfig }}
           init_job_image: ${{ inputs.init-job-image }}
           init_job_secret_name: ${{ inputs.init-job-secret-name }}
