@@ -1,778 +1,337 @@
-name: API CI/CD Pipeline (Gateway-First Reusable)
+name: Generic Gateway Helm Chart CI/CD (reusable)
 
 on:
   workflow_call:
     inputs:
-      major-version:
-        description: Major version number
+      chart-path:
+        description: Path to the Helm chart directory
         required: false
-        default: '1'
+        default: chart
         type: string
-      minor-version:
-        description: Minor version number
+      chartmuseum-url:
+        description: ChartMuseum upload endpoint
         required: false
-        default: '0'
+        default: https://charts.sf9.io/api/charts
         type: string
-      package-nuget:
-        description: Whether to build and publish NuGet packages
+      helm-version:
+        description: Helm version to use for lint/template/package
         required: false
-        default: false
-        type: boolean
-      nuget-major-version:
-        description: NuGet package major version number
-        required: false
-        default: '1'
+        default: "3.2.4"
         type: string
-      nuget-minor-version:
-        description: NuGet package minor version number
+      version-prefix:
+        description: Version prefix in major.minor format
         required: false
-        default: '0'
+        default: "1.0"
         type: string
-      nuget-projects:
-        description: NuGet projects to pack and push glob
+      package-destination:
+        description: Directory where packaged chart artifacts are written
         required: false
-        default: '**/*.csproj'
+        default: .helm-packages
         type: string
-      dotnet-version:
-        description: Dotnet SDK version for nuget packaging
-        required: false
-        default: 8.0.x
-        type: string
-      test-projects:
-        description: Test projects glob
-        required: false
-        default: '**/*UnitTests/*.csproj'
-        type: string
-      run-tests:
-        description: Whether to run tests before packing
-        required: false
-        default: 'false'
-        type: string
-
-      dockerfile-path:
-        description: Path to Dockerfile
-        required: false
-        default: ./Dockerfile
-        type: string
-      docker-context:
-        description: Docker build context
-        required: false
-        default: .
-        type: string
-      docker-platforms:
-        description: Target platforms for Docker build
-        required: false
-        default: linux/amd64
-        type: string
-      container-registry:
-        description: Container registry name
-        required: false
-        default: ghcr.io
-        type: string
-
-      namespace:
-        description: Kubernetes namespace for deployment
-        required: false
-        default: development
-        type: string
-      environment:
-        description: Environment value for Helm set
-        required: false
-        default: Development
-        type: string
-      app-name:
-        description: Application name for app.name
-        required: false
-        type: string
-      service-target-port:
-        description: Service targetPort
-        required: false
-        default: '80'
-        type: string
-      service-port:
-        description: Service port
-        required: false
-        default: '80'
-        type: string
-      image-pull-secret:
-        description: Kubernetes imagePullSecret name
-        required: false
-        default: sf9cr
-        type: string
-
-      chart-name:
-        description: Helm chart name in chart repository
-        required: false
-        default: s9genericchart-v2
-        type: string
-      chart-repo:
-        description: Helm chart repository URL
-        required: false
-        default: https://charts.sf9.io
-        type: string
-      helm-timeout-minutes:
-        description: Helm timeout minutes defaults to 10
-        required: false
-        default: ''
-        type: string
-      helm-set-values:
-        description: Additional Helm set values line or comma separated
-        required: false
-        type: string
-
-      routing-mode:
-        description: Routing mode gateway ingress or dual
-        required: false
-        default: gateway
-        type: string
-
-      gateway-parent-name:
-        description: Gateway parentRef name
-        required: false
-        default: public-gateway
-        type: string
-      gateway-parent-namespace:
-        description: Gateway parentRef namespace
-        required: false
-        default: s9-dev-edge
-        type: string
-      gateway-section-name:
-        description: Optional Gateway sectionName override
-        required: false
-        default: ''
-        type: string
-      gateway-hostnames:
-        description: Gateway hostnames comma or newline
-        required: false
-        default: ''
-        type: string
-      gateway-paths:
-        description: Gateway paths comma or newline
-        required: false
-        default: ''
-        type: string
-      gateway-path-type:
-        description: Gateway route path type
-        required: false
-        default: PathPrefix
-        type: string
-      gateway-backend-service-name:
-        description: Optional gateway backend service override
-        required: false
-        default: ''
-        type: string
-      gateway-backend-port:
-        description: Gateway backend service port
-        required: false
-        default: '80'
-        type: string
-
-      ingress-hosts:
-        description: Ingress hosts comma or newline
-        required: false
-        default: ''
-        type: string
-      ingress-paths:
-        description: Ingress paths comma or newline
-        required: false
-        default: ''
-        type: string
-      ingress-tls-secrets:
-        description: TLS secrets matching ingress hosts
-        required: false
-        default: ''
-        type: string
-      ingress-class-name:
-        description: Ingress class name
-        required: false
-        default: nginx
-        type: string
-      ingress-path-type:
-        description: Ingress pathType
-        required: false
-        default: Prefix
-        type: string
-      ingress-tls-enabled:
-        description: Ingress tlsEnabled
+      update-dependencies:
+        description: Run helm package with --dependency-update
         required: false
         default: true
         type: boolean
-      ingress-cluster-issuer:
-        description: Optional ingress cert-manager issuer annotation
-        required: false
-        default: letsencrypt-nginx
-        type: string
-      ingress-proxy-body-size:
-        description: Optional nginx proxy body size annotation
-        required: false
-        default: 50m
-        type: string
-
-      configmap-enabled:
-        description: Enable configmap rendering
-        required: false
-        default: false
-        type: boolean
-
-      gateway-auto-onboarding:
-        description: Automatically ensure Gateway listeners and certificates
+      validate-routing:
+        description: Validate default/ingress/gateway/dual routing rendering modes
         required: false
         default: true
         type: boolean
-      gateway-class-name:
-        description: GatewayClass used when creating missing Gateway
-        required: false
-        default: cilium
-        type: string
-      gateway-cert-issuer-name:
-        description: cert-manager issuer name for gateway domains
-        required: false
-        default: letsencrypt-production-gateway
-        type: string
-      gateway-cert-issuer-kind:
-        description: cert-manager issuer kind
-        required: false
-        default: ClusterIssuer
-        type: string
-      gateway-cert-wait:
-        description: Wait for cert readiness during onboarding
+      validate-configmap:
+        description: Validate ConfigMap gating and merged key rendering
         required: false
         default: true
         type: boolean
-      gateway-cert-wait-timeout-seconds:
-        description: Certificate wait timeout seconds
-        required: false
-        default: '600'
-        type: string
-
-      init-job-image:
-        description: Optional migration init Job image
-        required: false
-        default: ''
-        type: string
-      init-job-secret-name:
-        description: Secret containing migration connection string key
-        required: false
-        default: ''
-        type: string
-
     secrets:
       registry-username:
-        description: Container registry username
-        required: false
+        description: ChartMuseum username
+        required: true
       registry-password:
-        description: Container registry password token
-        required: false
-      kubeconfig:
-        description: Base64 kubeconfig or raw kubeconfig content
-        required: false
+        description: ChartMuseum password or token
+        required: true
       github-token:
-        description: GitHub token for tagging
+        description: GitHub token retained for baseline secret-name compatibility
         required: false
-      NUGET_PACKAGE_PAT:
-        description: GitHub Packages token for docker builds
-        required: false
-      nuget-api-key:
-        description: NuGet API key
-        required: false
-      nuget-source:
-        description: NuGet source URL
-        required: false
-      helm-set-secret-values:
-        description: Sensitive Helm set values
-        required: false
-
     outputs:
       version:
-        description: Generated semantic version
+        description: Generated chart semantic version
         value: ${{ jobs.version.outputs.version }}
-      docker-image:
-        description: Built Docker image with tag
-        value: ${{ jobs.build.outputs.docker-image }}
+      chart-name:
+        description: Helm chart name read from Chart.yaml
+        value: ${{ jobs.package-and-push.outputs.chart-name }}
+      chart-package:
+        description: Packaged chart path in the runner workspace
+        value: ${{ jobs.package-and-push.outputs.chart-package }}
       helm-chart:
-        description: Chart reference used for deployment
-        value: ${{ jobs.deploy.outputs.helm-chart }}
-      nuget-version:
-        description: Generated NuGet package version
-        value: ${{ jobs.nuget.outputs.version }}
+        description: ChartMuseum URL where package upload occurred
+        value: ${{ jobs.package-and-push.outputs.chart-url }}
 
-env:
-  CONTAINER_REGISTRY: ${{ inputs.container-registry }}
-  IMAGE_NAME: ${{ inputs.app-name || github.repository }}
+  workflow_dispatch:
+    inputs:
+      chart-path:
+        description: Path to the Helm chart directory
+        required: false
+        default: chart
+        type: string
+      chartmuseum-url:
+        description: ChartMuseum upload endpoint
+        required: false
+        default: https://charts.sf9.io/api/charts
+        type: string
+      helm-version:
+        description: Helm version to use for lint/template/package
+        required: false
+        default: "3.2.4"
+        type: string
+      version-prefix:
+        description: Version prefix in major.minor format
+        required: false
+        default: "1.0"
+        type: string
+      package-destination:
+        description: Directory where packaged chart artifacts are written
+        required: false
+        default: .helm-packages
+        type: string
+      update-dependencies:
+        description: Run helm package with --dependency-update
+        required: false
+        default: true
+        type: boolean
+      validate-routing:
+        description: Validate default/ingress/gateway/dual routing rendering modes
+        required: false
+        default: true
+        type: boolean
+      validate-configmap:
+        description: Validate ConfigMap gating and merged key rendering
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
 
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.semver.outputs.version }}
+      version: ${{ steps.compute.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Determine semantic version
-        id: semver
-        uses: simplify9/.github/.github/actions/determine-semver@main
-        with:
-          major: ${{ inputs.major-version }}
-          minor: ${{ inputs.minor-version }}
-
-      - name: Tag new version on GitHub origin
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.semver.outputs.version }}
-          sha: ${{ github.sha }}
-
-  nuget:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.nuget-semver.outputs.version }}
-    env:
-      GITHUB_TOKEN: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-      NUGET_AUTH_TOKEN: ${{ secrets.nuget-api-key }}
-      NUGET_SOURCE: ${{ secrets.nuget-source }}
-    steps:
-      - name: Checkout code
-        if: ${{ inputs.package-nuget }}
-        uses: actions/checkout@v4
-
-      - name: Configure GitHub Packages feed
-        if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
-        env:
-          FEED_URL: ${{ env.NUGET_SOURCE }}
-          FEED_USERNAME: ${{ github.actor }}
-          FEED_PASSWORD: ${{ secrets.nuget-api-key }}
-        run: |
-          dotnet nuget remove source github || true
-          dotnet nuget add source "$FEED_URL" \
-            --name github \
-            --username "$FEED_USERNAME" \
-            --password "$FEED_PASSWORD" \
-            --store-password-in-clear-text
-
-      - name: Determine NuGet semantic version
-        if: ${{ inputs.package-nuget }}
-        id: nuget-semver
-        uses: simplify9/.github/.github/actions/determine-semver@main
-        with:
-          major: ${{ inputs.nuget-major-version }}
-          minor: ${{ inputs.nuget-minor-version }}
-
-      - name: Dotnet Restore Build and Test
-        if: ${{ inputs.package-nuget }}
-        uses: simplify9/.github/.github/actions/dotnet-build@main
-        with:
-          projects: '**/*.csproj'
-          test-projects: ${{ inputs.test-projects }}
-          configuration: Release
-          dotnet-version: ${{ inputs.dotnet-version }}
-          run-tests: ${{ inputs.run-tests }}
-
-      - name: Pack and Push NuGet Package
-        if: ${{ inputs.package-nuget }}
-        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
-        with:
-          projects: ${{ inputs.nuget-projects }}
-          configuration: Release
-          version: ${{ steps.nuget-semver.outputs.version }}
-          api-key: ${{ secrets.nuget-api-key }}
-          nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
-
-      - name: Tag NuGet version on GitHub origin
-        if: ${{ inputs.package-nuget }}
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.nuget-semver.outputs.version }}
-          sha: ${{ github.sha }}
-
-      - name: Skip NuGet packaging
-        if: ${{ !inputs.package-nuget }}
-        run: echo 'NuGet packaging disabled; skipping NuGet job but keeping dependency chain.'
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [version, nuget]
-    outputs:
-      docker-image: ${{ steps.docker.outputs.image-tags }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build and push Docker image
-        id: docker
-        uses: simplify9/.github/.github/actions/docker-build-push@main
-        with:
-          registry: ${{ env.CONTAINER_REGISTRY }}
-          image-name: ${{ env.IMAGE_NAME }}
-          version: ${{ needs.version.outputs.version }}
-          username: ${{ secrets.registry-username || github.actor }}
-          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
-          dockerfile: ${{ inputs.dockerfile-path }}
-          context: ${{ inputs.docker-context }}
-          platforms: ${{ inputs.docker-platforms }}
-          build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: [version, build]
-    outputs:
-      helm-chart: ${{ steps.chartmeta.outputs.helm-chart }}
-    steps:
-      - name: Generate routing and config values
-        id: routing
+      - name: Compute chart semantic version from run number
+        id: compute
         shell: bash
-        env:
-          ROUTING_MODE: ${{ inputs.routing-mode }}
-          CONFIGMAP_ENABLED: ${{ inputs.configmap-enabled }}
-          GATEWAY_PARENT_NAME: ${{ inputs.gateway-parent-name }}
-          GATEWAY_PARENT_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
-          GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
-          GATEWAY_HOSTNAMES_RAW: ${{ inputs.gateway-hostnames }}
-          GATEWAY_PATHS_RAW: ${{ inputs.gateway-paths }}
-          GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
-          GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name }}
-          GATEWAY_BACKEND_PORT: ${{ inputs.gateway-backend-port }}
-          INGRESS_HOSTS: ${{ inputs.ingress-hosts }}
-          INGRESS_PATHS: ${{ inputs.ingress-paths }}
-          INGRESS_TLS_SECRETS: ${{ inputs.ingress-tls-secrets }}
-          INGRESS_CLASS_NAME: ${{ inputs.ingress-class-name }}
-          INGRESS_PATH_TYPE: ${{ inputs.ingress-path-type }}
-          INGRESS_TLS_ENABLED: ${{ inputs.ingress-tls-enabled }}
-          INGRESS_CLUSTER_ISSUER: ${{ inputs.ingress-cluster-issuer }}
-          INGRESS_PROXY_BODY_SIZE: ${{ inputs.ingress-proxy-body-size }}
         run: |
           set -euo pipefail
 
-          mode=$(echo "$ROUTING_MODE" | tr '[:upper:]' '[:lower:]')
-          gateway_enabled=false
-          ingress_enabled=false
-
-          case "$mode" in
-            gateway)
-              gateway_enabled=true
-              ;;
-            ingress)
-              ingress_enabled=true
-              ;;
-            dual)
-              gateway_enabled=true
-              ingress_enabled=true
-              ;;
-            *)
-              echo "Unknown routing-mode '$ROUTING_MODE'. Falling back to gateway."
-              gateway_enabled=true
-              ;;
-          esac
-
-          gateway_hosts_input="$GATEWAY_HOSTNAMES_RAW"
-          gateway_paths_input="$GATEWAY_PATHS_RAW"
-
-          # Backward compatibility: when gateway host/path are omitted, fall back to ingress-style inputs.
-          if [ -z "$(echo "$gateway_hosts_input" | tr -d '[:space:],\r\n')" ] && [ -n "$(echo "$INGRESS_HOSTS" | tr -d '[:space:],\r\n')" ]; then
-            gateway_hosts_input="$INGRESS_HOSTS"
-          fi
-          if [ -z "$(echo "$gateway_paths_input" | tr -d '[:space:],\r\n')" ] && [ -n "$(echo "$INGRESS_PATHS" | tr -d '[:space:],\r\n')" ]; then
-            gateway_paths_input="$INGRESS_PATHS"
-          fi
-          if [ -z "$(echo "$gateway_paths_input" | tr -d '[:space:],\r\n')" ]; then
-            gateway_paths_input='/'
-          fi
-
-          host_list=""
-          host_count=0
-          while IFS= read -r host; do
-            host=$(echo "$host" | xargs)
-            [ -z "$host" ] && continue
-            host_list+="$host"$'\n'
-            host_count=$((host_count + 1))
-          done < <(echo "$gateway_hosts_input" | sed 's/\r//g' | tr ',' '\n')
-
-          output=""
-          output+="gateway.enabled=${gateway_enabled}\\n"
-          output+="ingress.enabled=${ingress_enabled}\\n"
-          output+="config.enabled=${CONFIGMAP_ENABLED}\\n"
-
-          if [ "$gateway_enabled" = "true" ]; then
-            output+="gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}\\n"
-            output+="gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
-
-            effective_section="${GATEWAY_SECTION_NAME}"
-            if [ -z "$effective_section" ] && [ "$host_count" -eq 1 ]; then
-              first_host=$(echo "$host_list" | head -n1)
-              slug=$(echo "$first_host" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
-              effective_section=$(echo "https-${slug}" | cut -c1-63 | sed 's/-$//')
-            fi
-            if [ -n "$effective_section" ]; then
-              output+="gateway.parentRefs[0].sectionName=${effective_section}\\n"
-            fi
-
-            hidx=0
-            while IFS= read -r host; do
-              host=$(echo "$host" | xargs)
-              [ -z "$host" ] && continue
-              output+="gateway.hostnames[$hidx]=$host\\n"
-              hidx=$((hidx + 1))
-            done < <(printf "%s" "$host_list")
-
-            pidx=0
-            while IFS= read -r path; do
-              path=$(echo "$path" | xargs)
-              [ -z "$path" ] && continue
-              output+="gateway.routes[$pidx].path=$path\\n"
-              output+="gateway.routes[$pidx].pathType=${GATEWAY_PATH_TYPE}\\n"
-              if [ -n "$GATEWAY_BACKEND_SERVICE_NAME" ]; then
-                output+="gateway.routes[$pidx].backendRef.name=${GATEWAY_BACKEND_SERVICE_NAME}\\n"
-              fi
-              if [ -n "$GATEWAY_BACKEND_PORT" ]; then
-                output+="gateway.routes[$pidx].backendRef.port=${GATEWAY_BACKEND_PORT}\\n"
-              fi
-              pidx=$((pidx + 1))
-            done < <(echo "$gateway_paths_input" | sed 's/\r//g' | tr ',' '\n')
-          fi
-
-          if [ "$ingress_enabled" = "true" ]; then
-            output+="ingress.ingressClassName=${INGRESS_CLASS_NAME}\\n"
-            output+="ingress.pathType=${INGRESS_PATH_TYPE}\\n"
-            output+="ingress.tlsEnabled=${INGRESS_TLS_ENABLED}\\n"
-
-            if [ -n "$INGRESS_CLUSTER_ISSUER" ]; then
-              output+="ingress.annotations.cert-manager\\.io/cluster-issuer=${INGRESS_CLUSTER_ISSUER}\\n"
-            fi
-            if [ -n "$INGRESS_PROXY_BODY_SIZE" ]; then
-              output+="ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/proxy-body-size=${INGRESS_PROXY_BODY_SIZE}\\n"
-            fi
-
-            tls_input=$(echo "$INGRESS_TLS_SECRETS" | sed 's/\r//g' | tr ',' '\n')
-            mapfile -t tls_list < <(echo "$tls_input" | grep -v '^[[:space:]]*$' || true)
-
-            iidx=0
-            while IFS= read -r host; do
-              host=$(echo "$host" | xargs)
-              [ -z "$host" ] && continue
-              output+="ingress.hosts[$iidx].host=$host\\n"
-
-              tls_secret=""
-              if [ ${#tls_list[@]} -gt $iidx ]; then
-                tls_secret=$(echo "${tls_list[$iidx]}" | xargs)
-              fi
-              if [ -n "$tls_secret" ]; then
-                output+="ingress.hosts[$iidx].tlsSecret=$tls_secret\\n"
-              fi
-              iidx=$((iidx + 1))
-            done < <(echo "$INGRESS_HOSTS" | sed 's/\r//g' | tr ',' '\n')
-
-            pidx=0
-            while IFS= read -r path; do
-              path=$(echo "$path" | xargs)
-              [ -z "$path" ] && continue
-              output+="ingress.paths[$pidx]=$path\\n"
-              pidx=$((pidx + 1))
-            done < <(echo "$INGRESS_PATHS" | sed 's/\r//g' | tr ',' '\n')
-          fi
-
-          {
-            echo "routing-values<<EOF"
-            echo -e "$output"
-            echo "EOF"
-            echo "gateway-host-list<<EOF"
-            printf "%s" "$host_list"
-            echo
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Auto-onboard gateway hostnames
-        if: ${{ (inputs.routing-mode == 'gateway' || inputs.routing-mode == 'dual') && inputs.gateway-auto-onboarding }}
-        shell: bash
-        env:
-          KUBECONFIG_DATA: ${{ secrets.kubeconfig }}
-          DEPLOY_NAMESPACE: ${{ inputs.namespace }}
-          GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
-          GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
-          GATEWAY_CLASS_NAME: ${{ inputs.gateway-class-name }}
-          GATEWAY_CERT_ISSUER_NAME: ${{ inputs.gateway-cert-issuer-name }}
-          GATEWAY_CERT_ISSUER_KIND: ${{ inputs.gateway-cert-issuer-kind }}
-          GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
-          GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
-          HOST_LIST: ${{ steps.routing.outputs.gateway-host-list }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${KUBECONFIG_DATA}" ]; then
-            echo "kubeconfig secret is required for gateway auto-onboarding"
+          PREFIX="${{ inputs.version-prefix }}"
+          if ! [[ "$PREFIX" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: version-prefix must be in '<major>.<minor>' format, got '$PREFIX'" >&2
             exit 1
           fi
 
-          KCFG_PATH="$RUNNER_TEMP/kubeconfig"
-          if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
-            printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
-          else
-            if printf "%s" "$KUBECONFIG_DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
-              true
-            else
-              printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
-            fi
-          fi
-          export KUBECONFIG="$KCFG_PATH"
-
-          if [ -z "$(echo "$HOST_LIST" | tr -d '[:space:]\r\n')" ]; then
-            echo "No gateway hosts were provided. Skipping gateway auto-onboarding."
-            exit 0
+          patch=$((GITHUB_RUN_NUMBER - 1))
+          if [ "$patch" -lt 0 ]; then
+            patch=0
           fi
 
-          kubectl create namespace "$GATEWAY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create namespace "$DEPLOY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          version="${PREFIX}.${patch}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Computed chart version: ${version}"
 
-          to_slug() {
-            echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//'
-          }
+  validate-chart:
+    runs-on: ubuntu-latest
+    needs: [version]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-          trim63() {
-            echo "$1" | cut -c1-63 | sed 's/-$//'
-          }
-
-          ensure_gateway_exists() {
-            local host="$1"
-            local slug http_listener https_listener secret_name
-            slug=$(to_slug "$host")
-            http_listener=$(trim63 "http-${slug}")
-            https_listener=$(trim63 "https-${slug}")
-            secret_name="$slug"
-
-            if kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" >/dev/null 2>&1; then
-              return 0
-            fi
-
-            kubectl apply -f <(printf '%s\n' \
-              "apiVersion: gateway.networking.k8s.io/v1" \
-              "kind: Gateway" \
-              "metadata:" \
-              "  name: ${GATEWAY_NAME}" \
-              "  namespace: ${GATEWAY_NAMESPACE}" \
-              "spec:" \
-              "  gatewayClassName: ${GATEWAY_CLASS_NAME}" \
-              "  listeners:" \
-              "    - name: ${http_listener}" \
-              "      protocol: HTTP" \
-              "      port: 80" \
-              "      hostname: ${host}" \
-              "      allowedRoutes:" \
-              "        namespaces:" \
-              "          from: All" \
-              "    - name: ${https_listener}" \
-              "      protocol: HTTPS" \
-              "      port: 443" \
-              "      hostname: ${host}" \
-              "      tls:" \
-              "        mode: Terminate" \
-              "        certificateRefs:" \
-              "          - kind: Secret" \
-              "            name: ${secret_name}" \
-              "      allowedRoutes:" \
-              "        namespaces:" \
-              "          from: All")
-          }
-
-          add_listener_if_missing() {
-            local listener_name="$1"
-            local listener_protocol="$2"
-            local listener_host="$3"
-            local listener_secret="$4"
-            local existing
-
-            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
-            if echo "$existing" | grep -Fxq "$listener_name"; then
-              return 0
-            fi
-
-            if [ "$listener_protocol" = "HTTP" ]; then
-              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[
-                {\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{
-                  \"name\":\"${listener_name}\",
-                  \"protocol\":\"HTTP\",
-                  \"port\":80,
-                  \"hostname\":\"${listener_host}\",
-                  \"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}
-                }}
-              ]"
-            else
-              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[
-                {\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{
-                  \"name\":\"${listener_name}\",
-                  \"protocol\":\"HTTPS\",
-                  \"port\":443,
-                  \"hostname\":\"${listener_host}\",
-                  \"tls\":{\"mode\":\"Terminate\",\"certificateRefs\":[{\"kind\":\"Secret\",\"name\":\"${listener_secret}\"}]},
-                  \"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}
-                }}
-              ]"
-            fi
-          }
-
-          while IFS= read -r host; do
-            host=$(echo "$host" | xargs)
-            [ -z "$host" ] && continue
-
-            slug=$(to_slug "$host")
-            cert_name="$slug"
-            secret_name="$slug"
-            http_listener=$(trim63 "http-${slug}")
-            https_listener=$(trim63 "https-${slug}")
-
-            ensure_gateway_exists "$host"
-
-            kubectl apply -f <(printf '%s\n' \
-              "apiVersion: cert-manager.io/v1" \
-              "kind: Certificate" \
-              "metadata:" \
-              "  name: ${cert_name}" \
-              "  namespace: ${GATEWAY_NAMESPACE}" \
-              "spec:" \
-              "  secretName: ${secret_name}" \
-              "  issuerRef:" \
-              "    name: ${GATEWAY_CERT_ISSUER_NAME}" \
-              "    kind: ${GATEWAY_CERT_ISSUER_KIND}" \
-              "  dnsNames:" \
-              "    - ${host}")
-
-            add_listener_if_missing "$http_listener" "HTTP" "$host" "$secret_name"
-            add_listener_if_missing "$https_listener" "HTTPS" "$host" "$secret_name"
-
-            if [ "$GATEWAY_CERT_WAIT" = "true" ]; then
-              kubectl wait --for=condition=Ready=True "certificate/${cert_name}" -n "$GATEWAY_NAMESPACE" --timeout="${GATEWAY_CERT_WAIT_TIMEOUT}s"
-            fi
-          done < <(printf "%s" "$HOST_LIST")
-
-      - name: Deploy with Helm gateway-first chart
-        uses: simplify9/.github/.github/actions/helm-generic@main
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
         with:
-          app_name: ${{ inputs.app-name || github.repository }}
-          namespace: ${{ inputs.namespace }}
-          chart: ${{ inputs.chart-name }}
-          chart_repo: ${{ inputs.chart-repo }}
-          helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
-          extra_args: --wait
-          extra_set_values: |
-            image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name || github.repository }}
-            app.version=${{ needs.version.outputs.version }}
-            image.overrideName=${{ inputs.app-name }}
-            image.overrideVersion=${{ needs.version.outputs.version }}
-            image.pullSecret=${{ inputs.image-pull-secret }}
-            environment=${{ inputs.environment }}
-            service.targetPort=${{ inputs.service-target-port }}
-            service.port=${{ inputs.service-port }}
-            ${{ steps.routing.outputs.routing-values }}
-            ${{ inputs.helm-set-values }}
-          kubeconfig_data: ${{ secrets.kubeconfig }}
-          init_job_image: ${{ inputs.init-job-image }}
-          init_job_secret_name: ${{ inputs.init-job-secret-name }}
-          environment: ${{ inputs.environment }}
+          version: ${{ inputs.helm-version }}
 
-      - name: Expose chart metadata output
-        id: chartmeta
+      - name: Helm lint
         shell: bash
         run: |
-          echo "helm-chart=${{ inputs.chart-repo }}/${{ inputs.chart-name }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          helm lint "${{ inputs.chart-path }}"
+
+      - name: Validate routing render modes
+        if: ${{ inputs.validate-routing }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHART_PATH="${{ inputs.chart-path }}"
+
+          check_mode() {
+            local label="$1"
+            local expect_ingress="$2"
+            local expect_httproute="$3"
+            shift 3
+
+            local rendered
+            rendered="$(helm template "$label" "$CHART_PATH" "$@")"
+
+            if [ "$expect_ingress" = "true" ]; then
+              if ! printf '%s\n' "$rendered" | grep -q '^kind: Ingress$'; then
+                echo "Error: expected Ingress for mode '$label' but none was rendered." >&2
+                exit 1
+              fi
+            else
+              if printf '%s\n' "$rendered" | grep -q '^kind: Ingress$'; then
+                echo "Error: did not expect Ingress for mode '$label' but one was rendered." >&2
+                exit 1
+              fi
+            fi
+
+            if [ "$expect_httproute" = "true" ]; then
+              if ! printf '%s\n' "$rendered" | grep -q '^kind: HTTPRoute$'; then
+                echo "Error: expected HTTPRoute for mode '$label' but none was rendered." >&2
+                exit 1
+              fi
+            else
+              if printf '%s\n' "$rendered" | grep -q '^kind: HTTPRoute$'; then
+                echo "Error: did not expect HTTPRoute for mode '$label' but one was rendered." >&2
+                exit 1
+              fi
+            fi
+
+            echo "Mode '$label' rendered as expected."
+          }
+
+          check_mode default false true
+          check_mode ingress-only true false --set ingress.enabled=true --set gateway.enabled=false
+          check_mode gateway-only false true --set ingress.enabled=false --set gateway.enabled=true
+          check_mode dual true true --set ingress.enabled=true --set gateway.enabled=true
+
+      - name: Validate ConfigMap toggle behavior
+        if: ${{ inputs.validate-configmap }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHART_PATH="${{ inputs.chart-path }}"
+
+          default_rendered="$(helm template cfg-default "$CHART_PATH")"
+          if printf '%s\n' "$default_rendered" | grep -q '^kind: ConfigMap$'; then
+            echo "Error: ConfigMap should not render by default when config.enabled=false." >&2
+            exit 1
+          fi
+          echo "ConfigMap disabled-by-default behavior is valid."
+
+          enabled_rendered="$(helm template cfg-enabled "$CHART_PATH" \
+            --set config.enabled=true \
+            --set-string environmentVariables.APP_ENV=development \
+            --set-string config.data.FEATURE_FLAG=on)"
+
+          if ! printf '%s\n' "$enabled_rendered" | grep -q '^kind: ConfigMap$'; then
+            echo "Error: ConfigMap should render when config.enabled=true." >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$enabled_rendered" | grep -Eq '^  name: .*-config$'; then
+            echo "Error: ConfigMap name did not match expected '<app>-config' pattern." >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$enabled_rendered" | grep -q '^  APP_ENV:'; then
+            echo "Error: APP_ENV key from environmentVariables was not found in ConfigMap data." >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$enabled_rendered" | grep -q '^  FEATURE_FLAG:'; then
+            echo "Error: FEATURE_FLAG key from config.data was not found in ConfigMap data." >&2
+            exit 1
+          fi
+
+          echo "ConfigMap enabled behavior and merged key rendering are valid."
+
+  package-and-push:
+    runs-on: ubuntu-latest
+    needs: [version, validate-chart]
+    outputs:
+      chart-name: ${{ steps.package.outputs.chart-name }}
+      chart-package: ${{ steps.package.outputs.chart-package }}
+      chart-url: ${{ steps.upload.outputs.chart-url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Package chart
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHART_PATH="${{ inputs.chart-path }}"
+          DEST="${{ inputs.package-destination }}"
+          VERSION="${{ needs.version.outputs.version }}"
+
+          mkdir -p "$DEST"
+
+          CHART_NAME="$(helm show chart "$CHART_PATH" | awk '$1=="name:" { print $2; exit }')"
+          if [ -z "$CHART_NAME" ]; then
+            echo "Error: failed to resolve chart name from ${CHART_PATH}/Chart.yaml." >&2
+            exit 1
+          fi
+
+          if [ "${{ inputs.update-dependencies }}" = "true" ]; then
+            helm package "$CHART_PATH" --dependency-update --version "$VERSION" --app-version "$VERSION" --destination "$DEST"
+          else
+            helm package "$CHART_PATH" --version "$VERSION" --app-version "$VERSION" --destination "$DEST"
+          fi
+
+          PACKAGE_FILE="${DEST}/${CHART_NAME}-${VERSION}.tgz"
+          if [ ! -f "$PACKAGE_FILE" ]; then
+            echo "Error: expected package '${PACKAGE_FILE}' was not created." >&2
+            ls -la "$DEST" >&2
+            exit 1
+          fi
+
+          echo "chart-name=$CHART_NAME" >> "$GITHUB_OUTPUT"
+          echo "chart-package=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"
+
+          echo "Packaged ${CHART_NAME} version ${VERSION} at ${PACKAGE_FILE}."
+
+      - name: Upload chart package(s) to ChartMuseum
+        id: upload
+        shell: bash
+        env:
+          CHARTMUSEUM_URL: ${{ inputs.chartmuseum-url }}
+          CHARTMUSEUM_USER: ${{ secrets.registry-username }}
+          CHARTMUSEUM_PASSWORD: ${{ secrets.registry-password }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CHARTMUSEUM_URL}" ]; then
+            echo "Error: chartmuseum-url input is empty." >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          chart_packages=("${{ inputs.package-destination }}"/*.tgz)
+          if [ ${#chart_packages[@]} -eq 0 ]; then
+            echo "Error: no .tgz chart artifacts found in '${{ inputs.package-destination }}'." >&2
+            exit 1
+          fi
+
+          for package_file in "${chart_packages[@]}"; do
+            echo "Uploading ${package_file} to ${CHARTMUSEUM_URL}"
+            curl --fail --show-error --silent \
+              --data-binary "@${package_file}" \
+              "${CHARTMUSEUM_URL}" \
+              --user "${CHARTMUSEUM_USER}:${CHARTMUSEUM_PASSWORD}"
+          done
+
+          echo "chart-url=${CHARTMUSEUM_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Workflow summary
+        shell: bash
+        run: |
+          echo "### Helm Chart Package + Push" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Chart Name: ${{ steps.package.outputs.chart-name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ needs.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Package: ${{ steps.package.outputs.chart-package }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Upload Endpoint: ${{ steps.upload.outputs.chart-url }}" >> "$GITHUB_STEP_SUMMARY"
