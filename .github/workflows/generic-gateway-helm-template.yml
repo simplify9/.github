@@ -29,17 +29,17 @@ on:
         default: '0'
         type: string
       nuget-projects:
-        description: NuGet projects to pack and push (glob pattern)
+        description: NuGet projects to pack and push glob
         required: false
         default: '**/*.csproj'
         type: string
       dotnet-version:
-        description: .NET SDK version to use for NuGet packaging
+        description: Dotnet SDK version for nuget packaging
         required: false
         default: 8.0.x
         type: string
       test-projects:
-        description: Test projects to run before packing (glob pattern)
+        description: Test projects glob
         required: false
         default: '**/*UnitTests/*.csproj'
         type: string
@@ -65,7 +65,7 @@ on:
         default: linux/amd64
         type: string
       container-registry:
-        description: Container registry (docker.io, ghcr.io, etc.)
+        description: Container registry name
         required: false
         default: ghcr.io
         type: string
@@ -76,21 +76,21 @@ on:
         default: development
         type: string
       environment:
-        description: Value for environment Helm set (e.g., Development, Staging)
+        description: Environment value for Helm set
         required: false
         default: Development
         type: string
       app-name:
-        description: Application name for app.name Helm value
+        description: Application name for app.name
         required: false
         type: string
       service-target-port:
-        description: Service targetPort (maps to service.targetPort)
+        description: Service targetPort
         required: false
         default: '80'
         type: string
       service-port:
-        description: Service port (maps to service.port)
+        description: Service port
         required: false
         default: '80'
         type: string
@@ -111,17 +111,17 @@ on:
         default: https://charts.sf9.io
         type: string
       helm-timeout-minutes:
-        description: Optional Helm timeout in minutes (defaults to 10)
+        description: Helm timeout minutes defaults to 10
         required: false
         default: ''
         type: string
       helm-set-values:
-        description: Additional Helm set values (line or comma separated key=value)
+        description: Additional Helm set values line or comma separated
         required: false
         type: string
 
       routing-mode:
-        description: Routing mode gateway default ingress or dual
+        description: Routing mode gateway ingress or dual
         required: false
         default: gateway
         type: string
@@ -137,79 +137,113 @@ on:
         default: s9-dev-edge
         type: string
       gateway-section-name:
-        description: Gateway parentRef sectionName (listener)
+        description: Optional Gateway sectionName override
         required: false
-        default: https-gateway-dev
+        default: ''
         type: string
       gateway-hostnames:
-        description: Comma/newline separated gateway hostnames
+        description: Gateway hostnames comma or newline
         required: false
-        default: gateway-dev.sf9.io
+        default: ''
         type: string
       gateway-paths:
-        description: Comma/newline separated gateway route paths
+        description: Gateway paths comma or newline
         required: false
-        default: /
+        default: ''
         type: string
       gateway-path-type:
-        description: Gateway route path match type
+        description: Gateway route path type
         required: false
         default: PathPrefix
         type: string
       gateway-backend-service-name:
-        description: Optional backendRef service name override (empty uses release service)
+        description: Optional gateway backend service override
         required: false
         default: ''
         type: string
       gateway-backend-port:
-        description: gateway.routes[].backendRef.port
+        description: Gateway backend service port
         required: false
         default: '80'
         type: string
 
       ingress-hosts:
-        description: Comma/newline separated ingress hosts (maps to ingress.hosts[i].host)
+        description: Ingress hosts comma or newline
         required: false
+        default: ''
         type: string
       ingress-paths:
-        description: Comma/newline separated ingress paths (maps to ingress.paths[i])
+        description: Ingress paths comma or newline
         required: false
+        default: ''
         type: string
       ingress-tls-secrets:
-        description: Comma/newline separated TLS secrets matching ingress-hosts by index
+        description: TLS secrets matching ingress hosts
         required: false
+        default: ''
         type: string
       ingress-class-name:
-        description: ingress.ingressClassName
+        description: Ingress class name
         required: false
         default: nginx
         type: string
       ingress-path-type:
-        description: ingress.pathType
+        description: Ingress pathType
         required: false
         default: Prefix
         type: string
       ingress-tls-enabled:
-        description: ingress.tlsEnabled
+        description: Ingress tlsEnabled
         required: false
         default: true
         type: boolean
       ingress-cluster-issuer:
-        description: Optional cert-manager cluster issuer annotation for ingress mode
+        description: Optional ingress cert-manager issuer annotation
         required: false
         default: letsencrypt-nginx
         type: string
       ingress-proxy-body-size:
-        description: Optional nginx ingress proxy body size annotation
+        description: Optional nginx proxy body size annotation
         required: false
         default: 50m
         type: string
 
       configmap-enabled:
-        description: Enable chart configmap.yaml rendering (default false)
+        description: Enable configmap rendering
         required: false
         default: false
         type: boolean
+
+      gateway-auto-onboarding:
+        description: Automatically ensure Gateway listeners and certificates
+        required: false
+        default: true
+        type: boolean
+      gateway-class-name:
+        description: GatewayClass used when creating missing Gateway
+        required: false
+        default: cilium
+        type: string
+      gateway-cert-issuer-name:
+        description: cert-manager issuer name for gateway domains
+        required: false
+        default: letsencrypt-production-gateway
+        type: string
+      gateway-cert-issuer-kind:
+        description: cert-manager issuer kind
+        required: false
+        default: ClusterIssuer
+        type: string
+      gateway-cert-wait:
+        description: Wait for cert readiness during onboarding
+        required: false
+        default: true
+        type: boolean
+      gateway-cert-wait-timeout-seconds:
+        description: Certificate wait timeout seconds
+        required: false
+        default: '600'
+        type: string
 
       init-job-image:
         description: Optional migration init Job image
@@ -217,7 +251,7 @@ on:
         default: ''
         type: string
       init-job-secret-name:
-        description: Secret containing migration connection-string key
+        description: Secret containing migration connection string key
         required: false
         default: ''
         type: string
@@ -227,16 +261,16 @@ on:
         description: Container registry username
         required: false
       registry-password:
-        description: Container registry password/token
+        description: Container registry password token
         required: false
       kubeconfig:
-        description: Base64 encoded kubeconfig or raw kubeconfig content
+        description: Base64 kubeconfig or raw kubeconfig content
         required: false
       github-token:
         description: GitHub token for tagging
         required: false
       NUGET_PACKAGE_PAT:
-        description: Personal access token for GitHub Packages restores inside Docker builds
+        description: GitHub Packages token for docker builds
         required: false
       nuget-api-key:
         description: NuGet API key
@@ -245,7 +279,7 @@ on:
         description: NuGet source URL
         required: false
       helm-set-secret-values:
-        description: Sensitive Helm set values (passed through helm-generic action support)
+        description: Sensitive Helm set values
         required: false
 
     outputs:
@@ -273,7 +307,7 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Determine semantic version
         id: semver
@@ -301,7 +335,7 @@ jobs:
     steps:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Configure GitHub Packages feed
         if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
@@ -325,7 +359,7 @@ jobs:
           major: ${{ inputs.nuget-major-version }}
           minor: ${{ inputs.nuget-minor-version }}
 
-      - name: Dotnet Restore, Build, and Test
+      - name: Dotnet Restore Build and Test
         if: ${{ inputs.package-nuget }}
         uses: simplify9/.github/.github/actions/dotnet-build@main
         with:
@@ -365,7 +399,7 @@ jobs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Build and push Docker image
         id: docker
@@ -396,8 +430,8 @@ jobs:
           GATEWAY_PARENT_NAME: ${{ inputs.gateway-parent-name }}
           GATEWAY_PARENT_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
           GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
-          GATEWAY_HOSTNAMES: ${{ inputs.gateway-hostnames }}
-          GATEWAY_PATHS: ${{ inputs.gateway-paths }}
+          GATEWAY_HOSTNAMES_RAW: ${{ inputs.gateway-hostnames }}
+          GATEWAY_PATHS_RAW: ${{ inputs.gateway-paths }}
           GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
           GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name }}
           GATEWAY_BACKEND_PORT: ${{ inputs.gateway-backend-port }}
@@ -433,6 +467,29 @@ jobs:
               ;;
           esac
 
+          gateway_hosts_input="$GATEWAY_HOSTNAMES_RAW"
+          gateway_paths_input="$GATEWAY_PATHS_RAW"
+
+          # Backward compatibility: when gateway host/path are omitted, fall back to ingress-style inputs.
+          if [ -z "$(echo "$gateway_hosts_input" | tr -d '[:space:],\r\n')" ] && [ -n "$(echo "$INGRESS_HOSTS" | tr -d '[:space:],\r\n')" ]; then
+            gateway_hosts_input="$INGRESS_HOSTS"
+          fi
+          if [ -z "$(echo "$gateway_paths_input" | tr -d '[:space:],\r\n')" ] && [ -n "$(echo "$INGRESS_PATHS" | tr -d '[:space:],\r\n')" ]; then
+            gateway_paths_input="$INGRESS_PATHS"
+          fi
+          if [ -z "$(echo "$gateway_paths_input" | tr -d '[:space:],\r\n')" ]; then
+            gateway_paths_input='/'
+          fi
+
+          host_list=""
+          host_count=0
+          while IFS= read -r host; do
+            host=$(echo "$host" | xargs)
+            [ -z "$host" ] && continue
+            host_list+="$host"$'\n'
+            host_count=$((host_count + 1))
+          done < <(echo "$gateway_hosts_input" | sed 's/\r//g' | tr ',' '\n')
+
           output=""
           output+="gateway.enabled=${gateway_enabled}\\n"
           output+="ingress.enabled=${ingress_enabled}\\n"
@@ -441,7 +498,16 @@ jobs:
           if [ "$gateway_enabled" = "true" ]; then
             output+="gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}\\n"
             output+="gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
-            output+="gateway.parentRefs[0].sectionName=${GATEWAY_SECTION_NAME}\\n"
+
+            effective_section="${GATEWAY_SECTION_NAME}"
+            if [ -z "$effective_section" ] && [ "$host_count" -eq 1 ]; then
+              first_host=$(echo "$host_list" | head -n1)
+              slug=$(echo "$first_host" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
+              effective_section=$(echo "https-${slug}" | cut -c1-63 | sed 's/-$//')
+            fi
+            if [ -n "$effective_section" ]; then
+              output+="gateway.parentRefs[0].sectionName=${effective_section}\\n"
+            fi
 
             hidx=0
             while IFS= read -r host; do
@@ -449,7 +515,7 @@ jobs:
               [ -z "$host" ] && continue
               output+="gateway.hostnames[$hidx]=$host\\n"
               hidx=$((hidx + 1))
-            done < <(echo "$GATEWAY_HOSTNAMES" | sed 's/\r//g' | tr ',' '\n')
+            done < <(printf "%s" "$host_list")
 
             pidx=0
             while IFS= read -r path; do
@@ -464,7 +530,7 @@ jobs:
                 output+="gateway.routes[$pidx].backendRef.port=${GATEWAY_BACKEND_PORT}\\n"
               fi
               pidx=$((pidx + 1))
-            done < <(echo "$GATEWAY_PATHS" | sed 's/\r//g' | tr ',' '\n')
+            done < <(echo "$gateway_paths_input" | sed 's/\r//g' | tr ',' '\n')
           fi
 
           if [ "$ingress_enabled" = "true" ]; then
@@ -511,12 +577,178 @@ jobs:
             echo "routing-values<<EOF"
             echo -e "$output"
             echo "EOF"
+            echo "gateway-host-list<<EOF"
+            printf "%s" "$host_list"
+            echo
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Deploy with Helm (gateway-first chart)
+      - name: Auto-onboard gateway hostnames
+        if: ${{ (inputs.routing-mode == 'gateway' || inputs.routing-mode == 'dual') && inputs.gateway-auto-onboarding }}
+        shell: bash
+        env:
+          KUBECONFIG_DATA: ${{ secrets.kubeconfig }}
+          DEPLOY_NAMESPACE: ${{ inputs.namespace }}
+          GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
+          GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+          GATEWAY_CLASS_NAME: ${{ inputs.gateway-class-name }}
+          GATEWAY_CERT_ISSUER_NAME: ${{ inputs.gateway-cert-issuer-name }}
+          GATEWAY_CERT_ISSUER_KIND: ${{ inputs.gateway-cert-issuer-kind }}
+          GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
+          GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
+          HOST_LIST: ${{ steps.routing.outputs.gateway-host-list }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${KUBECONFIG_DATA}" ]; then
+            echo "kubeconfig secret is required for gateway auto-onboarding"
+            exit 1
+          fi
+
+          KCFG_PATH="$RUNNER_TEMP/kubeconfig"
+          if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
+            printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
+          else
+            if printf "%s" "$KUBECONFIG_DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
+              true
+            else
+              printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
+            fi
+          fi
+          export KUBECONFIG="$KCFG_PATH"
+
+          if [ -z "$(echo "$HOST_LIST" | tr -d '[:space:]\r\n')" ]; then
+            echo "No gateway hosts were provided. Skipping gateway auto-onboarding."
+            exit 0
+          fi
+
+          kubectl create namespace "$GATEWAY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace "$DEPLOY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+          to_slug() {
+            echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//'
+          }
+
+          trim63() {
+            echo "$1" | cut -c1-63 | sed 's/-$//'
+          }
+
+          ensure_gateway_exists() {
+            local host="$1"
+            local slug http_listener https_listener secret_name
+            slug=$(to_slug "$host")
+            http_listener=$(trim63 "http-${slug}")
+            https_listener=$(trim63 "https-${slug}")
+            secret_name="$slug"
+
+            if kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" >/dev/null 2>&1; then
+              return 0
+            fi
+
+            kubectl apply -f <(printf '%s\n' \
+              "apiVersion: gateway.networking.k8s.io/v1" \
+              "kind: Gateway" \
+              "metadata:" \
+              "  name: ${GATEWAY_NAME}" \
+              "  namespace: ${GATEWAY_NAMESPACE}" \
+              "spec:" \
+              "  gatewayClassName: ${GATEWAY_CLASS_NAME}" \
+              "  listeners:" \
+              "    - name: ${http_listener}" \
+              "      protocol: HTTP" \
+              "      port: 80" \
+              "      hostname: ${host}" \
+              "      allowedRoutes:" \
+              "        namespaces:" \
+              "          from: All" \
+              "    - name: ${https_listener}" \
+              "      protocol: HTTPS" \
+              "      port: 443" \
+              "      hostname: ${host}" \
+              "      tls:" \
+              "        mode: Terminate" \
+              "        certificateRefs:" \
+              "          - kind: Secret" \
+              "            name: ${secret_name}" \
+              "      allowedRoutes:" \
+              "        namespaces:" \
+              "          from: All")
+          }
+
+          add_listener_if_missing() {
+            local listener_name="$1"
+            local listener_protocol="$2"
+            local listener_host="$3"
+            local listener_secret="$4"
+            local existing
+
+            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
+            if echo "$existing" | grep -Fxq "$listener_name"; then
+              return 0
+            fi
+
+            if [ "$listener_protocol" = "HTTP" ]; then
+              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[
+                {\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{
+                  \"name\":\"${listener_name}\",
+                  \"protocol\":\"HTTP\",
+                  \"port\":80,
+                  \"hostname\":\"${listener_host}\",
+                  \"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}
+                }}
+              ]"
+            else
+              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[
+                {\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{
+                  \"name\":\"${listener_name}\",
+                  \"protocol\":\"HTTPS\",
+                  \"port\":443,
+                  \"hostname\":\"${listener_host}\",
+                  \"tls\":{\"mode\":\"Terminate\",\"certificateRefs\":[{\"kind\":\"Secret\",\"name\":\"${listener_secret}\"}]},
+                  \"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}
+                }}
+              ]"
+            fi
+          }
+
+          while IFS= read -r host; do
+            host=$(echo "$host" | xargs)
+            [ -z "$host" ] && continue
+
+            slug=$(to_slug "$host")
+            cert_name="$slug"
+            secret_name="$slug"
+            http_listener=$(trim63 "http-${slug}")
+            https_listener=$(trim63 "https-${slug}")
+
+            ensure_gateway_exists "$host"
+
+            kubectl apply -f <(printf '%s\n' \
+              "apiVersion: cert-manager.io/v1" \
+              "kind: Certificate" \
+              "metadata:" \
+              "  name: ${cert_name}" \
+              "  namespace: ${GATEWAY_NAMESPACE}" \
+              "spec:" \
+              "  secretName: ${secret_name}" \
+              "  issuerRef:" \
+              "    name: ${GATEWAY_CERT_ISSUER_NAME}" \
+              "    kind: ${GATEWAY_CERT_ISSUER_KIND}" \
+              "  dnsNames:" \
+              "    - ${host}")
+
+            add_listener_if_missing "$http_listener" "HTTP" "$host" "$secret_name"
+            add_listener_if_missing "$https_listener" "HTTPS" "$host" "$secret_name"
+
+            if [ "$GATEWAY_CERT_WAIT" = "true" ]; then
+              kubectl wait --for=condition=Ready=True "certificate/${cert_name}" -n "$GATEWAY_NAMESPACE" --timeout="${GATEWAY_CERT_WAIT_TIMEOUT}s"
+            fi
+          done < <(printf "%s" "$HOST_LIST")
+
+      - name: Deploy with Helm gateway-first chart
         uses: simplify9/.github/.github/actions/helm-generic@main
         with:
-          app_name: ${{ inputs.app-name }}
+          app_name: ${{ inputs.app-name || github.repository }}
           namespace: ${{ inputs.namespace }}
           chart: ${{ inputs.chart-name }}
           chart_repo: ${{ inputs.chart-repo }}
@@ -524,7 +756,7 @@ jobs:
           extra_args: --wait
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name }}
+            app.name=${{ inputs.app-name || github.repository }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.app-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}
