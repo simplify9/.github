@@ -748,7 +748,7 @@ jobs:
       - name: Deploy with Helm gateway-first chart
         uses: simplify9/.github/.github/actions/helm-generic@main
         with:
-          app_name: ${{ inputs.app-name }}
+          app_name: ${{ inputs.app-name || github.repository }}
           namespace: ${{ inputs.namespace }}
           chart: ${{ inputs.chart-name }}
           chart_repo: ${{ inputs.chart-repo }}
@@ -756,7 +756,7 @@ jobs:
           extra_args: --wait
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name }}
+            app.name=${{ inputs.app-name || github.repository }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.app-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}
