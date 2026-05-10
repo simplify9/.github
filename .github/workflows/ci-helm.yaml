@@ -141,7 +141,7 @@ jobs:
     environment: ${{ inputs.registry_profile }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Derive sanitized branch name
         id: branch
