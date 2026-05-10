@@ -307,7 +307,7 @@ jobs:
       version: ${{ steps.semver.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Determine semantic version
         id: semver
@@ -335,7 +335,7 @@ jobs:
     steps:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure GitHub Packages feed
         if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
@@ -399,7 +399,7 @@ jobs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build and push Docker image
         id: docker
@@ -680,10 +680,32 @@ jobs:
             local listener_protocol="$2"
             local listener_host="$3"
             local listener_secret="$4"
-            local existing
+            local listener_port existing conflict
 
-            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
+            if [ "$listener_protocol" = "HTTP" ]; then
+              listener_port=80
+            else
+              listener_port=443
+            fi
+
+            # Guard 1: listener with this exact name already registered
+            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
             if echo "$existing" | grep -Fxq "$listener_name"; then
+              echo "Listener '${listener_name}' already exists by name; skipping."
+              return 0
+            fi
+
+            # Guard 2: any listener with the same hostname+port+protocol triplet
+            # (the Gateway API uniqueness constraint — different name, same triplet still fails)
+            conflict=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" -o json \
+              | jq -r --arg host "$listener_host" --arg proto "$listener_protocol" \
+                       --argjson port "$listener_port" \
+                '.spec.listeners[]
+                 | select(.hostname == $host and .protocol == $proto and .port == $port)
+                 | .name' 2>/dev/null || true)
+            if [ -n "$conflict" ]; then
+              echo "A ${listener_protocol} listener for '${listener_host}:${listener_port}' already exists (name: '${conflict}'); skipping."
               return 0
             fi
 
