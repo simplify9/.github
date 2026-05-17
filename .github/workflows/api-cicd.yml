@@ -317,7 +317,7 @@ jobs:
           echo "Target: $TARGET_CHART_NAME (your app name)"
 
       - name: Upload chart artifact (unified for both local and external)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helm-chart-${{ inputs.chart-name }}
           path: ${{ steps.detect-chart.outputs.chart-source == 'external' && inputs.chart-name || format('{0}-artifact', inputs.chart-name) }}/
@@ -359,7 +359,7 @@ jobs:
     environment: development
     steps:
       - name: Download chart artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helm-chart-${{ inputs.chart-name }}
           path: ${{ inputs.chart-name }}
@@ -390,7 +390,7 @@ jobs:
     environment: staging
     steps:
       - name: Download chart artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helm-chart-${{ inputs.chart-name }}
           path: ${{ inputs.chart-name }}
@@ -421,7 +421,7 @@ jobs:
     environment: production
     steps:
       - name: Download chart artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helm-chart-${{ inputs.chart-name }}
           path: ${{ inputs.chart-name }}

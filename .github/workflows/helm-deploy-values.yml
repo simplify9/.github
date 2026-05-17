@@ -64,12 +64,12 @@ on:
       helm-version:
         type: string
         required: false
-        default: v3.14.4
+        default: v3.21.0
 
       kubectl-version:
         type: string
         required: false
-        default: v1.29.0
+        default: v1.33.0
 
       helm-timeout:
         type: string
