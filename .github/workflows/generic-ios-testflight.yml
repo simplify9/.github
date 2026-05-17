@@ -395,7 +395,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.package_manager.outputs.cache }}
@@ -803,7 +803,7 @@ jobs:
           echo "IPA_FILE=${IPA_OUT}" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename_ipa.outputs.ipa_file }}
@@ -848,7 +848,7 @@ jobs:
           xcodebuild -version
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}
           path: .
@@ -1035,7 +1035,7 @@ jobs:
           xcodebuild -version
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}
           path: .

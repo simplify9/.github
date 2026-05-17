@@ -412,7 +412,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.package_manager.outputs.cache }}
@@ -454,7 +454,7 @@ jobs:
           test -f "${{ inputs.keystore-output-path }}"
 
       - name: Build Release Bundle (AAB)
-        uses: gradle/gradle-build-action@v3
+        uses: gradle/actions/setup-gradle@v3
         with:
           build-root-directory: ${{ inputs.build-root-directory }}
           arguments: >
@@ -503,7 +503,7 @@ jobs:
           echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename.outputs.aab_file }}
@@ -517,7 +517,7 @@ jobs:
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}
           path: .
@@ -587,7 +587,7 @@ jobs:
 
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}
           path: .
