@@ -257,3 +257,20 @@ All Docker and Helm versioning flows through `actions/determine-semver`:
 - **Do not pass secrets as regular inputs** — declare them under `on.workflow_call.secrets:` or use `secrets: inherit`
 - **Do not mix Helm config and secret values** in a single `--set` call — use `--set-string` for anything that contains special characters or is sourced from a secret
 - **Do not use `cloudflare/pages-action` above `@v1`** — the repo is archived at v1.5.0; there is no v2
+
+---
+
+## Keeping README.md Up to Date
+
+**After every change to this repository, update `README.md` to reflect the current state of the codebase.**
+
+Specifically, update `README.md` whenever you:
+
+- Add, remove, or rename a workflow (`.github/workflows/`)
+- Add, remove, or rename a composite action (`.github/actions/`)
+- Add, change, or remove an input or secret on any workflow or action
+- Change a pinned action version or CLI tool version
+- Change the default value of any input that is documented in the README
+- Change deployment infrastructure (registry, cluster, chart repo URL)
+
+The README must always be an accurate reflection of what callers will experience. An outdated README is a source of broken pipelines and wasted debugging time — treat it as part of the same change, not an afterthought.
