@@ -28,7 +28,7 @@ on:
         description: 'Node.js version to use'
         required: false
         type: string
-        default: '18'
+        default: '24'
       
       package-manager:
         description: 'Package manager to use (npm, yarn, pnpm)'
@@ -110,6 +110,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Enable Corepack (pnpm)
+        if: ${{ inputs.package-manager == 'pnpm' }}
+        run: corepack enable
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -117,8 +121,11 @@ jobs:
           cache: ${{ inputs.package-manager }}
 
       - name: Set project name
+        env:
+          PROJECT_NAME: ${{ inputs.project-name }}
+          PROJECT_NAME_SUFFIX: ${{ inputs.project-name-suffix }}
         run: |
-          FULL_NAME="${{ inputs.project-name }}${{ inputs.project-name-suffix }}"
+          FULL_NAME="${PROJECT_NAME}${PROJECT_NAME_SUFFIX}"
           echo "FULL_PROJECT_NAME=$FULL_NAME" >> $GITHUB_ENV
           echo "🏷️ Using project name: $FULL_NAME"
 
@@ -142,21 +149,31 @@ jobs:
 
       - name: Run tests
         if: inputs.run-tests == true
-        run: ${{ inputs.test-command }}
+        env:
+          TEST_CMD: ${{ inputs.test-command }}
+        run: |
+          printf '%s\n' "$TEST_CMD" > /tmp/test_cmd.sh
+          bash -e /tmp/test_cmd.sh
 
       - name: Build application
-        run: ${{ inputs.build-command }}
+        env:
+          BUILD_CMD: ${{ inputs.build-command }}
+        run: |
+          printf '%s\n' "$BUILD_CMD" > /tmp/build_cmd.sh
+          bash -e /tmp/build_cmd.sh
 
       - name: Verify build output
+        env:
+          BUILD_DIR: ${{ inputs.build-directory }}
         run: |
-          if [ ! -d "${{ inputs.build-directory }}" ]; then
-            echo "❌ Build directory '${{ inputs.build-directory }}' not found!"
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "❌ Build directory '$BUILD_DIR' not found!"
             echo "Contents of current directory:"
             ls -la
             exit 1
           fi
           echo "✅ Build directory found, contents:"
-          ls -la ${{ inputs.build-directory }}/
+          ls -la "$BUILD_DIR/"
 
       - name: Setup Cloudflare Pages project
         uses: simplify9/.github/.github/actions/setup-cloudflare-project@main
@@ -193,21 +210,29 @@ jobs:
           fail-on-error: ${{ inputs.fail-on-domain-error }}
 
       - name: Deployment summary
+        env:
+          DEPLOY_ENV: ${{ inputs.environment }}
+          TARGET_BRANCH: ${{ inputs.target-branch }}
+          NODE_VERSION: ${{ inputs.node-version }}
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          BUILD_DIR: ${{ inputs.build-directory }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         run: |
           echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Project**: ${{ env.FULL_PROJECT_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: ${{ inputs.target-branch }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Node.js**: ${{ inputs.node-version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Package Manager**: ${{ inputs.package-manager }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Directory**: ${{ inputs.build-directory }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: $DEPLOY_ENV" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: $FULL_PROJECT_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: $TARGET_BRANCH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Node.js**: $NODE_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package Manager**: $PACKAGE_MANAGER" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Directory**: $BUILD_DIR" >> $GITHUB_STEP_SUMMARY
           
-          if [ -n "${{ steps.deploy.outputs.url }}" ]; then
-            echo "- **Deployment URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$DEPLOY_URL" ]; then
+            echo "- **Deployment URL**: $DEPLOY_URL" >> $GITHUB_STEP_SUMMARY
           fi
           
-          if [ -n "${{ inputs.custom-domain }}" ]; then
-            echo "- **Custom Domain**: ${{ inputs.custom-domain }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            echo "- **Custom Domain**: $CUSTOM_DOMAIN" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY

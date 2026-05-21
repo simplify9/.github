@@ -174,7 +174,7 @@ Deploys any Vite-based application (React, Vue, Svelte, vanilla JS) to Cloudflar
 | `custom-domain` | | `''` | Custom domain to configure |
 | `fail-on-domain-error` | | `false` | Fail the run if domain setup fails |
 | `run-tests` | | `true` | Run tests before deploy |
-| `node-version` | | `18` | Node.js version |
+| `node-version` | | `24` | Node.js version |
 
 **Required secrets:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
@@ -223,7 +223,7 @@ Deploys Next.js applications with full SSR to Cloudflare Workers using **OpenNex
 | `route` | | `''` | Custom domain / route (falls back to repo var `CLOUDFLARE_ROUTE`) |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
 | `node_version` | | `24` | Node.js version |
-| `compatibility_date` | | `2026-03-01` | Cloudflare compatibility date |
+| `compatibility_date` | | `2026-05-01` | Cloudflare compatibility date |
 | `build_script` | | `build` | npm script to run for build |
 | `run_lint` | | `true` | Run lint step |
 

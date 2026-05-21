@@ -6,7 +6,7 @@ on:
       node_version:
         description: Node.js version to use
         required: false
-        default: "20"
+        default: "24"
         type: string
       package_manager:
         description: One of npm|yarn|pnpm (used for caching + install command)
@@ -41,7 +41,7 @@ on:
       compatibility_date:
         description: Cloudflare Workers compatibility_date (YYYY-MM-DD)
         required: false
-        default: "2024-10-20"
+        default: "2026-05-01"
         type: string
       route:
         description: Route / custom domain for the Worker (e.g., example.com)
@@ -59,11 +59,6 @@ on:
         description: Directory with static assets (usually .vercel/output/static)
         required: false
         default: ".vercel/output/static"
-        type: string
-      wrangler_action_version:
-        description: Version tag for cloudflare/wrangler-action
-        required: false
-        default: "v3"
         type: string
     secrets:
       cloudflare_api_token:
@@ -83,6 +78,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Enable Corepack (pnpm)
+        if: ${{ inputs.package_manager == 'pnpm' }}
+        run: corepack enable
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
