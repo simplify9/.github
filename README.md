@@ -265,8 +265,9 @@ Deploys Vite apps to Cloudflare Workers (edge). Uses the `generate-wrangler-conf
 | `environment` | ✅ | — | Wrangler environment |
 | `route` | ✅ | — | Route pattern (e.g. `mysite.com/*`) |
 | `assets_dir` | | `dist` | Static assets directory |
+| `node_version` | | `24` | Node.js version |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
-| `compatibility_date` | | `2024-10-20` | Cloudflare compatibility date |
+| `compatibility_date` | | `2026-05-01` | Cloudflare compatibility date |
 
 **Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`
 
