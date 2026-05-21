@@ -174,7 +174,7 @@ Deploys any Vite-based application (React, Vue, Svelte, vanilla JS) to Cloudflar
 | `custom-domain` | | `''` | Custom domain to configure |
 | `fail-on-domain-error` | | `false` | Fail the run if domain setup fails |
 | `run-tests` | | `true` | Run tests before deploy |
-| `node-version` | | `18` | Node.js version |
+| `node-version` | | `24` | Node.js version |
 
 **Required secrets:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
 
@@ -223,7 +223,7 @@ Deploys Next.js applications with full SSR to Cloudflare Workers using **OpenNex
 | `route` | | `''` | Custom domain / route (falls back to repo var `CLOUDFLARE_ROUTE`) |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
 | `node_version` | | `24` | Node.js version |
-| `compatibility_date` | | `2026-03-01` | Cloudflare compatibility date |
+| `compatibility_date` | | `2026-05-01` | Cloudflare compatibility date |
 | `build_script` | | `build` | npm script to run for build |
 | `run_lint` | | `true` | Run lint step |
 
@@ -265,8 +265,9 @@ Deploys Vite apps to Cloudflare Workers (edge). Uses the `generate-wrangler-conf
 | `environment` | ✅ | — | Wrangler environment |
 | `route` | ✅ | — | Route pattern (e.g. `mysite.com/*`) |
 | `assets_dir` | | `dist` | Static assets directory |
+| `node_version` | | `24` | Node.js version |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
-| `compatibility_date` | | `2024-10-20` | Cloudflare compatibility date |
+| `compatibility_date` | | `2026-05-01` | Cloudflare compatibility date |
 
 **Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`
 
