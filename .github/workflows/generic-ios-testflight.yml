@@ -859,20 +859,33 @@ jobs:
 
       - name: Write build job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          WORKSPACE: ${{ inputs.workspace }}
+          SCHEME: ${{ inputs.scheme }}
+          VERSIONING: ${{ inputs.versioning-strategy }}
+          RUNNER_OS: ${{ runner.os }}
+          MACOS_RUNNER: ${{ inputs.macos-runner }}
+          XCODE_VERSION: ${{ inputs.xcode-version }}
+          NODE_VERSION: ${{ inputs.node-version }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🍎 iOS Build — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## 🍎 iOS Build — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Workspace | \`${{ inputs.workspace }}\` |"
-            echo "| Scheme | \`${{ inputs.scheme }}\` |"
-            echo "| Versioning | ${{ inputs.versioning-strategy }} |"
-            echo "| Runner | ${{ runner.os }} (${{ inputs.macos-runner }}) |"
-            echo "| Xcode | ${{ inputs.xcode-version }} |"
-            echo "| Node.js | ${{ inputs.node-version }} |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Workspace | \`${WORKSPACE}\` |"
+            echo "| Scheme | \`${SCHEME}\` |"
+            echo "| Versioning | ${VERSIONING} |"
+            echo "| Runner | ${RUNNER_OS} (${MACOS_RUNNER}) |"
+            echo "| Xcode | ${XCODE_VERSION} |"
+            echo "| Node.js | ${NODE_VERSION} |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Triggered by | ${ACTOR} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""

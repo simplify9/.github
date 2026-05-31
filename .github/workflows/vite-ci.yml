@@ -239,6 +239,7 @@ jobs:
       - name: Write job summary
         if: always()
         env:
+          JOB_STATUS: ${{ job.status }}
           DEPLOY_ENV: ${{ inputs.environment }}
           TARGET_BRANCH: ${{ inputs.target-branch }}
           NODE_VERSION: ${{ inputs.node-version }}
@@ -246,9 +247,13 @@ jobs:
           BUILD_DIR: ${{ inputs.build-directory }}
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🌐 [CF-PAGES] Vite CI/CD — Deploy — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## 🌐 [CF-PAGES] Vite CI/CD — Deploy — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -258,8 +263,8 @@ jobs:
             echo "| Node.js | ${NODE_VERSION:-unknown} |"
             echo "| Package Manager | ${PACKAGE_MANAGER:-unknown} |"
             echo "| Build Directory | ${BUILD_DIR:-unknown} |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
             if [ -n "${DEPLOY_URL}" ]; then
               echo "| Deployment URL | ${DEPLOY_URL} |"
             fi

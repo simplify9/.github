@@ -150,16 +150,24 @@ jobs:
 
       - name: Write version job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_VERSION: ${{ steps.compute.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🏷️ Chart Version Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## 🏷️ Chart Version Job — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Computed version | \`${{ steps.compute.outputs.version }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Computed version | \`${CHART_VERSION}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   validate-chart:
@@ -387,19 +395,30 @@ jobs:
       - name: Workflow summary
         if: always()
         shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_PKG_NAME: ${{ steps.package.outputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          CHART_PKG_FILE: ${{ steps.package.outputs.chart-package }}
+          UPLOAD_URL: ${{ steps.upload.outputs.chart-url }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## ☸️ Helm Chart Package + Push — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## ☸️ Helm Chart Package + Push — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Chart Name | \`${{ steps.package.outputs.chart-name }}\` |"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Package | \`${{ steps.package.outputs.chart-package }}\` |"
-            echo "| Upload Endpoint | ${{ steps.upload.outputs.chart-url }} |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Chart Name | \`${CHART_PKG_NAME}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Package | \`${CHART_PKG_FILE}\` |"
+            echo "| Upload Endpoint | ${UPLOAD_URL} |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""

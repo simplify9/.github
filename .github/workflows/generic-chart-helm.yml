@@ -218,16 +218,24 @@ jobs:
 
       - name: Write version job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          SEMVER_VERSION: ${{ steps.semver.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🏷️ Version Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## 🏷️ Version Job — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Computed version | \`${{ steps.semver.outputs.version }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Computed version | \`${SEMVER_VERSION}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   nuget:
@@ -304,16 +312,24 @@ jobs:
 
       - name: Write nuget job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          NUGET_ENABLED: ${{ inputs.package-nuget }}
+          NUGET_VERSION: ${{ steps.nuget-semver.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🔷 NuGet Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## 🔷 NuGet Job — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Enabled | ${{ inputs.package-nuget }} |"
-            echo "| Version | \`${{ steps.nuget-semver.outputs.version }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
+            echo "| Enabled | ${NUGET_ENABLED} |"
+            echo "| Version | \`${NUGET_VERSION}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
@@ -349,16 +365,24 @@ jobs:
 
       - name: Write build job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REGISTRY_INPUT: ${{ inputs.container-registry }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🐳 Build Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## 🐳 Build Job — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Registry | \`${{ inputs.container-registry }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Registry | \`${REGISTRY_INPUT}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
@@ -484,18 +508,28 @@ jobs:
 
       - name: Write deploy job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          APP_NAME: ${{ inputs.app-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          NAMESPACE: ${{ inputs.namespace }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## ☸️ Deploy Job — ${{ inputs.app-name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
+            echo "## ☸️ Deploy Job — ${APP_NAME} — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| App | \`${{ inputs.app-name }}\` |"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Namespace | \`${{ inputs.namespace }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| App | \`${APP_NAME}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Namespace | \`${NAMESPACE}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""
