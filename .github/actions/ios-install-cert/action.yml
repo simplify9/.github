@@ -3,13 +3,21 @@ description: Installs an iOS signing certificate (.p12) into a temporary keychai
 runs:
   using: composite
   steps:
+    - name: Announce certificate installation
+      shell: bash
+      run: |
+        echo "::notice title=🔏 [SIGN] Install iOS Signing Certificate::Importing .p12 into temporary keychain — value suppressed"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Install signing certificate (.p12) into temp keychain
       shell: bash
       env:
         IOS_P12_BASE64: ${{ inputs.p12Base64 }}
         IOS_P12_PASSWORD: ${{ inputs.p12Password }}
       run: |
+        echo "::group::🔏 [CHECKPOINT 1/1] Install Signing Certificate"
         set -euo pipefail
+        echo "::add-mask::${{ inputs.p12Password }}"
 
         KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
         KEYCHAIN_PASS="ci-pass"
@@ -36,6 +44,36 @@ runs:
 
         echo "=== Available code signing identities ==="
         security find-identity -v -p codesigning
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [SIGN] Certificate installed::Signing identity imported into keychain at $KEYCHAIN_PATH"
+        echo "::endgroup::"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [SIGN] Certificate installation failed::Failed to import .p12 into keychain. Check that p12Base64 is valid base64 and p12Password is correct."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🔏 iOS Signing Certificate Install
+
+        | Field | Value |
+        |-------|-------|
+        | Platform | iOS |
+        | Certificate | .p12 (value suppressed) |
+        | Runner | ${{ runner.os }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Install Signing Certificate | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF
 inputs:
   p12Base64:
     description: Base64-encoded .p12 certificate

@@ -40,6 +40,19 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Mask sensitive inputs
+      shell: bash
+      run: |
+        echo "::add-mask::${{ inputs.api-token }}"
+        echo "::add-mask::${{ inputs.account-id }}"
+
+    - name: Announce project setup
+      shell: bash
+      run: |
+        echo "::notice title=🌐 [CF-PAGES] Setup Cloudflare Pages Project::project: ${{ inputs.project-name }}, branch: ${{ inputs.production-branch }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Install jq for JSON parsing
       shell: bash
       run: |
@@ -66,6 +79,7 @@ runs:
           echo "exists=false" >> $GITHUB_OUTPUT
           echo "📝 Project '${{ inputs.project-name }}' does not exist"
         fi
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Create Cloudflare Pages project
       id: create-project
@@ -100,12 +114,43 @@ runs:
           echo "Response: $RESPONSE"
           exit 1
         fi
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [CF-PAGES] Project created::${{ inputs.project-name }} → https://${PROJECT_URL}.pages.dev"
 
     - name: Project setup complete
+      if: steps.check-project.outputs.exists == 'true'
       shell: bash
       run: |
-        if [ "${{ steps.check-project.outputs.exists }}" = "true" ]; then
-          echo "✅ Using existing Cloudflare Pages project: ${{ inputs.project-name }}"
-        else
-          echo "✅ Created new Cloudflare Pages project: ${{ inputs.project-name }}"
-        fi
+        echo "✅ Using existing Cloudflare Pages project: ${{ inputs.project-name }}"
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [CF-PAGES] Project setup failed::project: ${{ inputs.project-name }}. Checkpoints — 1) Project check: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Project configured: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🌐 Cloudflare Pages — Project Setup
+
+        | Field | Value |
+        |-------|-------|
+        | Project | ${{ inputs.project-name }} |
+        | Production branch | ${{ inputs.production-branch }} |
+        | Build command | ${{ inputs.build-command }} |
+        | Output dir | ${{ inputs.destination-dir }} |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Project Check | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Project Configured | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

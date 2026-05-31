@@ -96,6 +96,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Announce Helm deployment
+      shell: bash
+      run: |
+        echo "::notice title=☸️ [HELM] Deploy Chart (s9generic)::Release: ${{ inputs.release-name }}, chart: ${{ inputs.chart-name }}:${{ inputs.chart-version }}, namespace: ${{ inputs.namespace }}"
+        echo "🌍 [HELM] Chart source: ${{ inputs.chart-path != '' && 'local-artifact' || 'oci-registry' }}, wait: ${{ inputs.wait }}, timeout: ${{ inputs.timeout }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Validate inputs
       shell: bash
       run: |
@@ -131,6 +139,7 @@ runs:
     - name: Configure Kubernetes context
       shell: bash
       run: |
+        echo "::group::☸️ [CHECKPOINT 1/2] Configure Kubernetes Context"
         echo "Configuring Kubernetes context..."
         mkdir -p ~/.kube
         echo "${{ inputs.kubeconfig }}" | base64 -d > ~/.kube/config
@@ -141,6 +150,9 @@ runs:
         
         echo "Cluster info:"
         kubectl cluster-info
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Kubernetes context configured::namespace: ${{ inputs.namespace }}"
+        echo "::endgroup::"
 
     - name: Create namespace
       if: inputs.create-namespace == 'true'
@@ -153,6 +165,7 @@ runs:
       if: inputs.chart-path == ''
       shell: bash
       run: |
+        echo "::add-mask::${{ inputs.registry-password }}"
         echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
         registry_host="${{ inputs.registry }}"
         if [ "$registry_host" = "docker.io" ]; then
@@ -170,8 +183,7 @@ runs:
         cat > /tmp/custom-values.yaml << 'EOF'
         ${{ inputs.values }}
         EOF
-        echo "Custom values:"
-        cat /tmp/custom-values.yaml
+        echo "Custom values file created."
 
     - name: Deploy Helm chart
       id: deploy
@@ -197,11 +209,6 @@ runs:
             exit 1
           fi
           
-          echo "Chart directory contents:"
-          ls -la "${CHART_SOURCE}"
-          echo "Chart.yaml:"
-          cat "${CHART_SOURCE}/Chart.yaml"
-          
           echo "chart-url=local:${CHART_SOURCE}" >> $GITHUB_OUTPUT
         else
           # Deploy from OCI registry (original behavior)
@@ -220,21 +227,6 @@ runs:
         echo "Chart Source: ${CHART_SOURCE}"
         echo "Release name: ${{ inputs.release-name }}"
         echo "Namespace: ${{ inputs.namespace }}"
-        
-        # Debug: Show what we received
-        echo "=== ACTION DEBUG: Received Values ==="
-        echo "set-values input: '${{ inputs.set-values }}'"
-        echo "set-string-values input: '${{ inputs.set-string-values }}'"
-        echo "SECRET_VALUES env: '$SECRET_VALUES'"
-        echo "SECRET_VALUES length: ${#SECRET_VALUES}"
-        if [ -n "$SECRET_VALUES" ]; then
-          echo "SECRET_VALUES hex dump:"
-          echo "$SECRET_VALUES" | hexdump -C | head -5
-          echo "Contains semicolons: $(echo "$SECRET_VALUES" | grep -c ';' || echo '0')"
-          echo "Contains equals: $(echo "$SECRET_VALUES" | grep -c '=' || echo '0')"
-          echo "Contains spaces: $(echo "$SECRET_VALUES" | grep -c ' ' || echo '0')"
-        fi
-        echo "======================================"
         
         # Build helm command as array to properly handle arguments with spaces and special characters
         HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_SOURCE}" "--namespace" "${{ inputs.namespace }}")
@@ -280,7 +272,6 @@ runs:
             trimmed="$(echo "$value" | xargs)"
             if [ -n "$trimmed" ]; then
               HELM_ARGS+=("--set" "$trimmed")
-              echo "[helm-deploy]   --set $trimmed"
             fi
           done
         fi
@@ -290,34 +281,24 @@ runs:
         secret_values=""
         if [ -n "$SECRET_VALUES" ]; then
           secret_values="$SECRET_VALUES"
-          echo "Using secret values from environment variable"
         elif [ -n "${{ inputs.set-string-values }}" ]; then
           secret_values="${{ inputs.set-string-values }}"
-          echo "Using secret values from input parameter"
         fi
         
         if [ -n "$secret_values" ]; then
           echo "Processing secret values..."
-          echo "=== SECRET PROCESSING DEBUG ==="
-          echo "secret_values variable: '$secret_values'"
-          echo "secret_values length: ${#secret_values}"
-          echo "============================="
           
           # Only process if we have actual content (not just whitespace)
           if [ -n "$(echo "$secret_values" | tr -d '[:space:]')" ]; then
             while [[ "$secret_values" == *","* ]]; do
               value="${secret_values%%,*}"
               if [ -n "$value" ]; then
-                echo "Adding --set-string: $value"
                 HELM_ARGS+=("--set-string" "$value")
-                echo "[helm-deploy]   --set-string $value"
               fi
               secret_values="${secret_values#*,}"
             done
             if [ -n "$secret_values" ]; then
-              echo "Adding --set-string: $secret_values"
               HELM_ARGS+=("--set-string" "$secret_values")
-              echo "[helm-deploy]   --set-string $secret_values"
             fi
           else
             echo "No secret values to process"
@@ -326,7 +307,6 @@ runs:
           echo "No secret values provided"
         fi
         
-        echo "Executing: ${HELM_ARGS[*]}"
         echo "[helm-deploy] Final Helm argument count: ${#HELM_ARGS[@]}"
         if [ "${{ inputs.debug }}" = "true" ]; then
           echo "[helm-deploy] Printing environment variables relevant to Helm (sanitized):"
@@ -361,10 +341,6 @@ runs:
           echo "deployed-image=$DEPLOY_IMAGE" >> $GITHUB_OUTPUT
         fi
 
-        echo "\nFull Helm command (args on separate lines for readability):"
-        for i in "${!HELM_ARGS[@]}"; do
-          printf '  %q\n' "${HELM_ARGS[$i]}"
-        done
         # Preflight: attempt helm pull for OCI charts to surface clearer errors early
         if [[ "${CHART_SOURCE}" == oci://* ]]; then
           echo "[helm-deploy] Preflight: pulling chart ${CHART_SOURCE} to verify accessibility..."
@@ -373,7 +349,7 @@ runs:
           PREFLIGHT_CODE=${PIPESTATUS[0]}
           if [ $PREFLIGHT_CODE -ne 0 ]; then
             echo "[helm-deploy] Preflight chart pull FAILED (exit $PREFLIGHT_CODE). Raw output:" >&2
-            sed 's/'"${{ inputs.registry-password }}"'/****/g' /tmp/helm_preflight.log || true
+            cat /tmp/helm_preflight.log >&2 || true
             echo "[helm-deploy] Aborting before upgrade due to inaccessible chart." >&2
             exit $PREFLIGHT_CODE
           else
@@ -398,6 +374,8 @@ runs:
         fi
 
         echo "status=deployed" >> $GITHUB_OUTPUT
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Chart deployed::Release: ${{ inputs.release-name }}, namespace: ${{ inputs.namespace }}"
 
     - name: Verify deployment
       shell: bash
@@ -415,33 +393,33 @@ runs:
         
         echo "Deployment verification completed!"
 
-    - name: Output deployment information
+    - name: Report failure
+      if: failure()
       shell: bash
       run: |
-        echo "### 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Release:** ${{ inputs.release-name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Namespace:** ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart:** ${{ inputs.chart-name }}:${{ inputs.chart-version }}" >> $GITHUB_STEP_SUMMARY
-        
-        if [ -n "${{ inputs.chart-path }}" ]; then
-          echo "- **Source:** Local chart artifact (${{ inputs.chart-path }})" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [ -n "${{ steps.deploy.outputs.deployed-image }}" ]; then
-          echo "- **Image:** ${{ steps.deploy.outputs.deployed-image }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Management Commands:**" >> $GITHUB_STEP_SUMMARY
-        echo '```bash' >> $GITHUB_STEP_SUMMARY
-        echo "# Check status" >> $GITHUB_STEP_SUMMARY
-        echo "helm status ${{ inputs.release-name }} -n ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# View pods" >> $GITHUB_STEP_SUMMARY
-        echo "kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/instance=${{ inputs.release-name }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# Rollback if needed" >> $GITHUB_STEP_SUMMARY
-        echo "helm rollback ${{ inputs.release-name }} -n ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "::error title=❌ [HELM] Deploy failed::Release '${{ inputs.release-name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) K8s context: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart source, image tag, and resource quotas."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## ☸️ Helm Deploy to Kubernetes (s9generic)
+
+        | Field | Value |
+        |-------|-------|
+        | Release | \`${{ inputs.release-name }}\` |
+        | Chart | \`${{ inputs.chart-name }}:${{ inputs.chart-version }}\` |
+        | Namespace | ${{ inputs.namespace }} |
+        | Timeout | ${{ inputs.timeout }} |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Kubernetes Context | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Helm Chart Deployed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

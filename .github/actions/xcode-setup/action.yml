@@ -9,6 +9,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Announce Xcode setup
+      shell: bash
+      run: |
+        echo "::notice title=🍎 [IOS] Xcode Setup::Xcode version: ${{ inputs.xcodeVersion }}, CocoaPods: installing"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Install CocoaPods
       shell: bash
       run: sudo gem install cocoapods
@@ -16,6 +23,7 @@ runs:
     - name: Clean and Reinstall Pods
       shell: bash
       run: |
+        echo "::group::🍎 [CHECKPOINT 1/2] Install CocoaPods"
         echo "Resetting CocoaPods integration..."
         cd ios
         pod deintegrate
@@ -24,6 +32,9 @@ runs:
 
         echo "Verifying .xcconfig files:"
         find . -name "*.xcconfig"
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [IOS] CocoaPods installed::pod install completed"
+        echo "::endgroup::"
 
     - name: Check .xcfilelist presence
       shell: bash
@@ -66,7 +77,37 @@ runs:
 
         echo "Selecting Xcode: ${XCODE_APP}"
         sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [IOS] Xcode selected::${XCODE_APP}"
 
     - name: Check Xcode version
       shell: bash
       run: xcodebuild -version
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [IOS] Xcode setup failed::Xcode version: ${{ inputs.xcodeVersion }}. Checkpoints — 1) CocoaPods: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Xcode selected: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🍎 Xcode Setup
+
+        | Field | Value |
+        |-------|-------|
+        | Xcode version | ${{ inputs.xcodeVersion }} |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | CocoaPods Installed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Xcode Selected | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

@@ -3,11 +3,18 @@ description: Installs an iOS provisioning profile from a base64-encoded string
 runs:
   using: composite
   steps:
+    - name: Announce provisioning profile installation
+      shell: bash
+      run: |
+        echo "::notice title=🔏 [SIGN] Install iOS Provisioning Profile::Installing .mobileprovision from base64 input"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Install provisioning profile (manual)
       shell: bash
       env:
         IOS_MOBILEPROVISION_BASE64: ${{ inputs.profileBase64 }}
       run: |
+        echo "::group::🔏 [CHECKPOINT 1/1] Install Provisioning Profile"
         set -euo pipefail
         mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
@@ -25,6 +32,37 @@ runs:
 
         echo "IOS_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [SIGN] Profile installed::Name: ${NAME}, UUID: ${UUID}"
+        echo "::endgroup::"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🔏 iOS Provisioning Profile Install
+
+        | Field | Value |
+        |-------|-------|
+        | Platform | iOS |
+        | Profile name | ${IOS_PROFILE_NAME:-unknown} |
+        | Profile UUID | ${IOS_PROFILE_UUID:-unknown} |
+        | Runner | ${{ runner.os }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Install Provisioning Profile | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF
 inputs:
   profileBase64:
     description: Base64-encoded provisioning profile

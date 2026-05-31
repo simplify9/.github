@@ -80,6 +80,14 @@ runs:
   steps:
     - uses: actions/checkout@v6
 
+    - name: Announce Helm deployment
+      shell: bash
+      run: |
+        echo "::notice title=☸️ [HELM] Deploy Chart::App: ${{ inputs.app_name }}, chart: ${{ inputs.chart }}, namespace: ${{ inputs.namespace }}, env: ${{ inputs.environment }}"
+        echo "⚙️ [HELM] Chart repo: ${{ inputs.chart_repo != '' && inputs.chart_repo || 'OCI (inline)' }}, timeout: ${{ inputs.helm_timeout }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Derive sanitized branch name
       id: branch
       shell: bash
@@ -104,6 +112,7 @@ runs:
       env:
         KUBECONFIG_DATA: ${{ inputs.kubeconfig_data }}
       run: |
+        echo "::group::☸️ [CHECKPOINT 1/2] Process Kubeconfig"
         set -euo pipefail
         DATA="${KUBECONFIG_DATA:-}"
         if [ -z "$DATA" ]; then
@@ -117,6 +126,9 @@ runs:
         fi
         chmod 600 kubeconfig.yaml
         echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${{ inputs.namespace }}"
+        echo "::endgroup::"
 
     - name: Set KUBECONFIG env
       shell: bash
@@ -202,6 +214,7 @@ runs:
         INGRESS_PATHS: ${{ inputs.ingress_paths }}
         BRANCH: ${{ steps.branch.outputs.name }}
       run: |
+        echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
         set -euo pipefail
 
         if [ -n "$CHART_REPO" ]; then
@@ -245,12 +258,6 @@ runs:
         fi
 
         echo "Executing Helm upgrade with base settings plus extras..."
-        echo "DEBUG: Raw INGRESS_PATHS value:" >&2
-        printf '%s\n' "$INGRESS_PATHS" >&2 || true
-        echo "DEBUG: Expanded PATH_SET_ARGS (count=${#PATH_SET_ARGS[@]}):" >&2
-        printf '  %s\n' "${PATH_SET_ARGS[@]}" >&2 || true
-
-        set -x
         helm upgrade "${APP_NAME}" "$CHART_REF" \
           --install \
           --namespace "${NAMESPACE}" \
@@ -258,7 +265,9 @@ runs:
           "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
           --timeout "${HELM_TIMEOUT}" \
           ${EXTRA_ARGS}
-        set +x
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Helm deploy complete::App: ${APP_NAME}, namespace: ${NAMESPACE}"
+        echo "::endgroup::"
 
     - name: Show release status
       if: always()
@@ -271,3 +280,35 @@ runs:
         helm status "$APP_NAME" -n "$NAMESPACE" || true
         echo "---"
         kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$APP_NAME" || true
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## ☸️ Helm Deploy
+
+        | Field | Value |
+        |-------|-------|
+        | App | \`${{ inputs.app_name }}\` |
+        | Chart | \`${{ inputs.chart }}\` |
+        | Namespace | ${{ inputs.namespace }} |
+        | Environment | ${{ inputs.environment }} |
+        | Timeout | ${{ inputs.helm_timeout }} |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Kubeconfig Configured | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Helm Deploy | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

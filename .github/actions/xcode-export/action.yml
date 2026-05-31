@@ -14,12 +14,52 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Announce IPA export
+      shell: bash
+      run: |
+        echo "::notice title=🍎 [IOS] Export IPA::Exporting archive to IPA — archive: ${{ inputs.archivePath }}, output: ${{ inputs.exportPath }}"
+        echo "📋 [IOS] Export options: ${{ inputs.exportOptionsPlist }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Export IPA
       shell: bash
       run: |
+        echo "::group::🍎 [CHECKPOINT 1/1] Export IPA"
         mkdir -p "${{ inputs.exportPath }}"
         xcodebuild \
           -exportArchive \
           -archivePath "${{ inputs.archivePath }}" \
           -exportOptionsPlist "${{ inputs.exportOptionsPlist }}" \
           -exportPath "${{ inputs.exportPath }}"
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [IOS] IPA exported::Output: ${{ inputs.exportPath }}"
+        echo "::endgroup::"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${{ inputs.archivePath }}'. Check exportOptionsPlist path and signing configuration."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🍎 Xcode Export IPA
+
+        | Field | Value |
+        |-------|-------|
+        | Archive | \`${{ inputs.archivePath }}\` |
+        | Export options | \`${{ inputs.exportOptionsPlist }}\` |
+        | Output path | \`${{ inputs.exportPath }}\` |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Export IPA | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF

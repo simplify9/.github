@@ -108,6 +108,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Announce deploy job
+        run: |
+          echo "::notice title=☸️ [HELM] Helm Deploy — Job Started::Release: ${{ inputs.release-name }} | Chart: ${{ inputs.chart-name }} | Namespace: ${{ inputs.namespace }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏭️ Skipped" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -126,17 +133,27 @@ jobs:
           KUBECONFIG_B64: ${{ secrets.kubeconfig64 }}
         run: |
           set -euo pipefail
+          echo "::group::☸️ [CHECKPOINT 1/3] Configure kubeconfig"
+          echo "→ Writing kubeconfig to: ${HOME}/.kube/config"
           mkdir -p "${HOME}/.kube"
           echo "${KUBECONFIG_B64}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Kubeconfig configured — PASSED"
+          echo "::endgroup::"
 
       - name: Verify cluster access
         if: ${{ inputs.verify-cluster }}
         run: |
           set -euo pipefail
+          echo "::group::☸️ [CHECKPOINT 2/3] Verify cluster access"
+          echo "→ Target namespace: ${{ inputs.namespace }}"
           kubectl version --client=true
           kubectl cluster-info
           kubectl get ns "${{ inputs.namespace }}" || true
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Cluster access verified — PASSED"
+          echo "::endgroup::"
 
       - name: Deploy with Helm (upgrade/install)
         env:
@@ -149,6 +166,12 @@ jobs:
           CREATE_NAMESPACE: ${{ inputs.create-namespace }}
         run: |
           set -euo pipefail
+
+          echo "::group::☸️ [CHECKPOINT 3/3] Helm upgrade/install: ${{ inputs.release-name }}"
+          echo "→ Chart: ${{ inputs.chart-name }}"
+          echo "→ Repo: ${{ inputs.chart-repo }}"
+          echo "→ Namespace: ${{ inputs.namespace }}"
+          echo "→ Timeout: ${HELM_TIMEOUT}"
 
           # Build helm command safely using an array (prevents word splitting and ; command breaks)
           ARGS=(
@@ -206,11 +229,49 @@ jobs:
           fi
 
           helm "${ARGS[@]}"
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] Helm deploy completed — release: ${{ inputs.release-name }}"
+          echo "::endgroup::"
+
+      - name: Report deploy failure
+        if: failure()
+        run: |
+          echo "::error title=☸️ [HELM] Deploy Job Failed::Release '${{ inputs.release-name }}' failed | Chart: ${{ inputs.chart-name }} | Namespace: ${{ inputs.namespace }}"
+          echo "  Checkpoint 1 — Kubeconfig:     ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Cluster access:  ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — Helm deploy:     ${CHECKPOINT_3_STATUS:-❌ Not reached}"
 
       - name: Show release status
         if: always()
         run: |
           set -euo pipefail
+          echo "::group::☸️ Post-deploy release status: ${{ inputs.release-name }}"
           helm status "${{ inputs.release-name }}" --namespace "${{ inputs.namespace }}" || true
           kubectl get pods --namespace "${{ inputs.namespace }}" -l app.kubernetes.io/instance="${{ inputs.release-name }}" || true
           kubectl get ingress --namespace "${{ inputs.namespace }}" || true
+          echo "::endgroup::"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## ☸️ Helm Deploy — ${{ inputs.release-name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Release | \`${{ inputs.release-name }}\` |"
+            echo "| Chart | \`${{ inputs.chart-name }}\` |"
+            echo "| Namespace | \`${{ inputs.namespace }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Kubeconfig configured | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Cluster access verified | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | Helm upgrade/install | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

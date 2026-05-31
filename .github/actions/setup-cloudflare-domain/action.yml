@@ -31,6 +31,19 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Mask sensitive inputs
+      shell: bash
+      run: |
+        echo "::add-mask::${{ inputs.api-token }}"
+        echo "::add-mask::${{ inputs.account-id }}"
+
+    - name: Announce domain setup
+      shell: bash
+      run: |
+        echo "::notice title=🌐 [CF-PAGES] Setup Custom Domain::project: ${{ inputs.project-name }}, domain: ${{ inputs.domain-name }}, fail-on-error: ${{ inputs.fail-on-error }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Install jq for JSON parsing
       shell: bash
       run: |
@@ -64,6 +77,7 @@ runs:
           echo "exists=false" >> $GITHUB_OUTPUT
           echo "⚠️ Could not check existing domains, will attempt to add"
         fi
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Add custom domain
       id: add-domain
@@ -112,6 +126,8 @@ runs:
             fi
           fi
         fi
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [CF-PAGES] Domain configured::${{ inputs.domain-name }} → ${{ inputs.project-name }}"
 
     - name: Domain setup complete
       if: steps.check-domain.outputs.exists == 'true'
@@ -120,12 +136,34 @@ runs:
         echo "success=true" >> $GITHUB_OUTPUT
         echo "status=already-configured" >> $GITHUB_OUTPUT
         echo "✅ Domain '${{ inputs.domain-name }}' was already configured"
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
-    - name: Domain configuration summary
+    - name: Report failure
+      if: failure()
       shell: bash
       run: |
-        if [ "${{ steps.add-domain.outputs.success }}" = "true" ] || [ "${{ steps.check-domain.outputs.exists }}" = "true" ]; then
-          echo "✅ Domain configuration completed for: ${{ inputs.domain-name }}"
-        else
-          echo "❌ Domain configuration failed for: ${{ inputs.domain-name }}"
-        fi
+        echo "::error title=❌ [CF-PAGES] Domain setup failed::project: ${{ inputs.project-name }}, domain: ${{ inputs.domain-name }}. Checkpoints — 1) Domain check: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Domain configured: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🌐 Cloudflare Pages — Custom Domain Setup
+
+        | Field | Value |
+        |-------|-------|
+        | Project | ${{ inputs.project-name }} |
+        | Domain | ${{ inputs.domain-name }} |
+        | Fail on error | ${{ inputs.fail-on-error }} |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Domain Check | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Domain Configured | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

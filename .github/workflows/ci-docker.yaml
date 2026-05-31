@@ -55,6 +55,12 @@ jobs:
     environment: ${{ inputs.registry_profile }}
 
     steps:
+      - name: Announce build job
+        run: |
+          echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::App: ${{ inputs.app_name }} | Registry: ${{ inputs.docker_registry }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v6
 
       - name: Derive sanitized branch name
@@ -106,6 +112,8 @@ jobs:
           P_UP: ${{ secrets[format('{0}_REGISTRY_TOKEN',    steps.norm.outputs.profile_upper)] }}
         run: |
           set -euo pipefail
+          echo "::group::🐳 [CHECKPOINT 1/2] Validate and login to container registry"
+          echo "→ Registry: ${REGISTRY}"
           REGISTRY="${E_REGISTRY}"
           # Prefer normalized-profile secrets if present; else fall back to unnormalized
           USERNAME="${U_UP:-${U_FALLBACK:-}}"
@@ -123,9 +131,15 @@ jobs:
             exit 1
           fi
 
-          echo "Logging into ${REGISTRY} as ${USERNAME}"
+          echo "::add-mask::${USERNAME}"
+          echo "::add-mask::${TOKEN}"
+          echo "🔐 Authenticating with container registry: ${REGISTRY}..."
           echo "${TOKEN}" | docker login "${REGISTRY}" -u "${USERNAME}" --password-stdin
+          echo "✅ Registry authentication successful."
           echo "EFFECTIVE_REGISTRY=${REGISTRY}" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/2] Registry authentication — PASSED"
+          echo "::endgroup::"
 
       - name: Build and push image
         shell: bash
@@ -138,6 +152,9 @@ jobs:
           BRANCH: ${{ steps.branch.outputs.name }}
         run: |
           set -euo pipefail
+          echo "::group::🐳 [CHECKPOINT 2/2] Build and push image: ${APP}"
+          echo "→ Tags: ${EFFECTIVE_REGISTRY}/${APP}:github-${BRANCH}-${VER} | github-${BRANCH}-${RUN}"
+          echo "→ Dockerfile: ${FILE} | Context: ${CTX}"
           # Disable build provenance/attestations explicitly
           # (belt & suspenders: env var + explicit flag)
           export BUILDKIT_PROVENANCE=0
@@ -145,6 +162,42 @@ jobs:
             --file "$FILE" \
             --push \
             --provenance=false \
+            --cache-from "type=registry,ref=$EFFECTIVE_REGISTRY/$APP:buildcache" \
+            --cache-to "type=registry,ref=$EFFECTIVE_REGISTRY/$APP:buildcache,mode=max" \
             --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$VER" \
             --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$RUN" \
             "$CTX"
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/2] Image built and pushed — PASSED"
+          echo "::endgroup::"
+
+      - name: Report build failure
+        if: failure()
+        run: |
+          echo "::error title=🐳 [DOCKER] Build Job Failed::App '${{ inputs.app_name }}' | Registry: ${EFFECTIVE_REGISTRY:-unknown}"
+          echo "  Checkpoint 1 — Registry auth:  ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Docker build:   ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## 🐳 Docker Build — ${{ inputs.app_name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| App | \`${{ inputs.app_name }}\` |"
+            echo "| Registry | \`${EFFECTIVE_REGISTRY:-${{ inputs.docker_registry }}}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Run number | ${{ github.run_number }} |"
+            echo "| Runner | ${{ runner.os }} |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Registry authentication | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Docker build & push | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

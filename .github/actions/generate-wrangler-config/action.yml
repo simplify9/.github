@@ -37,9 +37,17 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Announce wrangler.toml generation
+      shell: bash
+      run: |
+        echo "::notice title=⚡ [CF-WORKERS] Generate wrangler.toml::Generating config — project: ${{ inputs.PROJECT_NAME }}, env: ${{ inputs.ENVIRONMENT }}, opennext: ${{ inputs.BUILD_FOR_OPENNEXT }}"
+        echo "📋 [CF-WORKERS] Routes: ${{ inputs.ROUTE }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Generate wrangler.toml
       shell: bash
       run: |
+        echo "::group::⚡ [CHECKPOINT 1/1] Generate wrangler.toml"
         set -euo pipefail
 
         COMPAT_DATE="${{ inputs.COMPATIBILITY_DATE }}"
@@ -114,3 +122,35 @@ runs:
         echo "Generated wrangler.toml:"
         echo "---------------------------"
         cat wrangler.toml
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [CF-WORKERS] wrangler.toml generated::Project: ${PROJECT_NAME}, env: ${ENVIRONMENT}, routes: ${#ROUTES[@]}"
+        echo "::endgroup::"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [CF-WORKERS] wrangler.toml generation failed::Config generation failed for project '${{ inputs.PROJECT_NAME }}'. Check that ROUTE, PROJECT_NAME, and COMPATIBILITY_DATE inputs are valid."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## ⚡ Generate wrangler.toml
+
+        | Field | Value |
+        |-------|-------|
+        | Project | ${{ inputs.PROJECT_NAME }} |
+        | Environment | ${{ inputs.ENVIRONMENT }} |
+        | Compatibility date | ${{ inputs.COMPATIBILITY_DATE }} |
+        | OpenNext | ${{ inputs.BUILD_FOR_OPENNEXT }} |
+        | Runner | ${{ runner.os }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Generate wrangler.toml | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF

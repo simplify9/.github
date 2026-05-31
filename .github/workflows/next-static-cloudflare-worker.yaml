@@ -76,6 +76,13 @@ jobs:
       contents: read
 
     steps:
+      - name: Announce deploy job
+        run: |
+          echo "::notice title=⚡ [CF-WORKERS] Next.js Static Deploy — Job Started::Project: ${{ inputs.project_name }}-${{ inputs.environment }} | Route: ${{ inputs.route }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -91,6 +98,8 @@ jobs:
 
       - name: Install dependencies
         run: |
+          echo "::group::⚡ [CHECKPOINT 1/3] Install dependencies"
+          echo "→ Package manager: ${{ inputs.package_manager }}"
           if [ "${{ inputs.package_manager }}" = "yarn" ]; then
             yarn install ${{ inputs.install_args }}
           elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
@@ -99,6 +108,9 @@ jobs:
           else
             npm ci
           fi
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Dependencies installed — PASSED"
+          echo "::endgroup::"
 
       - name: Lint
         if: ${{ inputs.run_lint }}
@@ -113,6 +125,8 @@ jobs:
 
       - name: Build Next.js
         run: |
+          echo "::group::⚡ [CHECKPOINT 2/3] Build Next.js static export"
+          echo "→ Build script: ${{ inputs.build_script }}"
           if [ "${{ inputs.package_manager }}" = "yarn" ]; then
             yarn ${{ inputs.build_script }}
           elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
@@ -120,9 +134,26 @@ jobs:
           else
             npm run ${{ inputs.build_script }}
           fi
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Next.js build completed — PASSED"
+          echo "::endgroup::"
 
       - name: Build Cloudflare Workers bundle (next-on-pages)
-        run: npx @cloudflare/next-on-pages@${{ inputs.next_on_pages_version }}
+        run: |
+          echo "::group::⚡ [CHECKPOINT 3/3] Build CF Workers bundle (next-on-pages)"
+          echo "→ Using @cloudflare/next-on-pages@${{ inputs.next_on_pages_version }}"
+          npx @cloudflare/next-on-pages@${{ inputs.next_on_pages_version }}
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] CF Workers bundle built — PASSED"
+          echo "::endgroup::"
+
+      - name: Report deploy failure
+        if: failure()
+        run: |
+          echo "::error title=⚡ [CF-WORKERS] Deploy Job Failed::Project '${{ inputs.project_name }}-${{ inputs.environment }}' failed | Route: ${{ inputs.route }}"
+          echo "  Checkpoint 1 — Dependencies:      ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Next.js build:     ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — CF Workers bundle: ${CHECKPOINT_3_STATUS:-❌ Not reached}"
 
       - name: Create assets ignore file
         if: ${{ inputs.create_assetsignore }}
@@ -145,3 +176,28 @@ jobs:
           command: deploy --env ${{ inputs.environment }}
           apiToken: ${{ secrets.cloudflare_api_token }}
           accountId: ${{ secrets.cloudflare_account_id }}
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## ⚡ Next.js Static → Cloudflare Workers Deploy — ${{ inputs.project_name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Project | \`${{ inputs.project_name }}-${{ inputs.environment }}\` |"
+            echo "| Route | \`${{ inputs.route }}\` |"
+            echo "| Environment | \`${{ inputs.environment }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Dependencies installed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Next.js build | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | CF Workers bundle | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

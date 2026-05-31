@@ -59,6 +59,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Announce Docker build
+      shell: bash
+      run: |
+        echo "::notice title=🐳 [DOCKER] Docker Build and Push::Building image — ${{ inputs.image-name }}:${{ inputs.version }}, registry: ${{ inputs.registry }}, platforms: ${{ inputs.platforms }}"
+        echo "📋 [DOCKER] Dockerfile: ${{ inputs.dockerfile }}, context: ${{ inputs.context }}, push: ${{ inputs.push }}, cache: ${{ inputs.cache }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
       with:
@@ -70,6 +78,12 @@ runs:
         registry: ${{ inputs.registry != 'docker.io' && inputs.registry || '' }}
         username: ${{ inputs.username }}
         password: ${{ inputs.password }}
+
+    - name: Confirm registry auth
+      shell: bash
+      run: |
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "✅ [CHECKPOINT 1/2] Registry Authentication — PASSED (registry: ${{ inputs.registry }})"
 
     - name: Extract metadata
       id: meta
@@ -100,14 +114,39 @@ runs:
         build-args: ${{ inputs.build-args }}
         secrets: ${{ inputs.build-secrets }}
 
-    - name: Output image information
+    - name: Confirm image built and pushed
       shell: bash
       run: |
-        echo "### 🐳 Docker Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Image:** ${{ inputs.image-name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Platforms:** ${{ inputs.platforms }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tags:**" >> $GITHUB_STEP_SUMMARY
-        echo "${{ steps.meta.outputs.tags }}" | sed 's/^/  - /' >> $GITHUB_STEP_SUMMARY
-        echo "- **Digest:** ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [DOCKER] Image built and pushed::${{ inputs.image-name }}:${{ inputs.version }} — digest: ${{ steps.build.outputs.digest }}"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [DOCKER] Build failed::Docker build/push failed for ${{ inputs.image-name }}:${{ inputs.version }} on ${{ inputs.registry }}. Checkpoints — 1) Registry auth: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build+push: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}"
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🐳 Docker Build and Push
+
+        | Field | Value |
+        |-------|-------|
+        | Image | \`${{ inputs.image-name }}:${{ inputs.version }}\` |
+        | Registry | ${{ inputs.registry }} |
+        | Platforms | ${{ inputs.platforms }} |
+        | Digest | \`${{ steps.build.outputs.digest }}\` |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Registry Authentication | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Image Build and Push | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

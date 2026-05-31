@@ -440,6 +440,8 @@ Builds and pushes a Docker image only — no Helm, no Kubernetes. Uses a **profi
 `<registry>/<app_name>:github-<branch>-<version>`  
 `<registry>/<app_name>:github-<branch>-<run_number>`
 
+**Docker layer caching:** Registry-backed BuildKit cache is enabled using a dedicated `:buildcache` tag (`type=registry,mode=max`). On warm runs, unchanged layers are restored from the registry and show as `CACHED` in the build log. The `:buildcache` tag is written to the same registry using the existing credentials — no additional auth is required.
+
 **Example**
 
 ```yaml
@@ -597,6 +599,7 @@ jobs:
 **Notes:**
 - Always uses **manual signing** (`signingStyle: manual`) — automatic signing requires an interactive Xcode session unavailable in CI.
 - Certificate and profile installation uses `ios-install-cert` and `ios-install-profile` composite actions internally.
+- **CocoaPods caching:** The `~/.cocoapods/repos` spec repository and `ios/Pods` directory are cached between runs, keyed on `Podfile.lock`. This eliminates the spec repo re-download on warm runs (typically the largest time sink). The cache is bypassed automatically when `clean-reinstall-pods: true` is set.
 - Two release paths exist: `release` (no environment protection) and `release_with_environment` (with approval gate via `release-environment` input).
 - Use `ios-testflight-dispatch-template.yml` to add a manual `workflow_dispatch` trigger to your repo.
 
@@ -657,7 +660,14 @@ jobs:
 ```
 
 **Notes:**
-- Uses `gradle/actions/setup-gradle@v3`. Do not use `gradle/gradle-build-action` — that repo is archived.
+- Uses `gradle/actions/setup-gradle@v4` with Gradle home caching enabled (`caches`, `notifications`, `wrapper` directories). Do not use `gradle/gradle-build-action` — that repo is archived. Do not add `cache: gradle` to `actions/setup-java` — it conflicts with `setup-gradle` caching.
+- **Caller repo requirement for task-output caching:** Add the following to `android/gradle.properties` (or your `build-root-directory`) to enable task-level output reuse (`FROM-CACHE`). Without this, Gradle home caching still works but individual task outputs are not reused:
+  ```properties
+  org.gradle.caching=true
+  org.gradle.parallel=true
+  org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
+  ```
+- Android NDK and CMake binaries are cached between runs using a version-pinned key. When upgrading native dependencies (e.g. `react-native-nitro-modules`) that require a new NDK or CMake version, bump the key suffix in the workflow. See `CACHING_IMPLEMENTATION.md` for the full bump procedure.
 - The `upload-google-play-release` action is **Docker-based** — it calls the Google Play Android Publisher API via Python. Modifying `play_upload.py` takes effect immediately (Docker image rebuilt per run).
 - Use `android-google-play-dispatch-template.yml` to add a `workflow_dispatch` trigger to your repo.
 
@@ -857,9 +867,10 @@ When a `build` job must pass a file to a `deploy` job:
 | `docker/build-push-action` | `@v7` |
 | `cloudflare/wrangler-action` | `@v4` |
 | `cloudflare/pages-action` | `@v1` (repo archived; v1 is final) |
-| `gradle/actions/setup-gradle` | `@v3` |
+| `gradle/actions/setup-gradle` | `@v4` |
 
 Do not upgrade `gradle/actions/setup-gradle` to v5 (requires runner ≥ 2.327.1) or v6 (proprietary commercial caching component).
+- Do not add `cache: gradle` to `actions/setup-java` — this secretly invokes `gradle/gradle-build-action` and conflicts with `setup-gradle`, causing the `setup-gradle` cache restore to be skipped.
 
 ---
 

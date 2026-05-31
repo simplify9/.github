@@ -212,7 +212,11 @@ def main() -> int:
     creds = service_account.Credentials.from_service_account_file(creds_path, scopes=SCOPES)
     service = build("androidpublisher", "v3", credentials=creds, cache_discovery=False)
 
+    summary_status = "\u274c FAILED"
+    summary_details: list = []
+
     try:
+        print("::group::🤖 [CHECKPOINT 2/2] Upload Bundle to Google Play")
         # 1) Create edit
         edit = execute_request(
             service.edits().insert(body={}, packageName=package_name),
@@ -271,15 +275,52 @@ def main() -> int:
             num_retries=api_retries,
         )
         print("[Play] Committed edit. Done.")
+        print("::endgroup::")
+        print(f"::notice title=\u2705 [ANDROID] Upload complete::Package: {package_name}, track: {track}, versionCode: {version_code}, AAB: {aab_path.name}")
+
+        summary_status = "\u2705 SUCCESS"
+        summary_details = [
+            ("Package", f"`{package_name}`"),
+            ("Track", track),
+            ("AAB", aab_path.name),
+            ("Version code", version_code),
+            ("Runner OS", os.environ.get("RUNNER_OS", "unknown")),
+            ("Triggered by", os.environ.get("GITHUB_ACTOR", "unknown")),
+        ]
+
         return 0
 
     except HttpError as exc:
         status_code = getattr(exc.resp, "status", "unknown")
         details = getattr(exc, "content", b"")
         details_text = details.decode("utf-8", errors="replace") if details else str(exc)
+        print(f"::endgroup::")
+        print(f"::error title=\u274c [ANDROID] Upload failed::HTTP {status_code}: {details_text[:200]}")
+        summary_details = [
+            ("Error type", "HttpError"),
+            ("Error message", f"HTTP {status_code}: {details_text[:200]}"),
+        ]
         raise SystemExit(f"[Play] HTTP {status_code} error: {details_text}") from exc
     except Exception as exc:
+        print(f"::endgroup::")
+        print(f"::error title=\u274c [ANDROID] Upload failed::{exc.__class__.__name__}: {str(exc)[:200]}")
+        summary_details = [
+            ("Error type", exc.__class__.__name__),
+            ("Error message", str(exc)[:200]),
+        ]
         raise SystemExit(f"[Play] Upload failed: {exc}") from exc
+    finally:
+        github_step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+        with open(github_step_summary, "a", encoding="utf-8") as f:
+            f.write(f"## \U0001f916 Google Play Release Upload \u2014 {summary_status}\n\n")
+            f.write("| Field | Value |\n|-------|-------|\n")
+            for key, value in summary_details:
+                f.write(f"| {key} | {value} |\n")
+            f.write("\n## \U0001f4cb Checkpoint Summary\n\n")
+            f.write("| # | Checkpoint | Status |\n|---|------------|--------|\n")
+            f.write("| 1 | Credentials Validated | \u2705 PASSED |\n")
+            cp2_status = "\u2705 PASSED" if summary_status == "\u2705 SUCCESS" else "\u274c FAILED"
+            f.write(f"| 2 | Bundle Uploaded | {cp2_status} |\n")
 
 
 if __name__ == "__main__":
