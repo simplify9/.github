@@ -41,28 +41,6 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🔏 iOS Provisioning Profile Install
-
-        | Field | Value |
-        |-------|-------|
-        | Platform | iOS |
-        | Profile name | ${IOS_PROFILE_NAME:-unknown} |
-        | Profile UUID | ${IOS_PROFILE_UUID:-unknown} |
-        | Runner | ${{ runner.os }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Install Provisioning Profile | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        $EOF
 inputs:
   profileBase64:
     description: Base64-encoded provisioning profile

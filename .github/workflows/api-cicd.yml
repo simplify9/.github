@@ -198,16 +198,24 @@ jobs:
 
       - name: Write version job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          SEMVER_VERSION: ${{ steps.semver.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🏷️ Version Job"
+            echo "## 🏷️ Version Job — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Computed version | \`${{ steps.semver.outputs.version }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Computed version | \`${SEMVER_VERSION}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
@@ -375,17 +383,27 @@ jobs:
 
       - name: Write build job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REGISTRY_INPUT: ${{ inputs.container-registry }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🐳 Build Job — ${{ inputs.chart-name }}"
+            echo "## 🐳 Build Job — ${CHART_NAME} — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Registry | \`${{ inputs.container-registry }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Registry | \`${REGISTRY_INPUT}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""
@@ -433,17 +451,26 @@ jobs:
 
       - name: Write deploy-development job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          DEV_NAMESPACE: ${{ inputs.development-namespace }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## ☸️ Deploy to Development — ${{ inputs.chart-name }}"
+            echo "## ☸️ Deploy to Development — ${CHART_NAME} — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Chart | \`${{ inputs.chart-name }}\` |"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Namespace | \`${{ inputs.development-namespace }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
+            echo "| Chart | \`${CHART_NAME}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Namespace | \`${DEV_NAMESPACE}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-staging:
@@ -483,17 +510,26 @@ jobs:
 
       - name: Write deploy-staging job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          STAGING_NAMESPACE: ${{ inputs.staging-namespace }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## ☸️ Deploy to Staging — ${{ inputs.chart-name }}"
+            echo "## ☸️ Deploy to Staging — ${CHART_NAME} — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Chart | \`${{ inputs.chart-name }}\` |"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Namespace | \`${{ inputs.staging-namespace }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
+            echo "| Chart | \`${CHART_NAME}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Namespace | \`${STAGING_NAMESPACE}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy-production:
@@ -533,15 +569,24 @@ jobs:
 
       - name: Write deploy-production job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PROD_NAMESPACE: ${{ inputs.production-namespace }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## ☸️ Deploy to Production — ${{ inputs.chart-name }}"
+            echo "## ☸️ Deploy to Production — ${CHART_NAME} — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Chart | \`${{ inputs.chart-name }}\` |"
-            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
-            echo "| Namespace | \`${{ inputs.production-namespace }}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Runner | ${{ runner.os }} |"
+            echo "| Chart | \`${CHART_NAME}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Namespace | \`${PROD_NAMESPACE}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"

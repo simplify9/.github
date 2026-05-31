@@ -79,7 +79,7 @@ runs:
           -destination "${{ inputs.destination }}"
           -archivePath "${{ inputs.archivePath }}"
           clean archive
-          -verbose -showBuildTimingSummary
+          -showBuildTimingSummary
         )
 
         if [[ -n "${{ inputs.derivedDataPath }}" ]]; then
@@ -146,27 +146,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [IOS] Build failed::scheme: ${{ inputs.scheme }}, config: ${{ inputs.configuration }}, signing: ${{ inputs.signingStyle }}. Checkpoints — 1) Archive: ${CHECKPOINT_1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🍎 Xcode Build and Archive
-
-        | Field | Value |
-        |-------|-------|
-        | Scheme | ${{ inputs.scheme }} |
-        | Configuration | ${{ inputs.configuration }} |
-        | Signing style | ${{ inputs.signingStyle }} |
-        | Archive path | ${{ inputs.archivePath }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Build and Archive | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        $EOF

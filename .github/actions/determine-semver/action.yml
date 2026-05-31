@@ -82,29 +82,6 @@ runs:
       run: |
         echo "::error title=❌ [VERSION] Semantic version computation failed::Version computation failed for ${{ inputs.major }}.${{ inputs.minor }}.x. Check that major/minor are valid integers and git tags are accessible."
         echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🏷️ Determine Semantic Version
-
-        | Field | Value |
-        |-------|-------|
-        | Major | ${{ inputs.major }} |
-        | Minor | ${{ inputs.minor }} |
-        | Computed version | ${{ steps.semver.outputs.version }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Compute Semantic Version | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        $EOF
 inputs:
   major:
     description: 'Major version number'

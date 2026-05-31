@@ -309,18 +309,6 @@ def main() -> int:
             ("Error message", str(exc)[:200]),
         ]
         raise SystemExit(f"[Play] Upload failed: {exc}") from exc
-    finally:
-        github_step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
-        with open(github_step_summary, "a", encoding="utf-8") as f:
-            f.write(f"## \U0001f916 Google Play Release Upload \u2014 {summary_status}\n\n")
-            f.write("| Field | Value |\n|-------|-------|\n")
-            for key, value in summary_details:
-                f.write(f"| {key} | {value} |\n")
-            f.write("\n## \U0001f4cb Checkpoint Summary\n\n")
-            f.write("| # | Checkpoint | Status |\n|---|------------|--------|\n")
-            f.write("| 1 | Credentials Validated | \u2705 PASSED |\n")
-            cp2_status = "\u2705 PASSED" if summary_status == "\u2705 SUCCESS" else "\u274c FAILED"
-            f.write(f"| 2 | Bundle Uploaded | {cp2_status} |\n")
 
 
 if __name__ == "__main__":

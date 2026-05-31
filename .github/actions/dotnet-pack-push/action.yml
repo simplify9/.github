@@ -156,31 +156,6 @@ runs:
       run: |
         echo "::error title=❌ [DOTNET] Pack/push failed::projects: ${{ inputs.projects }}, feed: ${{ inputs.nuget-source }}. Checkpoints — 1) Pack: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Push: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
 
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🔷 .NET Pack and Push NuGet
-
-        | Field | Value |
-        |-------|-------|
-        | Projects | ${{ inputs.projects }} |
-        | Configuration | ${{ inputs.configuration }} |
-        | Version | ${{ inputs.version != '' && inputs.version || '(from project)' }} |
-        | NuGet feed | ${{ inputs.nuget-source }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Pack NuGet Packages | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Push to Feed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF
-
 inputs:
   projects:
     description: 'Path(s) to .csproj file(s) to pack (supports wildcards and multiple projects)'

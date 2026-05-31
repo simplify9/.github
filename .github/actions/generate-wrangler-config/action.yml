@@ -131,26 +131,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [CF-WORKERS] wrangler.toml generation failed::Config generation failed for project '${{ inputs.PROJECT_NAME }}'. Check that ROUTE, PROJECT_NAME, and COMPATIBILITY_DATE inputs are valid."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## ⚡ Generate wrangler.toml
-
-        | Field | Value |
-        |-------|-------|
-        | Project | ${{ inputs.PROJECT_NAME }} |
-        | Environment | ${{ inputs.ENVIRONMENT }} |
-        | Compatibility date | ${{ inputs.COMPATIBILITY_DATE }} |
-        | OpenNext | ${{ inputs.BUILD_FOR_OPENNEXT }} |
-        | Runner | ${{ runner.os }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Generate wrangler.toml | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        $EOF

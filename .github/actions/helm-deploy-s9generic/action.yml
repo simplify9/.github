@@ -398,28 +398,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [HELM] Deploy failed::Release '${{ inputs.release-name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) K8s context: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart source, image tag, and resource quotas."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## ☸️ Helm Deploy to Kubernetes (s9generic)
-
-        | Field | Value |
-        |-------|-------|
-        | Release | \`${{ inputs.release-name }}\` |
-        | Chart | \`${{ inputs.chart-name }}:${{ inputs.chart-version }}\` |
-        | Namespace | ${{ inputs.namespace }} |
-        | Timeout | ${{ inputs.timeout }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Kubernetes Context | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Helm Chart Deployed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF

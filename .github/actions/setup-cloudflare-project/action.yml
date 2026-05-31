@@ -129,28 +129,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [CF-PAGES] Project setup failed::project: ${{ inputs.project-name }}. Checkpoints — 1) Project check: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Project configured: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🌐 Cloudflare Pages — Project Setup
-
-        | Field | Value |
-        |-------|-------|
-        | Project | ${{ inputs.project-name }} |
-        | Production branch | ${{ inputs.production-branch }} |
-        | Build command | ${{ inputs.build-command }} |
-        | Output dir | ${{ inputs.destination-dir }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Project Check | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Project Configured | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF

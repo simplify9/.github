@@ -125,28 +125,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [DOCKER] Build failed::Docker build/push failed for ${{ inputs.image-name }}:${{ inputs.version }} on ${{ inputs.registry }}. Checkpoints — 1) Registry auth: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build+push: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}"
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🐳 Docker Build and Push
-
-        | Field | Value |
-        |-------|-------|
-        | Image | \`${{ inputs.image-name }}:${{ inputs.version }}\` |
-        | Registry | ${{ inputs.registry }} |
-        | Platforms | ${{ inputs.platforms }} |
-        | Digest | \`${{ steps.build.outputs.digest }}\` |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Registry Authentication | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Image Build and Push | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF

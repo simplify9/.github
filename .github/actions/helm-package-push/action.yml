@@ -257,27 +257,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [HELM] Package/push failed::Chart '${{ inputs.chart-name }}:${{ inputs.version }}'. Checkpoints — 1) Packaged: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Pushed: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## ☸️ Helm Chart Package and Push
-
-        | Field | Value |
-        |-------|-------|
-        | Chart | \`${{ inputs.chart-name }}:${{ inputs.version }}\` |
-        | Source | ${{ inputs.chart-path }} |
-        | Publish method | ${{ inputs.publish-method }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Chart Packaged | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Chart Pushed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF

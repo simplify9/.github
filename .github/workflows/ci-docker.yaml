@@ -180,19 +180,32 @@ jobs:
 
       - name: Write job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          APP_NAME: ${{ inputs.app_name }}
+          DOCKER_REGISTRY: ${{ inputs.docker_registry }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
         run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
           {
-            echo "## 🐳 Docker Build — ${{ inputs.app_name }}"
+            echo "## 🐳 Docker Build — ${STATUS}"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| App | \`${{ inputs.app_name }}\` |"
-            echo "| Registry | \`${EFFECTIVE_REGISTRY:-${{ inputs.docker_registry }}}\` |"
-            echo "| Branch | \`${{ github.ref_name }}\` |"
-            echo "| Run number | ${{ github.run_number }} |"
-            echo "| Runner | ${{ runner.os }} |"
-            echo "| Triggered by | ${{ github.actor }} |"
-            echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo "| App | \`${APP_NAME}\` |"
+            echo "| Registry | \`${EFFECTIVE_REGISTRY:-${DOCKER_REGISTRY}}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Run number | ${RUN_NUMBER} |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
+            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""
