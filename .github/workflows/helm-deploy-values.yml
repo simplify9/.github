@@ -112,7 +112,7 @@ jobs:
         run: |
           echo "::notice title=☸️ [HELM] Helm Deploy — Job Started::Release: ${{ inputs.release-name }} | Chart: ${{ inputs.chart-name }} | Namespace: ${{ inputs.namespace }} | Triggered by: ${{ github.actor }}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏭️ Skipped" >> "$GITHUB_ENV"
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Checkout
@@ -263,6 +263,7 @@ jobs:
             echo "| Chart | \`${{ inputs.chart-name }}\` |"
             echo "| Namespace | \`${{ inputs.namespace }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
             echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
             echo ""

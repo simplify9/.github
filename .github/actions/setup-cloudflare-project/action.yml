@@ -40,18 +40,18 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Mask sensitive inputs
+      shell: bash
+      run: |
+        echo "::add-mask::${{ inputs.api-token }}"
+        echo "::add-mask::${{ inputs.account-id }}"
+
     - name: Announce project setup
       shell: bash
       run: |
         echo "::notice title=🌐 [CF-PAGES] Setup Cloudflare Pages Project::project: ${{ inputs.project-name }}, branch: ${{ inputs.production-branch }}"
         echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
         echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
-    - name: Mask sensitive inputs
-      shell: bash
-      run: |
-        echo "::add-mask::${{ inputs.api-token }}"
-        echo "::add-mask::${{ inputs.account-id }}"
 
     - name: Install jq for JSON parsing
       shell: bash
@@ -144,6 +144,7 @@ runs:
         | Production branch | ${{ inputs.production-branch }} |
         | Build command | ${{ inputs.build-command }} |
         | Output dir | ${{ inputs.destination-dir }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

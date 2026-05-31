@@ -170,6 +170,7 @@ runs:
         | Configuration | ${{ inputs.configuration }} |
         | Version | ${{ inputs.version != '' && inputs.version || '(from project)' }} |
         | NuGet feed | ${{ inputs.nuget-source }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

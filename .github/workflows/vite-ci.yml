@@ -236,7 +236,8 @@ jobs:
           echo "  Checkpoint 2 — Build:           ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — CF Pages deploy: ${CHECKPOINT_3_STATUS:-❌ Not reached}"
 
-      - name: Deployment summary
+      - name: Write job summary
+        if: always()
         env:
           DEPLOY_ENV: ${{ inputs.environment }}
           TARGET_BRANCH: ${{ inputs.target-branch }}
@@ -246,29 +247,31 @@ jobs:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: $DEPLOY_ENV" >> $GITHUB_STEP_SUMMARY
-          echo "- **Project**: $FULL_PROJECT_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch**: $TARGET_BRANCH" >> $GITHUB_STEP_SUMMARY
-          echo "- **Node.js**: $NODE_VERSION" >> $GITHUB_STEP_SUMMARY
-          echo "- **Package Manager**: $PACKAGE_MANAGER" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Directory**: $BUILD_DIR" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -n "$DEPLOY_URL" ]; then
-            echo "- **Deployment URL**: $DEPLOY_URL" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "$CUSTOM_DOMAIN" ]; then
-            echo "- **Custom Domain**: $CUSTOM_DOMAIN" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📋 Checkpoint Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| # | Checkpoint | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|------------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 1 | Dependencies installed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 2 | Application built | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 3 | CF Pages deployed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Deployment completed successfully!" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🌐 [CF-PAGES] Vite CI/CD — Deploy"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Environment | ${DEPLOY_ENV:-unknown} |"
+            echo "| Project | ${FULL_PROJECT_NAME:-unknown} |"
+            echo "| Branch | ${TARGET_BRANCH:-unknown} |"
+            echo "| Node.js | ${NODE_VERSION:-unknown} |"
+            echo "| Package Manager | ${PACKAGE_MANAGER:-unknown} |"
+            echo "| Build Directory | ${BUILD_DIR:-unknown} |"
+            echo "| Runner | ${{ runner.os }} |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            if [ -n "${DEPLOY_URL}" ]; then
+              echo "| Deployment URL | ${DEPLOY_URL} |"
+            fi
+            if [ -n "${CUSTOM_DOMAIN}" ]; then
+              echo "| Custom Domain | ${CUSTOM_DOMAIN} |"
+            fi
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Install dependencies | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Build application | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | CF Pages deployed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

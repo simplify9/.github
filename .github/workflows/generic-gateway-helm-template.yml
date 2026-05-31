@@ -338,6 +338,7 @@ jobs:
             echo "|-------|-------|"
             echo "| Computed version | \`${{ steps.semver.outputs.version }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -424,6 +425,7 @@ jobs:
             echo "| Enabled | ${{ inputs.package-nuget }} |"
             echo "| Version | \`${{ steps.nuget-semver.outputs.version }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
@@ -468,6 +470,7 @@ jobs:
             echo "| Version | \`${{ needs.version.outputs.version }}\` |"
             echo "| Registry | \`${{ inputs.container-registry }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
@@ -889,6 +892,7 @@ jobs:
             echo "| Routing mode | ${{ inputs.routing-mode }} |"
             echo "| Chart | ${{ inputs.chart-name }} |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
             echo ""
             echo "## 📋 Checkpoint Summary"

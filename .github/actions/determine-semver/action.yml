@@ -80,7 +80,7 @@ runs:
       if: failure()
       shell: bash
       run: |
-        echo "::error title=❌ [CHECKPOINT 1/1] FAILED — Compute Semantic Version::Version computation failed for ${{ inputs.major }}.${{ inputs.minor }}.x. Check that major/minor are valid integers and git tags are accessible."
+        echo "::error title=❌ [VERSION] Semantic version computation failed::Version computation failed for ${{ inputs.major }}.${{ inputs.minor }}.x. Check that major/minor are valid integers and git tags are accessible."
         echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
 
     - name: Write action summary
@@ -96,6 +96,7 @@ runs:
         | Major | ${{ inputs.major }} |
         | Minor | ${{ inputs.minor }} |
         | Computed version | ${{ steps.semver.outputs.version }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

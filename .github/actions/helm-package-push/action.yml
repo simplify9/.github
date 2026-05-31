@@ -271,6 +271,7 @@ runs:
         | Chart | \`${{ inputs.chart-name }}:${{ inputs.version }}\` |
         | Source | ${{ inputs.chart-path }} |
         | Publish method | ${{ inputs.publish-method }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

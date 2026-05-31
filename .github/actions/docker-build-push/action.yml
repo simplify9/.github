@@ -140,6 +140,7 @@ runs:
         | Registry | ${{ inputs.registry }} |
         | Platforms | ${{ inputs.platforms }} |
         | Digest | \`${{ steps.build.outputs.digest }}\` |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

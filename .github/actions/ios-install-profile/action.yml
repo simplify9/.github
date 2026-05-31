@@ -40,7 +40,7 @@ runs:
       if: failure()
       shell: bash
       run: |
-        echo "::error title=❌ [CHECKPOINT 1/1] FAILED — Install Provisioning Profile::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
+        echo "::error title=❌ [SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
 
     - name: Write action summary
       if: always()
@@ -55,6 +55,7 @@ runs:
         | Platform | iOS |
         | Profile name | ${IOS_PROFILE_NAME:-unknown} |
         | Profile UUID | ${IOS_PROFILE_UUID:-unknown} |
+        | Runner | ${{ runner.os }} |
 
         ## 📋 Checkpoint Summary
 

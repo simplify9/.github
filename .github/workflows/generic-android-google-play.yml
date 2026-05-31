@@ -537,6 +537,11 @@ jobs:
         run: |
           {
             echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Runner | ${{ runner.os }} |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo ""
             echo "## 📋 Build Checkpoint Summary"
             echo ""
             echo "| # | Checkpoint | Status |"
@@ -643,6 +648,7 @@ jobs:
             echo "| Version | \`${{ needs.build.outputs.version-name }}\` (code: ${{ needs.build.outputs.version-code }}) |"
             echo "| Track | ${{ inputs.play-track }} |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""
@@ -750,6 +756,7 @@ jobs:
             echo "| Track | ${{ inputs.play-track }} |"
             echo "| Environment | ${{ inputs.release-environment }} |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""

@@ -39,7 +39,7 @@ runs:
       if: failure()
       shell: bash
       run: |
-        echo "::error title=❌ [CHECKPOINT 1/1] FAILED — Export IPA::xcodebuild -exportArchive failed for archive '${{ inputs.archivePath }}'. Check exportOptionsPlist path and signing configuration."
+        echo "::error title=❌ [IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${{ inputs.archivePath }}'. Check exportOptionsPlist path and signing configuration."
 
     - name: Write action summary
       if: always()
@@ -54,6 +54,8 @@ runs:
         | Archive | \`${{ inputs.archivePath }}\` |
         | Export options | \`${{ inputs.exportOptionsPlist }}\` |
         | Output path | \`${{ inputs.exportPath }}\` |
+        | Runner | ${{ runner.os }} |
+        | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary
 

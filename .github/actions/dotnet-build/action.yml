@@ -128,6 +128,7 @@ runs:
         | Configuration | ${{ inputs.configuration }} |
         | .NET version | ${{ inputs.dotnet-version }} |
         | Tests enabled | ${{ inputs.run-tests }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

@@ -158,6 +158,7 @@ jobs:
             echo "|-------|-------|"
             echo "| Computed version | \`${{ steps.compute.outputs.version }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -396,6 +397,7 @@ jobs:
             echo "| Package | \`${{ steps.package.outputs.chart-package }}\` |"
             echo "| Upload Endpoint | ${{ steps.upload.outputs.chart-url }} |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
             echo ""
             echo "## 📋 Checkpoint Summary"

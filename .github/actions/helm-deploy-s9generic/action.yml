@@ -413,6 +413,7 @@ runs:
         | Chart | \`${{ inputs.chart-name }}:${{ inputs.chart-version }}\` |
         | Namespace | ${{ inputs.namespace }} |
         | Timeout | ${{ inputs.timeout }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

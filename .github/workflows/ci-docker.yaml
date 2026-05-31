@@ -188,6 +188,7 @@ jobs:
             echo "| Registry | \`${EFFECTIVE_REGISTRY:-${{ inputs.docker_registry }}}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
             echo "| Run number | ${{ github.run_number }} |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
             echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
             echo ""

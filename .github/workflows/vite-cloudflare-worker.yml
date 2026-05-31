@@ -231,6 +231,7 @@ jobs:
             echo "| Route | \`${{ inputs.route }}\` |"
             echo "| Environment | \`${{ inputs.environment }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
             echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
             echo ""

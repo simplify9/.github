@@ -197,6 +197,7 @@ jobs:
             echo "| Computed version | \`${{ steps.semver.outputs.version }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
             echo "| SHA | \`${{ github.sha }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -241,6 +242,7 @@ jobs:
             echo "| Version | \`${{ needs.version.outputs.version }}\` |"
             echo "| Projects | \`${{ inputs.nuget-projects }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   ci:
@@ -372,6 +374,7 @@ jobs:
             echo "| Registry | \`${{ inputs.container-registry }}\` |"
             echo "| Chart method | ${{ inputs.chart-publish-method }} |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo ""
             echo "## 📋 Checkpoint Summary"
             echo ""
@@ -455,5 +458,6 @@ jobs:
             echo "| Version | \`${{ needs.version.outputs.version }}\` |"
             echo "| Namespace | \`${{ inputs.development-namespace }}\` |"
             echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Runner | ${{ runner.os }} |"
             echo "| Triggered by | ${{ github.actor }} |"
           } >> "$GITHUB_STEP_SUMMARY"

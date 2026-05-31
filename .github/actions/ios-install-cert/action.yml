@@ -52,7 +52,7 @@ runs:
       if: failure()
       shell: bash
       run: |
-        echo "::error title=❌ [CHECKPOINT 1/1] FAILED — Install Signing Certificate::Failed to import .p12 into keychain. Check that p12Base64 is valid base64 and p12Password is correct."
+        echo "::error title=❌ [SIGN] Certificate installation failed::Failed to import .p12 into keychain. Check that p12Base64 is valid base64 and p12Password is correct."
 
     - name: Write action summary
       if: always()
@@ -66,6 +66,7 @@ runs:
         |-------|-------|
         | Platform | iOS |
         | Certificate | .p12 (value suppressed) |
+        | Runner | ${{ runner.os }} |
 
         ## 📋 Checkpoint Summary
 

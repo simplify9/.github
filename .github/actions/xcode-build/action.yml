@@ -161,6 +161,7 @@ runs:
         | Configuration | ${{ inputs.configuration }} |
         | Signing style | ${{ inputs.signingStyle }} |
         | Archive path | ${{ inputs.archivePath }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

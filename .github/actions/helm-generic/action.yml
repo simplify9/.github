@@ -302,6 +302,7 @@ runs:
         | Namespace | ${{ inputs.namespace }} |
         | Environment | ${{ inputs.environment }} |
         | Timeout | ${{ inputs.helm_timeout }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

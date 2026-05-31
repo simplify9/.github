@@ -101,6 +101,7 @@ runs:
         | Field | Value |
         |-------|-------|
         | Xcode version | ${{ inputs.xcodeVersion }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary

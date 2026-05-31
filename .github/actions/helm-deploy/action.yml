@@ -346,6 +346,7 @@ runs:
         | Namespace | ${{ inputs.namespace }} |
         | Source type | ${{ inputs.chart-source-type }} |
         | Timeout | ${{ inputs.timeout }} |
+        | Runner | ${{ runner.os }} |
         | Triggered by | ${{ github.actor }} |
 
         ## 📋 Checkpoint Summary
