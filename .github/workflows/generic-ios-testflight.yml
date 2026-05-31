@@ -417,6 +417,39 @@ jobs:
         shell: bash
         run: npm install -g react-native-cli
 
+      # Cache CocoaPods dependencies.
+      # Keyed on Podfile.lock (NOT Podfile): the lock file pins exact pod versions and
+      # source URLs; the Podfile only declares ranges. Key changes whenever `pod update`
+      # produces a new Podfile.lock commit.
+      #
+      # Path verification: the clean-reinstall-pods step does:
+      #   cd "${{ inputs.ios-dir }}" && rm -rf Pods Podfile.lock
+      # confirming that ios-dir (default: ios) is the correct base path.
+      # The xcode-setup composite action hardcodes `cd ios` for pod install, so
+      # ios/Pods always applies when use-simplify9-xcode-setup=true.
+      #
+      # Interaction with clean-reinstall-pods: when that input is true, the caller
+      # explicitly requests pod deintegrate + reinstall. Restoring the pod cache before
+      # that step would add overhead and be immediately discarded. The condition below
+      # bypasses the cache entirely when clean-reinstall-pods=true.
+      #
+      # Note on ios/Pods vs ~/.cocoapods/repos: when use-simplify9-xcode-setup=true
+      # (the default), xcode-setup always deletes ios/Pods before reinstalling. The
+      # ios/Pods portion of this cache has limited value in that path, but
+      # ~/.cocoapods/repos (the spec repository, 1-3 GB) is always reused and is the
+      # dominant time saving.
+      - name: Cache CocoaPods
+        id: cache-pods
+        if: ${{ !inputs.clean-reinstall-pods }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ inputs.ios-dir }}/Pods
+            ~/.cocoapods/repos
+          key: pods-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+
       - name: Xcode setup (simplify9 action)
         if: ${{ inputs.use-simplify9-xcode-setup }}
         uses: simplify9/.github/.github/actions/xcode-setup@main

@@ -162,6 +162,8 @@ jobs:
             --file "$FILE" \
             --push \
             --provenance=false \
+            --cache-from "type=registry,ref=$EFFECTIVE_REGISTRY/$APP:buildcache" \
+            --cache-to "type=registry,ref=$EFFECTIVE_REGISTRY/$APP:buildcache,mode=max" \
             --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$VER" \
             --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$RUN" \
             "$CTX"
