@@ -667,7 +667,9 @@ jobs:
   org.gradle.parallel=true
   org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
   ```
-- Android NDK and CMake binaries are cached between runs using a version-pinned key. When upgrading native dependencies (e.g. `react-native-nitro-modules`) that require a new NDK or CMake version, bump the key suffix in the workflow. See `CACHING_IMPLEMENTATION.md` for the full bump procedure.
+- **Android NDK pre-install:** NDK versions are installed via `sdkmanager` before the Gradle build. `actions/cache` cannot be used for `/usr/local/lib/android/sdk/` on GitHub-hosted runners — that directory is root-owned and `tar` extraction fails with permission errors. `sdkmanager` has the correct elevated permissions and installs both required NDK versions directly.
+- **Metro transform cache:** The Metro JS transform cache is stored in `.metro-cache` at the workspace root (set via `METRO_CACHE_DIR` env on the build step) and persisted between runs via `actions/cache@v4`, keyed on the lockfile hash. This eliminates the `WARN the transform cache was reset` message that caused Metro to retranspile all JS from scratch on every run.
+- **Node.js 24 opt-in:** All three jobs set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` at job level, opting in early ahead of GitHub's Node.js 20 retirement on September 16th 2026.
 - The `upload-google-play-release` action is **Docker-based** — it calls the Google Play Android Publisher API via Python. Modifying `play_upload.py` takes effect immediately (Docker image rebuilt per run).
 - Use `android-google-play-dispatch-template.yml` to add a `workflow_dispatch` trigger to your repo.
 

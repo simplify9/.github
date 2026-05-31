@@ -310,6 +310,9 @@ steps:
 - `version-code` = `github.run_number + version-code-offset`. Set `version-code-offset` high (default `80000`) when migrating from another CI system to avoid versionCode collisions on the Play Console.
 - The `gradle/actions/setup-gradle@v4` action is used — **not** `gradle/gradle-build-action` (that repo is archived).
 - `upload-google-play-release` is a Docker action. If you modify `play_upload.py`, rebuild context is automatic (GitHub rebuilds the Docker image per run). Do not cache the image manually.
+- **NDK pre-install:** Android NDK versions are installed via `sdkmanager` (not `actions/cache`) because `/usr/local/lib/android/sdk/` is owned by root on GitHub-hosted runners. `tar` extraction by the `runner` user fails with `Cannot utime` / `Cannot change mode: Operation not permitted`. Use `sdkmanager "ndk;<version>"` which has the correct elevated permissions.
+- **Metro transform cache:** The Metro JS transform cache is stored at `${{ github.workspace }}/.metro-cache` (set via `METRO_CACHE_DIR` env on the Gradle build step) and persisted between runs with `actions/cache@v4`, keyed on the lockfile hash. This eliminates the `WARN the transform cache was reset` message on every run.
+- **Node.js 24 opt-in:** All three jobs (`build`, `release`, `release_with_environment`) set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` at job level. This opts in to Node.js 24 for `actions/cache@v4`, `actions/setup-java@v4`, and `gradle/actions/setup-gradle@v4` ahead of GitHub's mandatory retirement of Node.js 20 on September 16th 2026.
 
 ---
 
@@ -343,6 +346,7 @@ steps:
 - **Do not upgrade `gradle/actions/setup-gradle` to v5/v6** — v5 requires runner ≥ 2.327.1; v6 contains a proprietary caching component under Gradle's commercial Terms of Use
 - **Do not add `cache: gradle` to `actions/setup-java`** — this invokes `gradle/gradle-build-action` internally and conflicts with `setup-gradle`, causing the `setup-gradle` cache restore to be silently skipped. `gradle/actions/setup-gradle` is the sole Gradle cache mechanism.
 - **Do not add a manual `actions/cache` step for `~/.gradle`** — `gradle/actions/setup-gradle` already owns Gradle home caching. Adding a second mechanism re-introduces the dual-cache conflict.
+- **Do not use `actions/cache` for `/usr/local/lib/android/sdk/` paths** — the Android SDK directory is owned by root on GitHub-hosted runners. `tar` extraction fails with `Cannot utime` / `Cannot change mode: Operation not permitted`. Use `sdkmanager` to install NDK/CMake versions directly.
 - **Do not enable any deployment by default** — all `deploy-to-*` inputs default to `false`
 - **Do not pass secrets as regular inputs** — declare them under `on.workflow_call.secrets:` or use `secrets: inherit`
 - **Do not mix Helm config and secret values** in a single `--set` call — use `--set-string` for anything that contains special characters or is sourced from a secret
