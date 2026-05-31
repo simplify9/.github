@@ -270,12 +270,7 @@ jobs:
             done <<< "$EXTRA_SET_VALUES"
           fi
 
-          echo "Executing Helm upgrade with base settings plus extras..."
-          echo "DEBUG: Raw INGRESS_PATHS value:" >&2
-          printf '%s\n' "$INGRESS_PATHS" >&2 || true
-          echo "DEBUG: Expanded PATH_SET_ARGS (count=${#PATH_SET_ARGS[@]}):" >&2
-          printf '  %s\n' "${PATH_SET_ARGS[@]}" >&2 || true
-          set -x
+          echo "🚀 Deploying '${APP_NAME}' to namespace '${NAMESPACE}' via chart '${CHART_REF}'..."
           helm upgrade "${APP_NAME}" "$CHART_REF" \
             --install \
             --namespace "${NAMESPACE}" \
@@ -283,7 +278,7 @@ jobs:
             "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
             --timeout "${HELM_TIMEOUT}" \
             ${EXTRA_ARGS}
-          set +x
+          echo "✅ Helm deployment of '${APP_NAME}' completed successfully."
 
       - name: Show release status
         if: always()

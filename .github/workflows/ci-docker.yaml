@@ -123,8 +123,11 @@ jobs:
             exit 1
           fi
 
-          echo "Logging into ${REGISTRY} as ${USERNAME}"
+          echo "::add-mask::${USERNAME}"
+          echo "::add-mask::${TOKEN}"
+          echo "🔐 Authenticating with container registry: ${REGISTRY}..."
           echo "${TOKEN}" | docker login "${REGISTRY}" -u "${USERNAME}" --password-stdin
+          echo "✅ Registry authentication successful."
           echo "EFFECTIVE_REGISTRY=${REGISTRY}" >> "$GITHUB_ENV"
 
       - name: Build and push image

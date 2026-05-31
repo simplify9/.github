@@ -303,10 +303,11 @@ jobs:
     steps:
       - name: Debug secret values in workflow template
         run: |
-          echo "=== WORKFLOW TEMPLATE DEBUG ==="
-          echo "Raw secret length: ${#SECRET_VAL}"
-          echo "Raw secret value: '$SECRET_VAL'"
-          echo "============================"
+          if [ -n "${SECRET_VAL}" ]; then
+            echo "::notice::🔐 Helm secret values are configured for this deployment."
+          else
+            echo "::notice::ℹ️ No Helm secret values provided — deploying with public configuration only."
+          fi
         env:
           SECRET_VAL: "${{ secrets.helm-set-secret-values }}"
       

@@ -165,6 +165,7 @@ runs:
       if: inputs.chart-source-type == 'oci'
       shell: bash
       run: |
+        echo "::add-mask::${{ inputs.registry-password }}"
         echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
         registry_host="${{ inputs.registry }}"
         if [ "$registry_host" = "docker.io" ]; then
@@ -181,8 +182,7 @@ runs:
         cat > /tmp/custom-values.yaml << 'EOF'
         ${{ inputs.values }}
         EOF
-        echo "Custom values:"
-        cat /tmp/custom-values.yaml
+        echo "Custom values file created."
 
     - name: Deploy Helm chart
       id: deploy
@@ -213,21 +213,6 @@ runs:
         echo "Chart URL: ${CHART_URL}"
         echo "Release name: ${{ inputs.release-name }}"
         echo "Namespace: ${{ inputs.namespace }}"
-        
-        # Debug: Show what we received
-        echo "=== ACTION DEBUG: Received Values ==="
-        echo "set-values input: '${{ inputs.set-values }}'"
-        echo "set-string-values input: '${{ inputs.set-string-values }}'"
-        echo "SECRET_VALUES env: '$SECRET_VALUES'"
-        echo "SECRET_VALUES length: ${#SECRET_VALUES}"
-        if [ -n "$SECRET_VALUES" ]; then
-          echo "SECRET_VALUES hex dump:"
-          echo "$SECRET_VALUES" | hexdump -C | head -5
-          echo "Contains semicolons: $(echo "$SECRET_VALUES" | grep -c ';' || echo '0')"
-          echo "Contains equals: $(echo "$SECRET_VALUES" | grep -c '=' || echo '0')"
-          echo "Contains spaces: $(echo "$SECRET_VALUES" | grep -c ' ' || echo '0')"
-        fi
-        echo "======================================"
         
         # Build helm command as array to properly handle arguments with spaces and special characters
         HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_SOURCE}" "--namespace" "${{ inputs.namespace }}")
@@ -278,32 +263,24 @@ runs:
         secret_values=""
         if [ -n "$SECRET_VALUES" ]; then
           secret_values="$SECRET_VALUES"
-          echo "Using secret values from environment variable"
         elif [ -n "${{ inputs.set-string-values }}" ]; then
           secret_values="${{ inputs.set-string-values }}"
-          echo "Using secret values from input parameter"
         fi
         
         if [ -n "$secret_values" ]; then
           echo "Processing secret values..."
-          echo "=== SECRET PROCESSING DEBUG ==="
-          echo "secret_values variable: '$secret_values'"
-          echo "secret_values length: ${#secret_values}"
-          echo "============================="
           
           # Only process if we have actual content (not just whitespace)
           if [ -n "$(echo "$secret_values" | tr -d '[:space:]')" ]; then
             while [[ "$secret_values" == *","* ]]; do
               value="${secret_values%%,*}"
               if [ -n "$value" ]; then
-                echo "Adding --set-string: $value"
                 HELM_ARGS+=("--set-string" "$value")
               fi
               secret_values="${secret_values#*,}"
             done
             # Handle the last value (or only value if no commas)
             if [ -n "$secret_values" ]; then
-              echo "Adding --set-string: $secret_values"
               HELM_ARGS+=("--set-string" "$secret_values")
             fi
           else
@@ -313,7 +290,7 @@ runs:
           echo "No secret values provided"
         fi
         
-        echo "Executing: ${HELM_ARGS[*]}"
+        echo "Running Helm upgrade/install..."
         "${HELM_ARGS[@]}"
         
         echo "status=deployed" >> $GITHUB_OUTPUT

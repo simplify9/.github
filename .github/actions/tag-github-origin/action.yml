@@ -3,6 +3,10 @@ description: 'Reusable action to create a tag on the GitHub origin using the RES
 runs:
   using: "composite"
   steps:
+    - name: Mask sensitive inputs
+      shell: bash
+      run: echo "::add-mask::${{ inputs.github-token }}"
+
     - name: Tag new version on GitHub origin
       run: |
         # Validate inputs

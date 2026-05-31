@@ -317,12 +317,14 @@ jobs:
             exit 1
           fi
 
+          echo "::add-mask::${CHARTMUSEUM_PASSWORD}"
           for package_file in "${chart_packages[@]}"; do
-            echo "Uploading ${package_file} to ${CHARTMUSEUM_URL}"
+            echo "🚀 Uploading chart package '$(basename "${package_file}")' to ChartMuseum..."
             curl --fail --show-error --silent \
               --data-binary "@${package_file}" \
               "${CHARTMUSEUM_URL}" \
               --user "${CHARTMUSEUM_USER}:${CHARTMUSEUM_PASSWORD}"
+            echo "✅ Package '$(basename "${package_file}")' uploaded successfully."
           done
 
           echo "chart-url=${CHARTMUSEUM_URL}" >> "$GITHUB_OUTPUT"

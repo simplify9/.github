@@ -46,7 +46,7 @@ on:
         required: true
         type: string
       assets_dir:
-        description: Vite build output directory (default: dist)
+        description: "Vite build output directory (default: dist)"
         required: false
         default: "dist"
         type: string

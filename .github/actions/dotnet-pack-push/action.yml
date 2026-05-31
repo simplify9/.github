@@ -78,6 +78,8 @@ runs:
       shell: bash
     - name: Push NuGet packages
       run: |
+        echo "::add-mask::${{ inputs.api-key }}"
+
         # Validate required inputs
         if [ -z "${{ inputs.api-key }}" ]; then
           echo "Error: API key is required but not provided!"

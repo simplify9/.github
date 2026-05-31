@@ -245,12 +245,6 @@ runs:
         fi
 
         echo "Executing Helm upgrade with base settings plus extras..."
-        echo "DEBUG: Raw INGRESS_PATHS value:" >&2
-        printf '%s\n' "$INGRESS_PATHS" >&2 || true
-        echo "DEBUG: Expanded PATH_SET_ARGS (count=${#PATH_SET_ARGS[@]}):" >&2
-        printf '  %s\n' "${PATH_SET_ARGS[@]}" >&2 || true
-
-        set -x
         helm upgrade "${APP_NAME}" "$CHART_REF" \
           --install \
           --namespace "${NAMESPACE}" \
@@ -258,7 +252,6 @@ runs:
           "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
           --timeout "${HELM_TIMEOUT}" \
           ${EXTRA_ARGS}
-        set +x
 
     - name: Show release status
       if: always()

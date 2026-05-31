@@ -179,9 +179,6 @@ on:
       docker-image:
         description: 'Built Docker image with tag'
         value: ${{ jobs.build.outputs.docker-image }}
-      helm-chart:
-        description: 'Published Helm chart URL'
-        value: ${{ jobs.build.outputs.helm-chart }}
       nuget-version:
         description: 'Generated NuGet package version'
         value: ${{ jobs.nuget.outputs.version }}

@@ -121,7 +121,7 @@ runs:
             'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
         fi
 
-        echo "Running: xcodebuild ${ARGS[*]}"
+        echo "🔨 Starting xcodebuild archive for scheme '${{ inputs.scheme }}' (configuration: ${{ inputs.configuration }})..."
 
         if command -v xcpretty >/dev/null 2>&1; then
           xcodebuild "${ARGS[@]}" | xcpretty --color

@@ -10,6 +10,7 @@ runs:
         IOS_P12_PASSWORD: ${{ inputs.p12Password }}
       run: |
         set -euo pipefail
+        echo "::add-mask::${{ inputs.p12Password }}"
 
         KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
         KEYCHAIN_PASS="ci-pass"

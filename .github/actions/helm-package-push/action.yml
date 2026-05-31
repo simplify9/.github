@@ -181,13 +181,15 @@ runs:
       if: inputs.publish-method == 'oci'
       shell: bash
       run: |
-        echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
+        echo "::add-mask::${{ inputs.password }}"
+        echo "🔐 Authenticating with OCI registry: ${{ inputs.registry }}..."
         registry_host="${{ inputs.registry }}"
         if [ "$registry_host" = "docker.io" ]; then
           # Docker Hub's Helm/OCI endpoint requires this hostname for registry login.
           registry_host="registry-1.docker.io"
         fi
         helm registry login "$registry_host" -u ${{ inputs.username }} -p ${{ inputs.password }}
+        echo "✅ Registry authentication successful."
 
     - name: Push Helm chart to OCI registry
       if: inputs.publish-method == 'oci'
@@ -222,12 +224,14 @@ runs:
           exit 1
         fi
 
-        echo "Uploading chart to ChartMuseum: ${CHARTMUSEUM_API_URL}"
+        echo "::add-mask::${{ inputs.chartmuseum-password }}"
+        echo "📡 Uploading chart(s) to ChartMuseum: ${CHARTMUSEUM_API_URL}"
         for f in "${chart_packages[@]}"; do
-          echo "Uploading @${f}"
+          echo "🚀 Uploading '$(basename "$f")'..."
           curl --fail --show-error --silent --data-binary "@${f}" \
             "${CHARTMUSEUM_API_URL}" \
             --user "${{ inputs.chartmuseum-username }}:${{ inputs.chartmuseum-password }}"
+          echo "✅ '$(basename "$f")' uploaded successfully."
         done
 
         echo "chart-url=${CHARTMUSEUM_URL%/}" >> $GITHUB_OUTPUT
