@@ -491,26 +491,36 @@ jobs:
           restore-keys: |
             android-ndk-cmake-${{ runner.os }}-
 
-      - name: Build Release Bundle (AAB)
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          build-root-directory: ${{ inputs.build-root-directory }}
-          arguments: >
-            ${{ inputs.gradle-task }}
-            -PversionName=${{ steps.compute.outputs.version_name }}
-            -PversionCode=${{ steps.compute.outputs.version_code }}
-            -PapplicationId=${{ inputs.app-id }}
-            -Pandroid.injected.signing.store.file=${{ github.workspace }}/${{ inputs.keystore-output-path }}
-            -Pandroid.injected.signing.store.password=${{ secrets.android-keystore-password }}
-            -Pandroid.injected.signing.key.alias=${{ secrets.android-key-alias }}
-            -Pandroid.injected.signing.key.password=${{ secrets.android-key-password }}
-            ${{ inputs.gradle-extra-arguments }}
           gradle-version: ${{ inputs.gradle-version }}
           cache-read-only: false
           gradle-home-cache-includes: |
             caches
             notifications
             wrapper
+
+      - name: Build Release Bundle (AAB)
+        working-directory: ${{ inputs.build-root-directory }}
+        env:
+          STORE_FILE: ${{ github.workspace }}/${{ inputs.keystore-output-path }}
+          STORE_PASSWORD: ${{ secrets.android-keystore-password }}
+          KEY_ALIAS: ${{ secrets.android-key-alias }}
+          KEY_PASSWORD: ${{ secrets.android-key-password }}
+          EXTRA_ARGS: ${{ inputs.gradle-extra-arguments }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew ${{ inputs.gradle-task }} \
+            -PversionName=${{ steps.compute.outputs.version_name }} \
+            -PversionCode=${{ steps.compute.outputs.version_code }} \
+            -PapplicationId=${{ inputs.app-id }} \
+            -Pandroid.injected.signing.store.file="${STORE_FILE}" \
+            -Pandroid.injected.signing.store.password="${STORE_PASSWORD}" \
+            -Pandroid.injected.signing.key.alias="${KEY_ALIAS}" \
+            -Pandroid.injected.signing.key.password="${KEY_PASSWORD}" \
+            ${EXTRA_ARGS}
 
       - name: Confirm bundle built
         run: |
