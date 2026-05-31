@@ -141,6 +141,12 @@ jobs:
     environment: ${{ inputs.registry_profile }}
 
     steps:
+      - name: Announce deploy job
+        run: |
+          echo "::notice title=☸️ [HELM] Helm Deploy — Job Started::App: ${{ inputs.app_name }} | Namespace: ${{ inputs.namespace }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v6
 
       - name: Derive sanitized branch name
@@ -165,6 +171,7 @@ jobs:
           KUBECONFIG_DATA: ${{ env.KUBECONFIG_INPUT }}
         run: |
           set -euo pipefail
+          echo "::group::☸️ [CHECKPOINT 1/2] Process kubeconfig input"
           DATA="${KUBECONFIG_DATA:-}"
           if [ -z "$DATA" ]; then
             echo "kubeconfig_data input is required but empty." >&2
@@ -178,6 +185,9 @@ jobs:
           fi
           chmod 600 kubeconfig.yaml
           echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/2] Kubeconfig processed — PASSED"
+          echo "::endgroup::"
 
       - name: Set KUBECONFIG env
         shell: bash
@@ -270,6 +280,8 @@ jobs:
             done <<< "$EXTRA_SET_VALUES"
           fi
 
+          echo "::group::☸️ [CHECKPOINT 2/2] Helm upgrade/install: ${APP_NAME}"
+          echo "→ Namespace: ${NAMESPACE} | Chart: ${CHART_REF} | Timeout: ${HELM_TIMEOUT}"
           echo "🚀 Deploying '${APP_NAME}' to namespace '${NAMESPACE}' via chart '${CHART_REF}'..."
           helm upgrade "${APP_NAME}" "$CHART_REF" \
             --install \
@@ -279,6 +291,16 @@ jobs:
             --timeout "${HELM_TIMEOUT}" \
             ${EXTRA_ARGS}
           echo "✅ Helm deployment of '${APP_NAME}' completed successfully."
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/2] Helm upgrade/install completed — PASSED"
+          echo "::endgroup::"
+
+      - name: Report deploy failure
+        if: failure()
+        run: |
+          echo "::error title=☸️ [HELM] Deploy Job Failed::App '${{ inputs.app_name }}' failed | Namespace: ${{ inputs.namespace }}"
+          echo "  Checkpoint 1 — Kubeconfig:     ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Helm deploy:     ${CHECKPOINT_2_STATUS:-❌ Not reached}"
 
       - name: Show release status
         if: always()
@@ -288,10 +310,35 @@ jobs:
           NAMESPACE: ${{ env.NAMESPACE }}
         run: |
           set -euo pipefail
+          echo "::group::☸️ Post-deploy release status: ${APP_NAME}"
           helm status "$APP_NAME" -n "$NAMESPACE" || true
           echo "---"
           kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$APP_NAME" || true
+          echo "::endgroup::"
 
       - name: Notes
         run: |
           echo "Override defaults by passing inputs to the workflow_call. Provide extra --set pairs via 'extra_set_values' (newline separated). Raw flags (e.g. --atomic) via 'extra_args'."
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## ☸️ Helm Deploy — ${{ inputs.app_name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| App | \`${{ inputs.app_name }}\` |"
+            echo "| Namespace | \`${{ inputs.namespace }}\` |"
+            echo "| Chart | \`${{ inputs.chart }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Kubeconfig processed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Helm upgrade/install | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

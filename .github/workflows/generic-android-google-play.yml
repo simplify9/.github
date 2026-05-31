@@ -203,6 +203,13 @@ jobs:
       aab-file: ${{ steps.rename.outputs.aab_file }}
 
     steps:
+      - name: Announce build job
+        run: |
+          echo "::notice title=🤖 [ANDROID] Build AAB — Job Started::App: ${{ inputs.app-id }} | Version prefix: ${{ inputs.version-prefix }} | Track: ${{ inputs.play-track }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -445,6 +452,8 @@ jobs:
           set -euo pipefail
           mkdir -p "$(dirname '${{ inputs.keystore-output-path }}')"
           echo "${{ secrets.android-keystore-base64 }}" | base64 -d > "${{ inputs.keystore-output-path }}"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Keystore restored — PASSED"
 
       - name: Verify keystore exists
         shell: bash
@@ -468,6 +477,11 @@ jobs:
             -Pandroid.injected.signing.key.password=${{ secrets.android-key-password }}
             ${{ inputs.gradle-extra-arguments }}
           gradle-version: ${{ inputs.gradle-version }}
+
+      - name: Confirm bundle built
+        run: |
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Gradle bundle built — PASSED"
 
       - name: Rename bundle
         id: rename
@@ -501,12 +515,36 @@ jobs:
           fi
 
           echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] Bundle renamed — PASSED: ${AAB_OUT}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename.outputs.aab_file }}
+
+      - name: Report build failure
+        if: failure()
+        run: |
+          echo "::error title=🤖 [ANDROID] Build Job Failed::App: ${{ inputs.app-id }}"
+          echo "  Checkpoint 1 — Keystore restored: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Bundle built:      ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — Bundle renamed:    ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+
+      - name: Write build job summary
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "## 📋 Build Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Keystore restored | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Bundle built | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | Bundle renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Release to Google Play
@@ -516,6 +554,11 @@ jobs:
     if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
 
     steps:
+      - name: Announce release job
+        run: |
+          echo "::notice title=🤖 [ANDROID] Release to Google Play — Job Started::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }} | Track: ${{ inputs.play-track }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
@@ -576,6 +619,37 @@ jobs:
           release_name: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
           changes_not_sent_for_review: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
+
+      - name: Confirm Google Play upload
+        run: |
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — PASSED: ${{ inputs.app-id }} v${{ needs.build.outputs.version-name }} → ${{ inputs.play-track }}"
+
+      - name: Report release failure
+        if: failure()
+        run: |
+          echo "::error title=🤖 [ANDROID] Release Job Failed::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }}"
+          echo "  Checkpoint 1 — Google Play upload: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+
+      - name: Write release job summary
+        if: always()
+        run: |
+          {
+            echo "## 🤖 Android Release to Google Play"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| App | \`${{ inputs.app-id }}\` |"
+            echo "| Version | \`${{ needs.build.outputs.version-name }}\` (code: ${{ needs.build.outputs.version-code }}) |"
+            echo "| Track | ${{ inputs.play-track }} |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Google Play upload | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release_with_environment:
     name: Release to Google Play
@@ -586,6 +660,11 @@ jobs:
     environment: ${{ inputs.release-environment }}
 
     steps:
+      - name: Announce release-with-environment job
+        run: |
+          echo "::notice title=🤖 [ANDROID] Release to Google Play (env gated) — Job Started::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }} | Track: ${{ inputs.play-track }} | Env: ${{ inputs.release-environment }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
@@ -646,3 +725,35 @@ jobs:
           release_name: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
           changes_not_sent_for_review: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
+
+      - name: Confirm Google Play upload
+        run: |
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — PASSED: ${{ inputs.app-id }} v${{ needs.build.outputs.version-name }} → ${{ inputs.play-track }}"
+
+      - name: Report release-with-environment failure
+        if: failure()
+        run: |
+          echo "::error title=🤖 [ANDROID] Release (env gated) Job Failed::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }}"
+          echo "  Checkpoint 1 — Google Play upload: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+
+      - name: Write release-with-environment job summary
+        if: always()
+        run: |
+          {
+            echo "## 🤖 Android Release to Google Play (Environment-Gated)"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| App | \`${{ inputs.app-id }}\` |"
+            echo "| Version | \`${{ needs.build.outputs.version-name }}\` (code: ${{ needs.build.outputs.version-code }}) |"
+            echo "| Track | ${{ inputs.play-track }} |"
+            echo "| Environment | ${{ inputs.release-environment }} |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Google Play upload | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

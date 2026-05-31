@@ -174,6 +174,10 @@ jobs:
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
+      - name: Announce version job
+        run: |
+          echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -192,6 +196,19 @@ jobs:
           tag: ${{ steps.semver.outputs.version }}
           sha: ${{ github.sha }}
 
+      - name: Write version job summary
+        if: always()
+        run: |
+          {
+            echo "## 🏷️ Version Job"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Computed version | \`${{ steps.semver.outputs.version }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
     runs-on: ubuntu-latest
     needs: version
@@ -201,6 +218,13 @@ jobs:
       chart-source: ${{ steps.detect-chart.outputs.chart-source }}
       chart-path-for-deployment: ${{ steps.detect-chart.outputs.chart-path-for-deployment }}
     steps:
+      - name: Announce build job
+        run: |
+          echo "::notice title=🐳 [DOCKER] Build — Job Started::Chart: ${{ inputs.chart-name }} | Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -208,6 +232,7 @@ jobs:
         id: detect-chart
         shell: bash
         run: |
+          echo "::group::🐳 [CHECKPOINT 1/3] Detect chart source"
           CHART_PATH="${{ inputs.chart-path }}"
           
           # Check if chart-path starts with http:// or https://
@@ -221,6 +246,9 @@ jobs:
             echo "chart-path-for-deployment=$CHART_PATH" >> "$GITHUB_OUTPUT"
             echo "Local chart detected: $CHART_PATH"
           fi
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Chart source detected — PASSED"
+          echo "::endgroup::"
 
       - name: Build and push Docker image
         id: docker
@@ -234,6 +262,11 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
+
+      - name: Confirm Docker image built
+        run: |
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Docker image built and pushed — PASSED"
 
       - name: Pull and repackage external chart
         if: steps.detect-chart.outputs.chart-source == 'external'
@@ -326,12 +359,51 @@ jobs:
           
           echo "Local chart prepared for artifact deployment"
 
+      - name: Confirm chart artifact ready
+        run: |
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] Chart artifact ready — PASSED: ${{ inputs.chart-name }}@${{ needs.version.outputs.version }}"
+
+      - name: Report build failure
+        if: failure()
+        run: |
+          echo "::error title=🐳 [DOCKER] Build Job Failed::Chart: ${{ inputs.chart-name }} | Version: ${{ needs.version.outputs.version }}"
+          echo "  Checkpoint 1 — Chart source detect: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Docker build:        ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — Chart artifact:      ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+
+      - name: Write build job summary
+        if: always()
+        run: |
+          {
+            echo "## 🐳 Build Job — ${{ inputs.chart-name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Registry | \`${{ inputs.container-registry }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Chart source detected | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Docker image built | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | Chart artifact ready | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy-development:
     runs-on: ubuntu-latest
     needs: [version, build]
     if: inputs.deploy-to-development && github.ref_name == 'development'
     environment: development  # linter: ignore (scalar form is valid for GitHub Actions)
     steps:
+      - name: Announce deploy-development job
+        run: |
+          echo "::notice title=☸️ [HELM] Deploy to Development — Job Started::Chart: ${{ inputs.chart-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.development-namespace }} | Triggered by: ${{ github.actor }}"
+
       - name: Download chart artifact
         uses: actions/download-artifact@v8
         with:
@@ -357,12 +429,30 @@ jobs:
             image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.development-helm-set-values && format(',{0}', inputs.development-helm-set-values) || '' }}
           timeout: '5m'
 
+      - name: Write deploy-development job summary
+        if: always()
+        run: |
+          {
+            echo "## ☸️ Deploy to Development — ${{ inputs.chart-name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Chart | \`${{ inputs.chart-name }}\` |"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Namespace | \`${{ inputs.development-namespace }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy-staging:
     runs-on: ubuntu-latest
     needs: [version, build]
     if: inputs.deploy-to-staging && github.ref_name == 'staging'
     environment: staging  # linter: ignore (scalar form is valid for GitHub Actions)
     steps:
+      - name: Announce deploy-staging job
+        run: |
+          echo "::notice title=☸️ [HELM] Deploy to Staging — Job Started::Chart: ${{ inputs.chart-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.staging-namespace }} | Triggered by: ${{ github.actor }}"
+
       - name: Download chart artifact
         uses: actions/download-artifact@v8
         with:
@@ -388,12 +478,30 @@ jobs:
             image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.staging-helm-set-values && format(',{0}', inputs.staging-helm-set-values) || '' }}
           timeout: '5m'
 
+      - name: Write deploy-staging job summary
+        if: always()
+        run: |
+          {
+            echo "## ☸️ Deploy to Staging — ${{ inputs.chart-name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Chart | \`${{ inputs.chart-name }}\` |"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Namespace | \`${{ inputs.staging-namespace }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy-production:
     runs-on: ubuntu-latest
     needs: [version, build]
     if: inputs.deploy-to-production && (github.ref_name == 'main' || github.ref_name == 'master')
     environment: production  # linter: ignore (scalar form is valid for GitHub Actions)
     steps:
+      - name: Announce deploy-production job
+        run: |
+          echo "::notice title=☸️ [HELM] Deploy to Production — Job Started::Chart: ${{ inputs.chart-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.production-namespace }} | Triggered by: ${{ github.actor }}"
+
       - name: Download chart artifact
         uses: actions/download-artifact@v8
         with:
@@ -418,3 +526,17 @@ jobs:
             image.overrideName=${{ inputs.helm-app-name || inputs.chart-name }},
             image.overrideVersion=${{ needs.version.outputs.version }}${{ inputs.production-helm-set-values && format(',{0}', inputs.production-helm-set-values) || '' }}
           timeout: '5m'
+
+      - name: Write deploy-production job summary
+        if: always()
+        run: |
+          {
+            echo "## ☸️ Deploy to Production — ${{ inputs.chart-name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Chart | \`${{ inputs.chart-name }}\` |"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Namespace | \`${{ inputs.production-namespace }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -119,11 +119,17 @@ jobs:
     outputs:
       version: ${{ steps.compute.outputs.version }}
     steps:
+      - name: Announce version job
+        run: |
+          echo "::notice title=🏷️ [VERSION] Chart Semver — Job Started::Prefix: ${{ inputs.version-prefix }} | Run: ${{ github.run_number }} | Triggered by: ${{ github.actor }}"
+
       - name: Compute chart semantic version from run number
         id: compute
         shell: bash
         run: |
           set -euo pipefail
+          echo "::group::🏷️ [CHECKPOINT 1/1] Compute chart version"
+          echo "→ Prefix: ${{ inputs.version-prefix }} | Run number: ${GITHUB_RUN_NUMBER}"
 
           PREFIX="${{ inputs.version-prefix }}"
           if ! [[ "$PREFIX" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -139,11 +145,33 @@ jobs:
           version="${PREFIX}.${patch}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Computed chart version: ${version}"
+          echo "✅ [CHECKPOINT 1/1] Chart version computed: ${version} — PASSED"
+          echo "::endgroup::"
+
+      - name: Write version job summary
+        if: always()
+        run: |
+          {
+            echo "## 🏷️ Chart Version Job"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Computed version | \`${{ steps.compute.outputs.version }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   validate-chart:
     runs-on: ubuntu-latest
     needs: [version]
     steps:
+      - name: Announce validate-chart job
+        run: |
+          echo "::notice title=☸️ [HELM] Chart Validation — Job Started::Chart: ${{ inputs.chart-path }} | Version: ${{ needs.version.outputs.version }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -156,7 +184,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "::group::☸️ [CHECKPOINT 1/3] Helm lint"
+          echo "→ Chart path: ${{ inputs.chart-path }}"
           helm lint "${{ inputs.chart-path }}"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Helm lint — PASSED"
+          echo "::endgroup::"
 
       - name: Validate routing render modes
         if: ${{ inputs.validate-routing }}
@@ -205,6 +238,8 @@ jobs:
           check_mode ingress-only true false --set ingress.enabled=true --set gateway.enabled=false
           check_mode gateway-only false true --set ingress.enabled=false --set gateway.enabled=true
           check_mode dual true true --set ingress.enabled=true --set gateway.enabled=true
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Routing render modes validated — PASSED"
 
       - name: Validate ConfigMap toggle behavior
         if: ${{ inputs.validate-configmap }}
@@ -243,6 +278,8 @@ jobs:
           fi
 
           echo "ConfigMap enabled behavior and merged key rendering are valid."
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] ConfigMap behavior validated — PASSED"
 
   package-and-push:
     runs-on: ubuntu-latest
@@ -252,6 +289,12 @@ jobs:
       chart-package: ${{ steps.package.outputs.chart-package }}
       chart-url: ${{ steps.upload.outputs.chart-url }}
     steps:
+      - name: Announce package-and-push job
+        run: |
+          echo "::notice title=☸️ [HELM] Package & Push — Job Started::Version: ${{ needs.version.outputs.version }} | Target: ${{ inputs.chartmuseum-url }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -294,6 +337,8 @@ jobs:
           echo "chart-package=$PACKAGE_FILE" >> "$GITHUB_OUTPUT"
 
           echo "Packaged ${CHART_NAME} version ${VERSION} at ${PACKAGE_FILE}."
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/2] Chart packaged — PASSED: ${CHART_NAME}@${VERSION}"
 
       - name: Upload chart package(s) to ChartMuseum
         id: upload
@@ -328,12 +373,35 @@ jobs:
           done
 
           echo "chart-url=${CHARTMUSEUM_URL}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/2] Chart uploaded to ChartMuseum — PASSED"
+
+      - name: Report package-and-push failure
+        if: failure()
+        run: |
+          echo "::error title=☸️ [HELM] Package & Push Job Failed::Version: ${{ needs.version.outputs.version }} | Target: ${{ inputs.chartmuseum-url }}"
+          echo "  Checkpoint 1 — Chart packaged:    ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — ChartMuseum upload: ${CHECKPOINT_2_STATUS:-❌ Not reached}"
 
       - name: Workflow summary
         shell: bash
         run: |
-          echo "### Helm Chart Package + Push" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Chart Name: ${{ steps.package.outputs.chart-name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: ${{ needs.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Package: ${{ steps.package.outputs.chart-package }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Upload Endpoint: ${{ steps.upload.outputs.chart-url }}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## ☸️ Helm Chart Package + Push"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Chart Name | \`${{ steps.package.outputs.chart-name }}\` |"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Package | \`${{ steps.package.outputs.chart-package }}\` |"
+            echo "| Upload Endpoint | ${{ steps.upload.outputs.chart-url }} |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Chart packaged | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Chart uploaded | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -306,6 +306,10 @@ jobs:
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
+      - name: Announce version job
+        run: |
+          echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -324,6 +328,19 @@ jobs:
           tag: ${{ steps.semver.outputs.version }}
           sha: ${{ github.sha }}
 
+      - name: Write version job summary
+        if: always()
+        run: |
+          {
+            echo "## 🏷️ Version Job"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Computed version | \`${{ steps.semver.outputs.version }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   nuget:
     runs-on: ubuntu-latest
     outputs:
@@ -333,6 +350,10 @@ jobs:
       NUGET_AUTH_TOKEN: ${{ secrets.nuget-api-key }}
       NUGET_SOURCE: ${{ secrets.nuget-source }}
     steps:
+      - name: Announce nuget job
+        run: |
+          echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Enabled: ${{ inputs.package-nuget }} | Triggered by: ${{ github.actor }}"
+
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
         uses: actions/checkout@v6
@@ -392,12 +413,29 @@ jobs:
         if: ${{ !inputs.package-nuget }}
         run: echo 'NuGet packaging disabled; skipping NuGet job but keeping dependency chain.'
 
+      - name: Write nuget job summary
+        if: always()
+        run: |
+          {
+            echo "## 🔷 NuGet Job"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Enabled | ${{ inputs.package-nuget }} |"
+            echo "| Version | \`${{ steps.nuget-semver.outputs.version }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
     runs-on: ubuntu-latest
     needs: [version, nuget]
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
+      - name: Announce build job
+        run: |
+          echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
+
       - name: Checkout code
         uses: actions/checkout@v6
 
@@ -415,12 +453,35 @@ jobs:
           platforms: ${{ inputs.docker-platforms }}
           build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
 
+      - name: Confirm Docker image built
+        run: |
+          echo "✅ Docker image built and pushed — ${{ needs.version.outputs.version }}"
+
+      - name: Write build job summary
+        if: always()
+        run: |
+          {
+            echo "## 🐳 Build Job"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Registry | \`${{ inputs.container-registry }}\` |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     runs-on: ubuntu-latest
     needs: [version, build]
     outputs:
       helm-chart: ${{ steps.chartmeta.outputs.helm-chart }}
     steps:
+      - name: Announce deploy job
+        run: |
+          echo "::notice title=☸️ [HELM] Gateway Deploy — Job Started::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }} | Routing: ${{ inputs.routing-mode }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Generate routing and config values
         id: routing
         shell: bash
@@ -581,8 +642,8 @@ jobs:
             printf "%s" "$host_list"
             echo
             echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
+          } >> "$GITHUB_OUTPUT"          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/2] Routing values generated — mode: ${mode}"
       - name: Auto-onboard gateway hostnames
         if: ${{ (inputs.routing-mode == 'gateway' || inputs.routing-mode == 'dual') && inputs.gateway-auto-onboarding }}
         shell: bash
@@ -766,6 +827,7 @@ jobs:
               kubectl wait --for=condition=Ready=True "certificate/${cert_name}" -n "$GATEWAY_NAMESPACE" --timeout="${GATEWAY_CERT_WAIT_TIMEOUT}s"
             fi
           done < <(printf "%s" "$HOST_LIST")
+          echo "✅ Gateway hostnames onboarded — PASSED"
 
       - name: Deploy with Helm gateway-first chart
         uses: simplify9/.github/.github/actions/helm-generic@main
@@ -794,8 +856,45 @@ jobs:
           init_job_secret_name: ${{ inputs.init-job-secret-name }}
           environment: ${{ inputs.environment }}
 
+      - name: Confirm Helm deployed
+        run: |
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/2] Helm deploy completed — PASSED: ${{ inputs.app-name }} in ${{ inputs.namespace }}"
+
       - name: Expose chart metadata output
         id: chartmeta
         shell: bash
         run: |
           echo "helm-chart=${{ inputs.chart-repo }}/${{ inputs.chart-name }}" >> "$GITHUB_OUTPUT"
+          echo "✅ Deploy complete — ${{ inputs.app-name }}@${{ needs.version.outputs.version }} in ${{ inputs.namespace }}"
+
+      - name: Report deploy failure
+        if: failure()
+        run: |
+          echo "::error title=☸️ [HELM] Deploy Job Failed::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }}"
+          echo "  Checkpoint 1 — Routing values: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Helm deploy:    ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+
+      - name: Write deploy job summary
+        if: always()
+        run: |
+          {
+            echo "## ☸️ Gateway Deploy — ${{ inputs.app-name }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| App | \`${{ inputs.app-name }}\` |"
+            echo "| Version | \`${{ needs.version.outputs.version }}\` |"
+            echo "| Namespace | \`${{ inputs.namespace }}\` |"
+            echo "| Routing mode | ${{ inputs.routing-mode }} |"
+            echo "| Chart | ${{ inputs.chart-name }} |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Routing values generated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Helm deployment | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"

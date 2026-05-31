@@ -265,6 +265,13 @@ jobs:
       ipa-file: ${{ steps.rename_ipa.outputs.ipa_file }}
 
     steps:
+      - name: Announce build job
+        run: |
+          echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${{ inputs.workspace }} | Scheme: ${{ inputs.scheme }} | Versioning: ${{ inputs.versioning-strategy }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -610,6 +617,11 @@ jobs:
           p12Base64: ${{ secrets.ios-p12-base64 }}
           p12Password: ${{ secrets.ios-p12-password }}
 
+      - name: Confirm signing cert installed
+        run: |
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Signing certificate installed — PASSED"
+
       - name: Install provisioning profile
         id: install_profile
         uses: simplify9/.github/.github/actions/ios-install-profile@main
@@ -717,6 +729,8 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
             -verbose -showBuildTimingSummary
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
 
       - name: Generate exportOptions.plist
         if: ${{ inputs.generate-export-options }}
@@ -801,12 +815,46 @@ jobs:
 
           echo "ipa_file=${IPA_OUT}" >> "$GITHUB_OUTPUT"
           echo "IPA_FILE=${IPA_OUT}" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] IPA renamed — PASSED: ${IPA_OUT}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename_ipa.outputs.ipa_file }}
+
+      - name: Report build failure
+        if: failure()
+        run: |
+          echo "::error title=🍎 [IOS] Build Job Failed::Workspace: ${{ inputs.workspace }} | Scheme: ${{ inputs.scheme }}"
+          echo "  Checkpoint 1 — Signing cert installed: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — IPA renamed:           ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+
+      - name: Write build job summary
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "## 🍎 iOS Build Checkpoint Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Workspace | \`${{ inputs.workspace }}\` |"
+            echo "| Scheme | \`${{ inputs.scheme }}\` |"
+            echo "| Versioning | ${{ inputs.versioning-strategy }} |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Signing cert installed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Archive created | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | IPA renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Upload to TestFlight
@@ -815,6 +863,10 @@ jobs:
     if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
 
     steps:
+      - name: Announce release job
+        run: |
+          echo "::notice title=🍎 [IOS] Upload to TestFlight — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
         shell: bash
@@ -1002,6 +1054,10 @@ jobs:
     environment: ${{ inputs.release-environment }}
 
     steps:
+      - name: Announce release-with-environment job
+        run: |
+          echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Env: ${{ inputs.release-environment }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
         shell: bash
