@@ -211,7 +211,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ⚡ Next.js → Cloudflare Workers Deploy — ${{ inputs.project_name }}"
+            echo "## ⚡ Next.js → Cloudflare Workers Deploy — ${{ inputs.project_name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

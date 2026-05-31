@@ -182,7 +182,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🐳 Docker Build — ${{ inputs.app_name }}"
+            echo "## 🐳 Docker Build — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

@@ -255,7 +255,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ☸️ Helm Deploy — ${{ inputs.release-name }}"
+            echo "## ☸️ Helm Deploy — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

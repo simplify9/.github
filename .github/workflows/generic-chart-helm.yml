@@ -220,7 +220,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🏷️ Version Job"
+            echo "## 🏷️ Version Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -306,7 +306,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🔷 NuGet Job"
+            echo "## 🔷 NuGet Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -351,7 +351,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🐳 Build Job"
+            echo "## 🐳 Build Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -486,7 +486,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ☸️ Deploy Job — ${{ inputs.app-name }}"
+            echo "## ☸️ Deploy Job — ${{ inputs.app-name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

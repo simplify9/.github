@@ -70,29 +70,6 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [VERSION] Git tag creation failed::Failed to create tag '${{ inputs.tag }}' on ${{ inputs.repository }}. Check the GitHub token has repo write permissions and the SHA is valid. HTTP status is logged above."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🏷️ Tag Commit on GitHub Origin
-
-        | Field | Value |
-        |-------|-------|
-        | Repository | ${{ inputs.repository }} |
-        | Tag | \`${{ inputs.tag }}\` |
-        | Commit SHA | \`${{ inputs.sha }}\` |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Create Git Tag | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        $EOF
 inputs:
   github-token:
     description: 'GitHub token for authentication'

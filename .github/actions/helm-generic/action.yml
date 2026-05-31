@@ -286,29 +286,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## ☸️ Helm Deploy
-
-        | Field | Value |
-        |-------|-------|
-        | App | \`${{ inputs.app_name }}\` |
-        | Chart | \`${{ inputs.chart }}\` |
-        | Namespace | ${{ inputs.namespace }} |
-        | Environment | ${{ inputs.environment }} |
-        | Timeout | ${{ inputs.helm_timeout }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Kubeconfig Configured | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Helm Deploy | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF

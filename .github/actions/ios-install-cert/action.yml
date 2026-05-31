@@ -53,27 +53,6 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [SIGN] Certificate installation failed::Failed to import .p12 into keychain. Check that p12Base64 is valid base64 and p12Password is correct."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🔏 iOS Signing Certificate Install
-
-        | Field | Value |
-        |-------|-------|
-        | Platform | iOS |
-        | Certificate | .p12 (value suppressed) |
-        | Runner | ${{ runner.os }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Install Signing Certificate | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        $EOF
 inputs:
   p12Base64:
     description: Base64-encoded .p12 certificate

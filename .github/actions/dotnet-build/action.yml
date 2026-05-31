@@ -113,32 +113,6 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [DOTNET] Build failed::projects: ${{ inputs.projects }}, config: ${{ inputs.configuration }}. Checkpoints — 1) Restore: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build: ${CHECKPOINT_2_STATUS:-⏭️ Not reached} | 3) Tests: ${CHECKPOINT_3_STATUS:-⏭️ Not reached}."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🔷 .NET Restore and Build
-
-        | Field | Value |
-        |-------|-------|
-        | Projects | ${{ inputs.projects }} |
-        | Configuration | ${{ inputs.configuration }} |
-        | .NET version | ${{ inputs.dotnet-version }} |
-        | Tests enabled | ${{ inputs.run-tests }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Restore Dependencies | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Build | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        | 3 | Tests | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |
-        $EOF
 inputs:
   projects:
     description: 'Project(s) to restore and build (wildcards allowed)'

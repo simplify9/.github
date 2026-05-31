@@ -230,15 +230,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          {
-            echo "## Reusable Workflow Provenance"
-            echo ""
-            echo "- workflow_ref: ${GITHUB_WORKFLOW_REF}"
-            echo "- workflow_sha: ${GITHUB_WORKFLOW_SHA}"
-            echo "- repository: ${GITHUB_REPOSITORY}"
-            echo "- run_id: ${GITHUB_RUN_ID}"
-            echo "- run_attempt: ${GITHUB_RUN_ATTEMPT}"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compute version values
         id: compute
@@ -329,20 +320,6 @@ jobs:
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "## Android Version Computation"
-            echo ""
-            echo "- versionName source: ${VERSION_NAME_SOURCE}"
-            echo "- base version: ${{ inputs.version-prefix }}"
-            echo "- versionName override: ${OVERRIDE_DISPLAY}"
-            echo "- versionName offset: ${NAME_OFFSET}"
-            echo "- versionName increment count: ${INCREMENT_COUNT}"
-            echo "- versionCode offset: ${CODE_OFFSET}"
-            echo "- github.run_number: ${GITHUB_RUN_NUMBER}"
-            echo "- final versionName: ${VERSION_NAME}"
-            echo "- final versionCode: ${VERSION_CODE}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Resolve package manager settings
         id: package_manager
         shell: bash
@@ -421,15 +398,6 @@ jobs:
           echo "default_install_command=${DEFAULT_INSTALL_COMMAND}" >> "$GITHUB_OUTPUT"
           echo "jetifier_install_command=${JETIFIER_INSTALL_COMMAND}" >> "$GITHUB_OUTPUT"
           echo "jetifier_run_command=${JETIFIER_RUN_COMMAND}" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "## Node Package Manager Resolution"
-            echo ""
-            echo "- package manager: ${PACKAGE_MANAGER}"
-            echo "- package directory: ${DISPLAY_DIR}"
-            echo "- cache dependency path: ${CACHE_DEPENDENCY_PATH}"
-            echo "- default install command: ${DEFAULT_INSTALL_COMMAND}"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -580,11 +548,17 @@ jobs:
         if: always()
         run: |
           {
+            echo "## 🤖 Android Build — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
+            echo "| App | \`${{ inputs.app-id }}\` |"
+            echo "| Version | \`${VERSION_NAME:-unknown}\` (code: ${VERSION_CODE:-unknown}) |"
+            echo "| Track | ${{ inputs.play-track }} |"
             echo "| Runner | ${{ runner.os }} |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
             echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
             echo ""
             echo "## 📋 Build Checkpoint Summary"
             echo ""
@@ -684,7 +658,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🤖 Android Release to Google Play"
+            echo "## 🤖 Android Release to Google Play — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -791,7 +765,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🤖 Android Release to Google Play (Environment-Gated)"
+            echo "## 🤖 Android Release to Google Play (Environment-Gated) — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

@@ -223,7 +223,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ⚡ Cloudflare Workers Deploy — ${{ inputs.project_name }}"
+            echo "## ⚡ Cloudflare Workers Deploy — ${{ inputs.project_name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

@@ -392,15 +392,6 @@ jobs:
           echo "cache_dependency_path=${CACHE_DEPENDENCY_PATH}" >> "$GITHUB_OUTPUT"
           echo "default_install_command=${DEFAULT_INSTALL_COMMAND}" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "## Node Package Manager Resolution"
-            echo ""
-            echo "- package manager: ${PACKAGE_MANAGER}"
-            echo "- package directory: ${DISPLAY_DIR}"
-            echo "- cache dependency path: ${CACHE_DEPENDENCY_PATH}"
-            echo "- default install command: ${DEFAULT_INSTALL_COMMAND}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -761,7 +752,8 @@ jobs:
             CODE_SIGN_IDENTITY="${{ inputs.code-sign-identity }}" \
             PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
-            -verbose -showBuildTimingSummary
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            -showBuildTimingSummary
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
 
@@ -869,15 +861,14 @@ jobs:
         if: always()
         run: |
           {
-            echo ""
-            echo "## 🍎 iOS Build Checkpoint Summary"
+            echo "## 🍎 iOS Build — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
             echo "| Workspace | \`${{ inputs.workspace }}\` |"
             echo "| Scheme | \`${{ inputs.scheme }}\` |"
             echo "| Versioning | ${{ inputs.versioning-strategy }} |"
-            echo "| Runner | ${{ inputs.macos-runner }} |"
+            echo "| Runner | ${{ runner.os }} (${{ inputs.macos-runner }}) |"
             echo "| Xcode | ${{ inputs.xcode-version }} |"
             echo "| Node.js | ${{ inputs.node-version }} |"
             echo "| Branch | \`${{ github.ref_name }}\` |"

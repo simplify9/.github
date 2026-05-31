@@ -143,27 +143,3 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [CF-PAGES] Domain setup failed::project: ${{ inputs.project-name }}, domain: ${{ inputs.domain-name }}. Checkpoints — 1) Domain check: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Domain configured: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
-
-    - name: Write action summary
-      if: always()
-      shell: bash
-      run: |
-        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🌐 Cloudflare Pages — Custom Domain Setup
-
-        | Field | Value |
-        |-------|-------|
-        | Project | ${{ inputs.project-name }} |
-        | Domain | ${{ inputs.domain-name }} |
-        | Fail on error | ${{ inputs.fail-on-error }} |
-        | Runner | ${{ runner.os }} |
-        | Triggered by | ${{ github.actor }} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Domain Check | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-        | 2 | Domain Configured | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
-        $EOF

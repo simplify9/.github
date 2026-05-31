@@ -200,7 +200,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🏷️ Version Job"
+            echo "## 🏷️ Version Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -377,7 +377,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🐳 Build Job — ${{ inputs.chart-name }}"
+            echo "## 🐳 Build Job — ${{ inputs.chart-name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -435,7 +435,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ☸️ Deploy to Development — ${{ inputs.chart-name }}"
+            echo "## ☸️ Deploy to Development — ${{ inputs.chart-name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -485,7 +485,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ☸️ Deploy to Staging — ${{ inputs.chart-name }}"
+            echo "## ☸️ Deploy to Staging — ${{ inputs.chart-name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -535,7 +535,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## ☸️ Deploy to Production — ${{ inputs.chart-name }}"
+            echo "## ☸️ Deploy to Production — ${{ inputs.chart-name }} — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

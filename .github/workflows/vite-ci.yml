@@ -248,7 +248,7 @@ jobs:
           CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
         run: |
           {
-            echo "## 🌐 [CF-PAGES] Vite CI/CD — Deploy"
+            echo "## 🌐 [CF-PAGES] Vite CI/CD — Deploy — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"

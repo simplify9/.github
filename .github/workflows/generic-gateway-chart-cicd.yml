@@ -152,7 +152,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 🏷️ Chart Version Job"
+            echo "## 🏷️ Chart Version Job — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -385,10 +385,11 @@ jobs:
           echo "  Checkpoint 2 — ChartMuseum upload: ${CHECKPOINT_2_STATUS:-❌ Not reached}"
 
       - name: Workflow summary
+        if: always()
         shell: bash
         run: |
           {
-            echo "## ☸️ Helm Chart Package + Push"
+            echo "## ☸️ Helm Chart Package + Push — $( [ '${{ job.status }}' = 'success' ] && echo '✅ SUCCESS' || echo '❌ FAILED' )"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
