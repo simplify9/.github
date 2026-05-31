@@ -3,8 +3,16 @@ description: 'Reusable action to pack .NET project(s) and push the resulting NuG
 runs:
   using: "composite"
   steps:
+    - name: Announce NuGet pack and push
+      shell: bash
+      run: |
+        echo "::notice title=🔷 [DOTNET] Pack and Push NuGet::projects: ${{ inputs.projects }}, version: ${{ inputs.version != '' && inputs.version || 'from project' }}, feed: ${{ inputs.nuget-source }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Pack NuGet packages
       run: |
+        echo "::group::🔷 [CHECKPOINT 1/2] Pack NuGet Packages"
         # Create output directory
         mkdir -p ./nupkg
         
@@ -75,9 +83,13 @@ runs:
           echo "Error: No projects were successfully packed!"
           exit 1
         fi
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [DOTNET] NuGet packages packed::$packed_count package(s) ready"
+        echo "::endgroup::"
       shell: bash
     - name: Push NuGet packages
       run: |
+        echo "::group::🔷 [CHECKPOINT 2/2] Push NuGet Packages"
         echo "::add-mask::${{ inputs.api-key }}"
 
         # Validate required inputs
@@ -133,7 +145,41 @@ runs:
         fi
         
         echo "All packages pushed successfully!"
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [DOTNET] NuGet packages pushed::$pushed_count package(s) → ${{ inputs.nuget-source }}"
+        echo "::endgroup::"
       shell: bash
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [DOTNET] Pack/push failed::projects: ${{ inputs.projects }}, feed: ${{ inputs.nuget-source }}. Checkpoints — 1) Pack: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Push: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🔷 .NET Pack and Push NuGet
+
+        | Field | Value |
+        |-------|-------|
+        | Projects | ${{ inputs.projects }} |
+        | Configuration | ${{ inputs.configuration }} |
+        | Version | ${{ inputs.version != '' && inputs.version || '(from project)' }} |
+        | NuGet feed | ${{ inputs.nuget-source }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Pack NuGet Packages | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Push to Feed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF
+
 inputs:
   projects:
     description: 'Path(s) to .csproj file(s) to pack (supports wildcards and multiple projects)'

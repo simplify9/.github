@@ -99,6 +99,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Announce Helm deployment
+      shell: bash
+      run: |
+        echo "::notice title=☸️ [HELM] Deploy Chart::Release: ${{ inputs.release-name }}, chart: ${{ inputs.chart-name }}:${{ inputs.chart-version }}, namespace: ${{ inputs.namespace }}, source: ${{ inputs.chart-source-type }}"
+        echo "🌍 [HELM] Target namespace: ${{ inputs.namespace }}, wait: ${{ inputs.wait }}, timeout: ${{ inputs.timeout }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Set up Helm
       uses: azure/setup-helm@v5
       with:
@@ -112,6 +120,7 @@ runs:
     - name: Configure Kubernetes context
       shell: bash
       run: |
+        echo "::group::☸️ [CHECKPOINT 1/2] Configure Kubernetes Context"
         echo "Configuring Kubernetes context..."
         mkdir -p ~/.kube
         echo "${{ inputs.kubeconfig }}" | base64 -d > ~/.kube/config
@@ -122,6 +131,9 @@ runs:
         
         echo "Cluster info:"
         kubectl cluster-info
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Kubernetes context configured::namespace: ${{ inputs.namespace }}"
+        echo "::endgroup::"
 
     - name: Create namespace
       if: inputs.create-namespace == 'true'
@@ -294,6 +306,8 @@ runs:
         "${HELM_ARGS[@]}"
         
         echo "status=deployed" >> $GITHUB_OUTPUT
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Chart deployed::Release: ${{ inputs.release-name }}, namespace: ${{ inputs.namespace }}"
 
     - name: Verify deployment
       shell: bash
@@ -311,32 +325,33 @@ runs:
         
         echo "Deployment verification completed!"
 
-    - name: Output deployment information
+    - name: Report failure
+      if: failure()
       shell: bash
       run: |
-        echo "### 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Release:** ${{ inputs.release-name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Namespace:** ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart:** ${{ inputs.chart-name }}:${{ inputs.chart-version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart Source Type:** ${{ inputs.chart-source-type }}" >> $GITHUB_STEP_SUMMARY
-        if [ "${{ inputs.chart-source-type }}" = "oci" ]; then
-          echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "- **Chart Repository URL:** ${{ inputs.chart-repo-url }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        if [ -n "${{ inputs.image-repository }}" ] && [ -n "${{ inputs.image-tag }}" ]; then
-          echo "- **Image:** ${{ inputs.image-repository }}:${{ inputs.image-tag }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Management Commands:**" >> $GITHUB_STEP_SUMMARY
-        echo '```bash' >> $GITHUB_STEP_SUMMARY
-        echo "# Check status" >> $GITHUB_STEP_SUMMARY
-        echo "helm status ${{ inputs.release-name }} -n ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# View pods" >> $GITHUB_STEP_SUMMARY
-        echo "kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/instance=${{ inputs.release-name }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "# Rollback if needed" >> $GITHUB_STEP_SUMMARY
-        echo "helm rollback ${{ inputs.release-name }} -n ${{ inputs.namespace }}" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "::error title=❌ [HELM] Deploy failed::Release '${{ inputs.release-name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) K8s context: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart source (${{ inputs.chart-source-type }}), image tag, and resource quotas."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## ☸️ Helm Deploy to Kubernetes
+
+        | Field | Value |
+        |-------|-------|
+        | Release | \`${{ inputs.release-name }}\` |
+        | Chart | \`${{ inputs.chart-name }}:${{ inputs.chart-version }}\` |
+        | Namespace | ${{ inputs.namespace }} |
+        | Source type | ${{ inputs.chart-source-type }} |
+        | Timeout | ${{ inputs.timeout }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Kubernetes Context | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Helm Chart Deployed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

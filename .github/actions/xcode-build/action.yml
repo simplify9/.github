@@ -58,9 +58,17 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Announce Xcode build
+      shell: bash
+      run: |
+        echo "::notice title=🍎 [IOS] Build and Archive::scheme: ${{ inputs.scheme }}, config: ${{ inputs.configuration }}, signing: ${{ inputs.signingStyle }}"
+        echo "🔨 [IOS] Workspace: ${{ inputs.workspace }}, archive: ${{ inputs.archivePath }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Build and archive
       shell: bash
       run: |
+        echo "::group::🍎 [CHECKPOINT 1/1] Build and Archive"
         set -euo pipefail
 
         ARGS=(
@@ -129,3 +137,35 @@ runs:
           echo "WARN: xcpretty not found; falling back to raw xcodebuild output"
           xcodebuild "${ARGS[@]}"
         fi
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [IOS] Archive created::${{ inputs.archivePath }}"
+        echo "::endgroup::"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [IOS] Build failed::scheme: ${{ inputs.scheme }}, config: ${{ inputs.configuration }}, signing: ${{ inputs.signingStyle }}. Checkpoints — 1) Archive: ${CHECKPOINT_1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🍎 Xcode Build and Archive
+
+        | Field | Value |
+        |-------|-------|
+        | Scheme | ${{ inputs.scheme }} |
+        | Configuration | ${{ inputs.configuration }} |
+        | Signing style | ${{ inputs.signingStyle }} |
+        | Archive path | ${{ inputs.archivePath }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Build and Archive | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF

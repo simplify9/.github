@@ -213,6 +213,7 @@ def main() -> int:
     service = build("androidpublisher", "v3", credentials=creds, cache_discovery=False)
 
     try:
+        print("::group::🤖 [CHECKPOINT 2/2] Upload Bundle to Google Play")
         # 1) Create edit
         edit = execute_request(
             service.edits().insert(body={}, packageName=package_name),
@@ -271,14 +272,36 @@ def main() -> int:
             num_retries=api_retries,
         )
         print("[Play] Committed edit. Done.")
+        print("::endgroup::")
+        print(f"::notice title=\u2705 [ANDROID] Upload complete::Package: {package_name}, track: {track}, versionCode: {version_code}, AAB: {aab_path.name}")
+
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            with open(summary_path, "a", encoding="utf-8") as f:
+                f.write("## \U0001f916 Google Play Release Upload\n\n")
+                f.write("| Field | Value |\n|-------|-------|\n")
+                f.write(f"| Package | `{package_name}` |\n")
+                f.write(f"| Track | {track} |\n")
+                f.write(f"| AAB | {aab_path.name} |\n")
+                f.write(f"| Version code | {version_code} |\n")
+                f.write(f"| Triggered by | {os.environ.get('GITHUB_ACTOR', 'unknown')} |\n")
+                f.write("\n## \U0001f4cb Checkpoint Summary\n\n")
+                f.write("| # | Checkpoint | Status |\n|---|------------|--------|\n")
+                f.write("| 1 | Credentials Validated | \u2705 PASSED |\n")
+                f.write("| 2 | Bundle Uploaded | \u2705 PASSED |\n")
+
         return 0
 
     except HttpError as exc:
         status_code = getattr(exc.resp, "status", "unknown")
         details = getattr(exc, "content", b"")
         details_text = details.decode("utf-8", errors="replace") if details else str(exc)
+        print(f"::endgroup::")
+        print(f"::error title=\u274c [ANDROID] Upload failed::HTTP {status_code}: {details_text[:200]}")
         raise SystemExit(f"[Play] HTTP {status_code} error: {details_text}") from exc
     except Exception as exc:
+        print(f"::endgroup::")
+        print(f"::error title=\u274c [ANDROID] Upload failed::{exc.__class__.__name__}: {str(exc)[:200]}")
         raise SystemExit(f"[Play] Upload failed: {exc}") from exc
 
 

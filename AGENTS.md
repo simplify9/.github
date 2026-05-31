@@ -119,6 +119,94 @@ All Docker and Helm versioning flows through `actions/determine-semver`:
 - Outputs `version` (e.g., `1.4.7`) — no `v` prefix
 - The `tag-github-origin` action then creates the tag after a successful deployment
 
+### Log Output Standards
+
+Every composite action **must** follow the 4-pillar log output framework. This applies to all new actions and any modification to existing ones.
+
+**4 Pillars:**
+1. **Meaningful and context-aware** — emit a `::notice::` announcement on the first step with key input values
+2. **Checkpoint-driven** — wrap each critical operation in `::group::`/`::endgroup::`, track status in `CHECKPOINT_N_STATUS` env vars
+3. **Systematically consistent** — use the canonical emoji/tag vocabulary below
+4. **Summarised** — last step (`if: always()`) writes a structured table to `$GITHUB_STEP_SUMMARY`
+
+**Canonical emoji/tag vocabulary:**
+
+| Domain | Tag | Emoji |
+|--------|-----|-------|
+| Docker | `[DOCKER]` | 🐳 |
+| Helm / Kubernetes | `[HELM]` | ☸️ |
+| .NET / NuGet | `[DOTNET]` | 🔷 |
+| Cloudflare Pages | `[CF-PAGES]` | 🌐 |
+| Cloudflare Workers | `[CF-WORKERS]` | ⚡ |
+| iOS | `[IOS]` | 🍎 |
+| Android | `[ANDROID]` | 🤖 |
+| Versioning / Tagging | `[VERSION]` | 🏷️ |
+| Code Signing | `[SIGN]` | 🔏 |
+
+**Step template for a composite action:**
+
+```yaml
+steps:
+  # 1. Announce (first step — always runs)
+  - name: Announce <action>
+    shell: bash
+    run: |
+      echo "::notice title=🏷️ [DOMAIN] Action Name::key: ${{ inputs.key }}"
+      echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+      echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
+  # 2. Existing work step — wrap with group, set status at end
+  - name: Do the work
+    shell: bash
+    run: |
+      echo "::group::🏷️ [CHECKPOINT 1/2] Step Name"
+      # ... existing commands ...
+      echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+      echo "::endgroup::"
+
+  # 3. For uses: steps — add a confirm step immediately after
+  - uses: some/action@v1
+  - name: Confirm step complete
+    shell: bash
+    run: |
+      echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+  # 4. Failure report (before summary)
+  - name: Report failure
+    if: failure()
+    shell: bash
+    run: |
+      echo "::error title=❌ [DOMAIN] Action failed::context. Checkpoints — 1) Name: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Name: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+
+  # 5. Summary (always last, always runs)
+  - name: Write action summary
+    if: always()
+    shell: bash
+    run: |
+      EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+      cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+      ## 🏷️ Action Title
+
+      | Field | Value |
+      |-------|-------|
+      | Key input | ${{ inputs.key }} |
+      | Triggered by | ${{ github.actor }} |
+
+      ## 📋 Checkpoint Summary
+
+      | # | Checkpoint | Status |
+      |---|------------|--------|
+      | 1 | Step One | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+      | 2 | Step Two | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+      $EOF
+```
+
+**Rules:**
+- Use `EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)` for the heredoc delimiter — never a fixed string like `EOF` which can collide with step output
+- `CHECKPOINT_N_STATUS` defaults to `⏭️ Skipped` (not `⏳ Pending`) when the step is always skipped (e.g. optional `if:` steps that never run in most call sites)
+- For Docker actions (`entrypoint.sh` / Python scripts), emit `::group::`, `::notice::`, and `::error::` via `echo` / `print()` and write the summary by appending to `$GITHUB_STEP_SUMMARY`
+- Do not add checkpoints for trivial one-liner steps (masking, `mkdir`, `chmod`) — only for operations that can meaningfully fail independently
+
 ---
 
 ## Deployment Infrastructure

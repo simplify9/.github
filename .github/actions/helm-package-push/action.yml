@@ -77,6 +77,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Announce chart package and push
+      shell: bash
+      run: |
+        echo "::notice title=☸️ [HELM] Package and Push Chart::chart: ${{ inputs.chart-name }}:${{ inputs.version }}, source: ${{ inputs.chart-path }}, publish: ${{ inputs.publish-method }}"
+        echo "📦 [HELM] Destination: ${{ inputs.package-destination }}, update Chart.yaml: ${{ inputs.update-chart-yaml }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Set up Helm
       uses: azure/setup-helm@v5
       with:
@@ -135,6 +143,7 @@ runs:
       id: package
       shell: bash
       run: |
+        echo "::group::☸️ [CHECKPOINT 1/2] Package Helm Chart"
         echo "Packaging Helm chart from ${{ inputs.chart-path }}"
         if [ "${{ inputs.update-dependencies }}" = "true" ]; then
           echo "Running helm package with dependency update enabled"
@@ -148,6 +157,9 @@ runs:
         
         echo "Packaged chart: ${PACKAGE_FILE}"
         ls -la ${{ inputs.package-destination }}/
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Chart packaged::${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
+        echo "::endgroup::"
 
     - name: Validate publish configuration
       shell: bash
@@ -208,6 +220,8 @@ runs:
         helm push "${PACKAGE_FILE}" "${CHART_URL}"
         
         echo "chart-url=${CHART_URL}/${{ inputs.chart-name }}:${{ inputs.version }}" >> $GITHUB_OUTPUT
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Chart pushed (OCI)::${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.registry }}"
 
     - name: Push Helm chart to ChartMuseum
       if: inputs.publish-method == 'chartmuseum'
@@ -235,31 +249,34 @@ runs:
         done
 
         echo "chart-url=${CHARTMUSEUM_URL%/}" >> $GITHUB_OUTPUT
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Chart pushed (ChartMuseum)::${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.chartmuseum-url }}"
 
-    - name: Output chart information
+    - name: Report failure
+      if: failure()
       shell: bash
       run: |
-        PUBLISH_METHOD="${{ inputs.publish-method }}"
-        PUBLISHED_CHART_URL="${{ steps.push_oci.outputs.chart-url || steps.push_chartmuseum.outputs.chart-url }}"
+        echo "::error title=❌ [HELM] Package/push failed::Chart '${{ inputs.chart-name }}:${{ inputs.version }}'. Checkpoints — 1) Packaged: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Pushed: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
 
-        echo "### ⚙️ Helm Chart Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart Name:** ${{ inputs.chart-name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Publish Method:** ${PUBLISH_METHOD}" >> $GITHUB_STEP_SUMMARY
-        if [ "$PUBLISH_METHOD" = "oci" ]; then
-          echo "- **Registry:** ${{ inputs.registry }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository:** ${{ inputs.repository }}" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "- **ChartMuseum URL:** ${{ inputs.chartmuseum-url }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "- **Package:** ${{ steps.package.outputs.package-path }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart URL:** ${PUBLISHED_CHART_URL}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Installation Command:**" >> $GITHUB_STEP_SUMMARY
-        echo '```bash' >> $GITHUB_STEP_SUMMARY
-        if [ "$PUBLISH_METHOD" = "oci" ]; then
-          echo "helm install my-release ${PUBLISHED_CHART_URL}" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "helm install my-release ${{ inputs.chart-name }} --repo ${{ inputs.chartmuseum-url }} --version ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo '```' >> $GITHUB_STEP_SUMMARY
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## ☸️ Helm Chart Package and Push
+
+        | Field | Value |
+        |-------|-------|
+        | Chart | \`${{ inputs.chart-name }}:${{ inputs.version }}\` |
+        | Source | ${{ inputs.chart-path }} |
+        | Publish method | ${{ inputs.publish-method }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Chart Packaged | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Chart Pushed | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        $EOF

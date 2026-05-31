@@ -7,8 +7,15 @@ runs:
       shell: bash
       run: echo "::add-mask::${{ inputs.github-token }}"
 
+    - name: Announce tag creation
+      shell: bash
+      run: |
+        echo "::notice title=🏷️ [VERSION] Create Git Tag::Creating tag '${{ inputs.tag }}' on ${{ inputs.repository }} @ ${{ inputs.sha }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Tag new version on GitHub origin
       run: |
+        echo "::group::🏷️ [CHECKPOINT 1/1] Create Git Tag"
         # Validate inputs
         if [ -z "${{ inputs.github-token }}" ]; then
           echo "Error: GitHub token is required"
@@ -47,12 +54,44 @@ runs:
         if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
           echo "✅ Successfully created tag '${{ inputs.tag }}'"
           echo "Response: $response_body"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "::notice title=✅ [VERSION] Tag created::Tag '${{ inputs.tag }}' on ${{ inputs.repository }}"
         else
           echo "❌ Failed to create tag. HTTP Status: $http_code"
           echo "Response: $response_body"
+          echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
           exit 1
         fi
+        echo "::endgroup::"
       shell: bash
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [CHECKPOINT 1/1] FAILED — Create Git Tag::Failed to create tag '${{ inputs.tag }}' on ${{ inputs.repository }}. Check the GitHub token has repo write permissions and the SHA is valid. HTTP status is logged above."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🏷️ Tag Commit on GitHub Origin
+
+        | Field | Value |
+        |-------|-------|
+        | Repository | ${{ inputs.repository }} |
+        | Tag | \`${{ inputs.tag }}\` |
+        | Commit SHA | \`${{ inputs.sha }}\` |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Create Git Tag | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF
 inputs:
   github-token:
     description: 'GitHub token for authentication'

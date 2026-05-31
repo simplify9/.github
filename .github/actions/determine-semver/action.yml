@@ -3,9 +3,17 @@ description: 'Reusable action to compute semantic version from major/minor and l
 runs:
   using: "composite"
   steps:
+    - name: Announce version computation
+      shell: bash
+      run: |
+        echo "::notice title=🏷️ [VERSION] Determine Semantic Version::Computing next version — major: ${{ inputs.major }}, minor: ${{ inputs.minor }}, actor: ${{ github.actor }}"
+        echo "📋 [VERSION] Scanning git tags for pattern: ${{ inputs.major }}.${{ inputs.minor }}.*"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     - name: Determine semantic version
       id: semver
       run: |
+        echo "::group::🔍 [CHECKPOINT 1/1] Compute Semantic Version"
         # Validate inputs
         major=${{ inputs.major }}
         minor=${{ inputs.minor }}
@@ -63,7 +71,39 @@ runs:
         version="$major.$minor.$patch"
         echo "Computed next version: $version"
         echo "version=$version" >> $GITHUB_OUTPUT
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [VERSION] Version computed::Next version: ${version}"
+        echo "::endgroup::"
       shell: bash
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [CHECKPOINT 1/1] FAILED — Compute Semantic Version::Version computation failed for ${{ inputs.major }}.${{ inputs.minor }}.x. Check that major/minor are valid integers and git tags are accessible."
+        echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🏷️ Determine Semantic Version
+
+        | Field | Value |
+        |-------|-------|
+        | Major | ${{ inputs.major }} |
+        | Minor | ${{ inputs.minor }} |
+        | Computed version | ${{ steps.semver.outputs.version }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Compute Semantic Version | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        $EOF
 inputs:
   major:
     description: 'Major version number'

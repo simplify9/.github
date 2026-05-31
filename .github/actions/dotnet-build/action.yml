@@ -3,12 +3,21 @@ description: 'Reusable action to restore, build, and optionally test .NET projec
 runs:
   using: "composite"
   steps:
+    - name: Announce .NET build
+      shell: bash
+      run: |
+        echo "::notice title=🔷 [DOTNET] Restore and Build::projects: ${{ inputs.projects }}, config: ${{ inputs.configuration }}, dotnet: ${{ inputs.dotnet-version }}, tests: ${{ inputs.run-tests }}"
+        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "CHECKPOINT_3_STATUS=⏭️ Skipped" >> "$GITHUB_ENV"
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
     - name: Restore dependencies
       run: |
+        echo "::group::🔷 [CHECKPOINT 1/3] Restore Dependencies"
         # Check if there's a solution file first
         if ls *.sln 1> /dev/null 2>&1; then
           echo "Found solution file(s), restoring solution..."
@@ -22,9 +31,12 @@ runs:
             dotnet restore ${{ inputs.projects }}
           fi
         fi
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
       shell: bash
     - name: Build
       run: |
+        echo "::group::🔷 [CHECKPOINT 2/3] Build"
         # Check if there's a solution file first
         if ls *.sln 1> /dev/null 2>&1; then
           echo "Found solution file(s), building solution..."
@@ -55,10 +67,13 @@ runs:
             dotnet build ${{ inputs.projects }} --configuration ${{ inputs.configuration }} --no-restore
           fi
         fi
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
       shell: bash
     - name: Test
       if: ${{ inputs.run-tests == 'true' }}
       run: |
+        echo "::group::🔷 [CHECKPOINT 3/3] Run Tests"
         # Handle wildcards in test projects
         if [[ "${{ inputs.test-projects }}" == *"*"* ]]; then
           test_pattern="${{ inputs.test-projects }}"
@@ -89,7 +104,40 @@ runs:
           echo "Running tests for: ${{ inputs.test-projects }}"
           dotnet test ${{ inputs.test-projects }} --no-build --verbosity normal --configuration ${{ inputs.configuration }}
         fi
+        echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
       shell: bash
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [DOTNET] Build failed::projects: ${{ inputs.projects }}, config: ${{ inputs.configuration }}. Checkpoints — 1) Restore: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build: ${CHECKPOINT_2_STATUS:-⏭️ Not reached} | 3) Tests: ${CHECKPOINT_3_STATUS:-⏭️ Not reached}."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      run: |
+        EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🔷 .NET Restore and Build
+
+        | Field | Value |
+        |-------|-------|
+        | Projects | ${{ inputs.projects }} |
+        | Configuration | ${{ inputs.configuration }} |
+        | .NET version | ${{ inputs.dotnet-version }} |
+        | Tests enabled | ${{ inputs.run-tests }} |
+        | Triggered by | ${{ github.actor }} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Restore Dependencies | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
+        | 2 | Build | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+        | 3 | Tests | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |
+        $EOF
 inputs:
   projects:
     description: 'Project(s) to restore and build (wildcards allowed)'
