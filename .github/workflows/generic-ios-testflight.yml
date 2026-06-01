@@ -51,7 +51,7 @@ on:
         description: Use simplify9 xcode-setup composite action (pods + selected Xcode)
         required: false
         type: boolean
-        default: true
+        default: false
       verify-cocoapods:
         description: Run `pod --version` check
         required: false
