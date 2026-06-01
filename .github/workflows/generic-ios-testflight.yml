@@ -350,9 +350,9 @@ jobs:
             yarn)
               DEFAULT_LOCKFILE="yarn.lock"
               if [[ "${PACKAGE_DIR}" == "." ]]; then
-                DEFAULT_INSTALL_COMMAND="yarn"
+                DEFAULT_INSTALL_COMMAND="yarn install --frozen-lockfile"
               else
-                DEFAULT_INSTALL_COMMAND="yarn --cwd '${PACKAGE_DIR}'"
+                DEFAULT_INSTALL_COMMAND="yarn --cwd '${PACKAGE_DIR}' install --frozen-lockfile"
               fi
               ;;
             npm)
@@ -848,6 +848,8 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename_ipa.outputs.ipa_file }}
+          compression-level: 0
+          retention-days: 14
 
       - name: Report build failure
         if: failure()

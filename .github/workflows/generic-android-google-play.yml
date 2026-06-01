@@ -336,11 +336,11 @@ jobs:
             yarn)
               DEFAULT_LOCKFILE="yarn.lock"
               if [[ "${PACKAGE_DIR}" == "." ]]; then
-                DEFAULT_INSTALL_COMMAND="yarn"
+                DEFAULT_INSTALL_COMMAND="yarn install --frozen-lockfile"
                 JETIFIER_INSTALL_COMMAND="yarn add -D jetifier"
                 JETIFIER_RUN_COMMAND="npx jetify"
               else
-                DEFAULT_INSTALL_COMMAND="yarn --cwd '${PACKAGE_DIR}'"
+                DEFAULT_INSTALL_COMMAND="yarn --cwd '${PACKAGE_DIR}' install --frozen-lockfile"
                 JETIFIER_INSTALL_COMMAND="yarn --cwd '${PACKAGE_DIR}' add -D jetifier"
                 JETIFIER_RUN_COMMAND="npx --yes --prefix '${PACKAGE_DIR}' jetify"
               fi
@@ -487,13 +487,13 @@ jobs:
           echo "::group::📦 [ANDROID] Pre-installing NDK versions"
           echo "→ Accepting SDK licenses"
           yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
-          echo "→ Installing NDK 27.1.12297006 and NDK 27.0.12077973"
+          echo "→ Installing NDK 27.1.12297006"
           "${SDKMANAGER}" \
-            "ndk;27.1.12297006" \
-            "ndk;27.0.12077973"
-          echo "✅ NDK versions pre-installed"
+            "ndk;27.1.12297006"
+          echo "✅ NDK version pre-installed"
           echo "::endgroup::"
-
+      
+      # Intentionally pinned to setup-gradle@v5 due to the @v6 policy changes and becoming closed source.
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
@@ -504,15 +504,6 @@ jobs:
             notifications
             wrapper
 
-      - name: Cache Metro transform outputs
-        id: cache-metro
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.metro-cache
-          key: metro-${{ runner.os }}-${{ hashFiles('**/yarn.lock', '**/package-lock.json') }}
-          restore-keys: |
-            metro-${{ runner.os }}-
-
       - name: Build Release Bundle (AAB)
         working-directory: ${{ inputs.build-root-directory }}
         env:
@@ -521,7 +512,6 @@ jobs:
           KEY_ALIAS: ${{ secrets.android-key-alias }}
           KEY_PASSWORD: ${{ secrets.android-key-password }}
           EXTRA_ARGS: ${{ inputs.gradle-extra-arguments }}
-          METRO_CACHE_DIR: ${{ github.workspace }}/.metro-cache
         shell: bash
         run: |
           set -euo pipefail
@@ -580,6 +570,8 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename.outputs.aab_file }}
+          compression-level: 0
+          retention-days: 14
 
       - name: Report build failure
         if: failure()

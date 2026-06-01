@@ -669,7 +669,8 @@ jobs:
             printf "%s" "$host_list"
             echo
             echo "EOF"
-          } >> "$GITHUB_OUTPUT"          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          } >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/2] Routing values generated — mode: ${mode}"
       - name: Auto-onboard gateway hostnames
         if: ${{ (inputs.routing-mode == 'gateway' || inputs.routing-mode == 'dual') && inputs.gateway-auto-onboarding }}
