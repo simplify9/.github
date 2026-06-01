@@ -501,11 +501,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
           echo "::group::📦 [ANDROID] Pre-installing NDK versions"
           echo "→ Accepting SDK licenses"
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
           echo "→ Installing NDK 27.1.12297006 and NDK 27.0.12077973"
-          sdkmanager \
+          "${SDKMANAGER}" \
             "ndk;27.1.12297006" \
             "ndk;27.0.12077973"
           echo "✅ NDK versions pre-installed"
