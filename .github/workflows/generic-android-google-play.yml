@@ -504,15 +504,6 @@ jobs:
             notifications
             wrapper
 
-      - name: Cache Metro transform outputs
-        id: cache-metro
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.metro-cache
-          key: metro-${{ runner.os }}-${{ hashFiles('**/yarn.lock', '**/package-lock.json') }}
-          restore-keys: |
-            metro-${{ runner.os }}-
-
       - name: Build Release Bundle (AAB)
         working-directory: ${{ inputs.build-root-directory }}
         env:
@@ -521,7 +512,6 @@ jobs:
           KEY_ALIAS: ${{ secrets.android-key-alias }}
           KEY_PASSWORD: ${{ secrets.android-key-password }}
           EXTRA_ARGS: ${{ inputs.gradle-extra-arguments }}
-          METRO_CACHE_DIR: ${{ github.workspace }}/.metro-cache
         shell: bash
         run: |
           set -euo pipefail
