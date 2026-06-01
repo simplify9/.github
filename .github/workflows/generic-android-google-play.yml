@@ -210,19 +210,6 @@ jobs:
       aab-file: ${{ steps.rename.outputs.aab_file }}
 
     steps:
-      # ─────────────────────────────────────────────────────────────────────────────
-      # CALLER REPO REQUIREMENT — android/gradle.properties (or build-root-directory)
-      # For Gradle task-output caching to function (turning "1025 tasks EXECUTED" into
-      # "1022 FROM-CACHE"), the caller repo must set these in gradle.properties:
-      #
-      #   org.gradle.caching=true
-      #   org.gradle.parallel=true
-      #   org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
-      #
-      # Without org.gradle.caching=true, setup-gradle still restores the Gradle home
-      # (dependencies, wrapper) from cache, but task-level output reuse will NOT occur.
-      # See CACHING_IMPLEMENTATION.md for the full explanation.
-      # ─────────────────────────────────────────────────────────────────────────────
       - name: Announce build job
         run: |
           echo "::notice title=🤖 [ANDROID] Build AAB — Job Started::App: ${{ inputs.app-id }} | Version prefix: ${{ inputs.version-prefix }} | Track: ${{ inputs.play-track }} | Triggered by: ${{ github.actor }}"
@@ -232,11 +219,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Record workflow provenance
-        shell: bash
-        run: |
-          set -euo pipefail
 
       - name: Compute version values
         id: compute
