@@ -660,7 +660,7 @@ jobs:
 ```
 
 **Notes:**
-- Uses `gradle/actions/setup-gradle@v4` with Gradle home caching enabled (`caches`, `notifications`, `wrapper` directories). Do not use `gradle/gradle-build-action` — that repo is archived. Do not add `cache: gradle` to `actions/setup-java` — it conflicts with `setup-gradle` caching.
+- Uses `gradle/actions/setup-gradle@v5` with Gradle home caching enabled (`caches`, `notifications`, `wrapper` directories). Do not use `gradle/gradle-build-action` — that repo is archived. Do not add `cache: gradle` to `actions/setup-java` — it conflicts with `setup-gradle` caching.
 - **Caller repo requirement for task-output caching:** Add the following to `android/gradle.properties` (or your `build-root-directory`) to enable task-level output reuse (`FROM-CACHE`). Without this, Gradle home caching still works but individual task outputs are not reused:
   ```properties
   org.gradle.caching=true
