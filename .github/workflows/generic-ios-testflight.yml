@@ -496,7 +496,7 @@ jobs:
           restore-keys: |
             pods-dir-${{ runner.os }}-
 
-      - name: Install CocoaPods (deployment mode)
+      - name: Install CocoaPods
         if: ${{ !inputs.clean-reinstall-pods && !inputs.use-simplify9-xcode-setup }}
         shell: bash
         working-directory: ${{ inputs.ios-dir }}
@@ -505,15 +505,15 @@ jobs:
           RUBY_VERSION: ${{ inputs.ruby-version }}
         run: |
           set -euo pipefail
-          echo "::group::📦 [IOS] Installing CocoaPods (deployment mode)"
+          echo "::group::📦 [IOS] Installing CocoaPods"
           if [[ "${USE_BUNDLER}" == "true" && -n "${RUBY_VERSION}" ]]; then
-            echo "→ Running: bundle exec pod install --deployment"
-            bundle exec pod install --deployment
+            echo "→ Running: bundle exec pod install"
+            bundle exec pod install
           else
-            echo "→ Running: pod install --deployment"
-            pod install --deployment
+            echo "→ Running: pod install"
+            pod install
           fi
-          echo "✅ CocoaPods installed (deployment mode)"
+          echo "✅ CocoaPods installed"
           echo "::endgroup::"
 
       - name: Xcode setup (simplify9 action)
