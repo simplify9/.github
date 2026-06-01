@@ -113,6 +113,11 @@ on:
         required: false
         type: string
         default: ""
+      gradle-react-native-architectures:
+        description: "Android ABIs to build. Default arm64-v8a only (production devices). Override for projects needing more."
+        required: false
+        type: string
+        default: arm64-v8a
 
       keystore-output-path:
         description: Where to write decoded keystore
@@ -197,6 +202,8 @@ jobs:
   build:
     name: Build AAB
     runs-on: ${{ inputs.ubuntu-runner }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     outputs:
       version-name: ${{ steps.compute.outputs.version_name }}
       version-code: ${{ steps.compute.outputs.version_code }}
@@ -442,22 +449,67 @@ jobs:
           ls -lah "$(dirname '${{ inputs.keystore-output-path }}')"
           test -f "${{ inputs.keystore-output-path }}"
 
-      # Cache Android NDK and CMake binaries.
-      # Key is intentionally STATIC (version-pinned) — NDK/CMake versions are driven by
-      # native dependencies (e.g. react-native-nitro-modules), not lockfiles. A hash-based
-      # key would invalidate on every package.json change even when native deps are unchanged.
-      # BUMP PROCEDURE: when native dep versions change and require a new NDK/CMake version,
-      # update the version suffix in the key below and in restore-keys accordingly.
-      - name: Cache Android NDK and CMake
-        id: cache-ndk
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/lib/android/sdk/ndk
-            /usr/local/lib/android/sdk/cmake
-          key: android-ndk-cmake-${{ runner.os }}-ndk27.1.12297006-ndk27.0.12077973-cmake3.22.1
-          restore-keys: |
-            android-ndk-cmake-${{ runner.os }}-
+      - name: Normalize Gradle properties (CI performance settings)
+        shell: bash
+        env:
+          GRADLE_PROPS_DIR: ${{ inputs.build-root-directory }}
+          RN_ARCHITECTURES: ${{ inputs.gradle-react-native-architectures }}
+        run: |
+          set -euo pipefail
+          echo "::group::⚙️ [ANDROID] Normalizing Gradle properties for CI"
+
+          PROPS_FILE="${GRADLE_PROPS_DIR}/gradle.properties"
+
+          if [[ ! -f "${PROPS_FILE}" ]]; then
+            echo "→ No existing gradle.properties found; creating one"
+            touch "${PROPS_FILE}"
+          fi
+
+          # upsert_prop KEY VALUE FILE — replace existing line or append
+          upsert_prop() {
+            local key="$1"
+            local value="$2"
+            local file="$3"
+            # Escape characters significant to sed in the key
+            local escaped_key
+            escaped_key="$(printf '%s' "${key}" | sed 's/[.[\*^$/]/\\&/g')"
+            if grep -qE "^${escaped_key}=" "${file}"; then
+              # Replace the whole line; use | as delimiter to avoid clashes with / in values
+              sed -i "s|^${escaped_key}=.*|${key}=${value}|" "${file}"
+              echo "  ✓ replaced: ${key}=${value}"
+            else
+              # Ensure file ends with a newline before appending
+              [[ -s "${file}" && -n "$(tail -c1 "${file}")" ]] && echo "" >> "${file}"
+              echo "${key}=${value}" >> "${file}"
+              echo "  ✓ appended: ${key}=${value}"
+            fi
+          }
+
+          echo "→ Applying CI performance settings to ${PROPS_FILE}"
+          upsert_prop "org.gradle.jvmargs" "-Xmx4g -XX:MaxMetaspaceSize=1g" "${PROPS_FILE}"
+          upsert_prop "org.gradle.caching" "true" "${PROPS_FILE}"
+          upsert_prop "org.gradle.parallel" "true" "${PROPS_FILE}"
+          upsert_prop "reactNativeArchitectures" "${RN_ARCHITECTURES}" "${PROPS_FILE}"
+
+          echo "→ Resulting gradle.properties performance settings:"
+          grep -E "^(org\.gradle\.jvmargs|org\.gradle\.caching|org\.gradle\.parallel|reactNativeArchitectures)=" "${PROPS_FILE}" | sed 's/^/    /'
+
+          echo "✅ Gradle properties normalized"
+          echo "::endgroup::"
+
+      - name: Pre-install Android NDK versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::📦 [ANDROID] Pre-installing NDK versions"
+          echo "→ Accepting SDK licenses"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          echo "→ Installing NDK 27.1.12297006 and NDK 27.0.12077973"
+          sdkmanager \
+            "ndk;27.1.12297006" \
+            "ndk;27.0.12077973"
+          echo "✅ NDK versions pre-installed"
+          echo "::endgroup::"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -469,6 +521,15 @@ jobs:
             notifications
             wrapper
 
+      - name: Cache Metro transform outputs
+        id: cache-metro
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.metro-cache
+          key: metro-${{ runner.os }}-${{ hashFiles('**/yarn.lock', '**/package-lock.json') }}
+          restore-keys: |
+            metro-${{ runner.os }}-
+
       - name: Build Release Bundle (AAB)
         working-directory: ${{ inputs.build-root-directory }}
         env:
@@ -477,6 +538,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.android-key-alias }}
           KEY_PASSWORD: ${{ secrets.android-key-password }}
           EXTRA_ARGS: ${{ inputs.gradle-extra-arguments }}
+          METRO_CACHE_DIR: ${{ github.workspace }}/.metro-cache
         shell: bash
         run: |
           set -euo pipefail
@@ -587,6 +649,8 @@ jobs:
     needs: build
     # Release path without GitHub Environment protection.
     if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Announce release job
@@ -704,6 +768,8 @@ jobs:
     # Release path with GitHub Environment protection/approvals.
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Announce release-with-environment job
