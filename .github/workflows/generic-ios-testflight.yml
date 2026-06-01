@@ -41,7 +41,7 @@ on:
         description: Install react-native-cli globally
         required: false
         type: boolean
-        default: true
+        default: false
       xcode-version:
         description: "Optional Xcode major or major.minor selector (for example: 26 or 16.4)"
         required: false
