@@ -41,7 +41,7 @@ on:
         description: Install react-native-cli globally
         required: false
         type: boolean
-        default: true
+        default: false
       xcode-version:
         description: "Optional Xcode major or major.minor selector (for example: 26 or 16.4)"
         required: false
@@ -51,7 +51,7 @@ on:
         description: Use simplify9 xcode-setup composite action (pods + selected Xcode)
         required: false
         type: boolean
-        default: true
+        default: false
       verify-cocoapods:
         description: Run `pod --version` check
         required: false
@@ -214,6 +214,23 @@ on:
         type: boolean
         default: false
 
+      ruby-version:
+        description: "Ruby version for bundler/CocoaPods setup. Empty disables Ruby setup."
+        required: false
+        type: string
+        default: ""
+      use-bundler:
+        description: "If true and ruby-version set, install gems via bundler (requires a Gemfile)."
+        required: false
+        type: boolean
+        default: false
+
+      enable-ccache:
+        description: "Enable ccache for Objective-C/C++ pod compilation (partial speedup; no Swift benefit)."
+        required: false
+        type: boolean
+        default: false
+
     secrets:
       ios-p12-base64:
         description: Base64 encoded signing certificate (.p12)
@@ -274,6 +291,41 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Setup Ruby (optional)
+        if: ${{ inputs.ruby-version != '' }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ inputs.ruby-version }}
+          bundler-cache: ${{ inputs.use-bundler }}
+
+      - name: Install ccache (optional)
+        if: ${{ inputs.enable-ccache }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            brew install ccache
+          fi
+          ccache --version
+
+      - name: Cache ccache directory (optional)
+        if: ${{ inputs.enable-ccache }}
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-ios-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          restore-keys: |
+            ccache-ios-${{ runner.os }}-
+
+      - name: Configure ccache (optional)
+        if: ${{ inputs.enable-ccache }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          echo "CCACHE_DIR=$HOME/Library/Caches/ccache" >> "$GITHUB_ENV"
 
       - name: Initialize runtime paths
         shell: bash
@@ -408,38 +460,61 @@ jobs:
         shell: bash
         run: npm install -g react-native-cli
 
-      # Cache CocoaPods dependencies.
+      # CocoaPods caching — split into two steps.
+      #
       # Keyed on Podfile.lock (NOT Podfile): the lock file pins exact pod versions and
       # source URLs; the Podfile only declares ranges. Key changes whenever `pod update`
       # produces a new Podfile.lock commit.
       #
-      # Path verification: the clean-reinstall-pods step does:
-      #   cd "${{ inputs.ios-dir }}" && rm -rf Pods Podfile.lock
-      # confirming that ios-dir (default: ios) is the correct base path.
-      # The xcode-setup composite action hardcodes `cd ios` for pod install, so
-      # ios/Pods always applies when use-simplify9-xcode-setup=true.
+      # Why two steps?
+      # ~/.cocoapods/repos (the global spec repository, 1-3 GB) is safe to reuse even
+      # during a clean reinstall — the clean only removes the project's Pods dir and
+      # Podfile.lock, not the global spec repo. Caching it always eliminates the dominant
+      # time cost of `pod install --repo-update`.
       #
-      # Interaction with clean-reinstall-pods: when that input is true, the caller
-      # explicitly requests pod deintegrate + reinstall. Restoring the pod cache before
-      # that step would add overhead and be immediately discarded. The condition below
-      # bypasses the cache entirely when clean-reinstall-pods=true.
-      #
-      # Note on ios/Pods vs ~/.cocoapods/repos: when use-simplify9-xcode-setup=true
-      # (the default), xcode-setup always deletes ios/Pods before reinstalling. The
-      # ios/Pods portion of this cache has limited value in that path, but
-      # ~/.cocoapods/repos (the spec repository, 1-3 GB) is always reused and is the
-      # dominant time saving.
-      - name: Cache CocoaPods
-        id: cache-pods
+      # The project Pods dir (ios/Pods) is only useful when NOT doing a clean reinstall;
+      # restoring it before pod deintegrate + reinstall adds overhead and is immediately
+      # discarded, so that cache is bypassed when clean-reinstall-pods=true.
+      - name: Cache CocoaPods spec repo
+        id: cache-pods-specs
+        uses: actions/cache@v5
+        with:
+          path: ~/.cocoapods/repos
+          key: cocoapods-specs-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          restore-keys: |
+            cocoapods-specs-${{ runner.os }}-
+
+      # Project Pods dir cache — only when NOT doing a clean reinstall.
+      # A clean reinstall deletes ios/Pods, so caching it then is wasted.
+      - name: Cache CocoaPods Pods directory
+        id: cache-pods-dir
         if: ${{ !inputs.clean-reinstall-pods }}
         uses: actions/cache@v5
         with:
-          path: |
-            ${{ inputs.ios-dir }}/Pods
-            ~/.cocoapods/repos
-          key: pods-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          path: ${{ inputs.ios-dir }}/Pods
+          key: pods-dir-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
           restore-keys: |
-            pods-${{ runner.os }}-
+            pods-dir-${{ runner.os }}-
+
+      - name: Install CocoaPods (deployment mode)
+        if: ${{ !inputs.clean-reinstall-pods && !inputs.use-simplify9-xcode-setup }}
+        shell: bash
+        working-directory: ${{ inputs.ios-dir }}
+        env:
+          USE_BUNDLER: ${{ inputs.use-bundler }}
+          RUBY_VERSION: ${{ inputs.ruby-version }}
+        run: |
+          set -euo pipefail
+          echo "::group::📦 [IOS] Installing CocoaPods (deployment mode)"
+          if [[ "${USE_BUNDLER}" == "true" && -n "${RUBY_VERSION}" ]]; then
+            echo "→ Running: bundle exec pod install --deployment"
+            bundle exec pod install --deployment
+          else
+            echo "→ Running: pod install --deployment"
+            pod install --deployment
+          fi
+          echo "✅ CocoaPods installed (deployment mode)"
+          echo "::endgroup::"
 
       - name: Xcode setup (simplify9 action)
         if: ${{ inputs.use-simplify9-xcode-setup }}
@@ -753,6 +828,7 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            -quiet \
             -showBuildTimingSummary
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
