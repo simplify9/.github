@@ -113,6 +113,11 @@ on:
         required: false
         type: string
         default: ""
+      gradle-react-native-architectures:
+        description: "Android ABIs to build. Default arm64-v8a only (production devices). Override for projects needing more."
+        required: false
+        type: string
+        default: arm64-v8a
 
       keystore-output-path:
         description: Where to write decoded keystore
@@ -443,6 +448,54 @@ jobs:
           set -euo pipefail
           ls -lah "$(dirname '${{ inputs.keystore-output-path }}')"
           test -f "${{ inputs.keystore-output-path }}"
+
+      - name: Normalize Gradle properties (CI performance settings)
+        shell: bash
+        env:
+          GRADLE_PROPS_DIR: ${{ inputs.build-root-directory }}
+          RN_ARCHITECTURES: ${{ inputs.gradle-react-native-architectures }}
+        run: |
+          set -euo pipefail
+          echo "::group::⚙️ [ANDROID] Normalizing Gradle properties for CI"
+
+          PROPS_FILE="${GRADLE_PROPS_DIR}/gradle.properties"
+
+          if [[ ! -f "${PROPS_FILE}" ]]; then
+            echo "→ No existing gradle.properties found; creating one"
+            touch "${PROPS_FILE}"
+          fi
+
+          # upsert_prop KEY VALUE FILE — replace existing line or append
+          upsert_prop() {
+            local key="$1"
+            local value="$2"
+            local file="$3"
+            # Escape characters significant to sed in the key
+            local escaped_key
+            escaped_key="$(printf '%s' "${key}" | sed 's/[.[\*^$/]/\\&/g')"
+            if grep -qE "^${escaped_key}=" "${file}"; then
+              # Replace the whole line; use | as delimiter to avoid clashes with / in values
+              sed -i "s|^${escaped_key}=.*|${key}=${value}|" "${file}"
+              echo "  ✓ replaced: ${key}=${value}"
+            else
+              # Ensure file ends with a newline before appending
+              [[ -s "${file}" && -n "$(tail -c1 "${file}")" ]] && echo "" >> "${file}"
+              echo "${key}=${value}" >> "${file}"
+              echo "  ✓ appended: ${key}=${value}"
+            fi
+          }
+
+          echo "→ Applying CI performance settings to ${PROPS_FILE}"
+          upsert_prop "org.gradle.jvmargs" "-Xmx4g -XX:MaxMetaspaceSize=1g" "${PROPS_FILE}"
+          upsert_prop "org.gradle.caching" "true" "${PROPS_FILE}"
+          upsert_prop "org.gradle.parallel" "true" "${PROPS_FILE}"
+          upsert_prop "reactNativeArchitectures" "${RN_ARCHITECTURES}" "${PROPS_FILE}"
+
+          echo "→ Resulting gradle.properties performance settings:"
+          grep -E "^(org\.gradle\.jvmargs|org\.gradle\.caching|org\.gradle\.parallel|reactNativeArchitectures)=" "${PROPS_FILE}" | sed 's/^/    /'
+
+          echo "✅ Gradle properties normalized"
+          echo "::endgroup::"
 
       - name: Pre-install Android NDK versions
         shell: bash
