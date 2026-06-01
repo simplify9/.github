@@ -500,10 +500,13 @@ jobs:
         if: ${{ !inputs.clean-reinstall-pods && !inputs.use-simplify9-xcode-setup }}
         shell: bash
         working-directory: ${{ inputs.ios-dir }}
+        env:
+          USE_BUNDLER: ${{ inputs.use-bundler }}
+          RUBY_VERSION: ${{ inputs.ruby-version }}
         run: |
           set -euo pipefail
           echo "::group::📦 [IOS] Installing CocoaPods (deployment mode)"
-          if [[ "${{ inputs.use-bundler }}" == "true" && "${{ inputs.ruby-version }}" != "" ]]; then
+          if [[ "${USE_BUNDLER}" == "true" && -n "${RUBY_VERSION}" ]]; then
             echo "→ Running: bundle exec pod install --deployment"
             bundle exec pod install --deployment
           else

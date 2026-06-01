@@ -38,7 +38,14 @@ react_native_post_install(installer, :ccache_enabled => true)
 Without this Podfile change, ccache is present but never invoked. Document this requirement in the caller's README or Podfile comments.
 
 ### bundler (`use-bundler: true`)
-Setting `use-bundler: true` (alongside a non-empty `ruby-version`) causes `ruby/setup-ruby` to run `bundle install` and cache gems. This requires a **Gemfile** (and ideally a `Gemfile.lock`) in the caller repository. The `pod install` commands in this workflow remain unchanged — they do **not** automatically use `bundle exec pod install`. To get a reproducible CocoaPods version from the Gemfile, the caller must either override `install-command` or configure their own pod install path.
+Setting `use-bundler: true` (alongside a non-empty `ruby-version`)
+causes `ruby/setup-ruby` to run `bundle install` and cache gems.
+This requires a **Gemfile** (and ideally a `Gemfile.lock`) in the
+caller repository. When both `use-bundler: true` and
+`ruby-version` are set, the `Install CocoaPods (deployment mode)`
+step automatically runs `bundle exec pod install --deployment`,
+ensuring the CocoaPods version is taken from the Gemfile rather
+than the system default.
 
 ---
 
