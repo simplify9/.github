@@ -17,7 +17,7 @@ runs:
       run: |
         echo "::group::🔏 [CHECKPOINT 1/1] Install Signing Certificate"
         set -euo pipefail
-        echo "::add-mask::${{ inputs.p12Password }}"
+        echo "::add-mask::${IOS_P12_PASSWORD}"
 
         KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
         KEYCHAIN_PASS="ci-pass"

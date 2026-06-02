@@ -335,36 +335,9 @@ jobs:
 
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          XCODE_VERSION="${{ inputs.xcode-version }}"
-          CANDIDATES=(
-            "/Applications/Xcode_${XCODE_VERSION}.app"
-            "/Applications/Xcode${XCODE_VERSION}.app"
-            "/Applications/Xcode-${XCODE_VERSION}.app"
-            "/Applications/Xcode_${XCODE_VERSION}.0.app"
-            "/Applications/Xcode${XCODE_VERSION}.0.app"
-          )
-
-          XCODE_APP=""
-          for p in "${CANDIDATES[@]}"; do
-            if [[ -d "$p" ]]; then
-              XCODE_APP="$p"
-              break
-            fi
-          done
-
-          if [[ -z "${XCODE_APP}" ]]; then
-            echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-
-          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
-          xcode-select -p
-          xcodebuild -version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
 
       - name: Run pre-build mutation script (optional)
         if: ${{ inputs.pre-build-script != '' }}
@@ -989,35 +962,9 @@ jobs:
 
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          XCODE_VERSION="${{ inputs.xcode-version }}"
-          CANDIDATES=(
-            "/Applications/Xcode_${XCODE_VERSION}.app"
-            "/Applications/Xcode${XCODE_VERSION}.app"
-            "/Applications/Xcode-${XCODE_VERSION}.app"
-            "/Applications/Xcode_${XCODE_VERSION}.0.app"
-            "/Applications/Xcode${XCODE_VERSION}.0.app"
-          )
-
-          XCODE_APP=""
-          for p in "${CANDIDATES[@]}"; do
-            if [[ -d "$p" ]]; then
-              XCODE_APP="$p"
-              break
-            fi
-          done
-
-          if [[ -z "${XCODE_APP}" ]]; then
-            echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-
-          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
-          xcodebuild -version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
 
       - name: Download artifact
         uses: actions/download-artifact@v8
@@ -1180,35 +1127,9 @@ jobs:
 
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          XCODE_VERSION="${{ inputs.xcode-version }}"
-          CANDIDATES=(
-            "/Applications/Xcode_${XCODE_VERSION}.app"
-            "/Applications/Xcode${XCODE_VERSION}.app"
-            "/Applications/Xcode-${XCODE_VERSION}.app"
-            "/Applications/Xcode_${XCODE_VERSION}.0.app"
-            "/Applications/Xcode${XCODE_VERSION}.0.app"
-          )
-
-          XCODE_APP=""
-          for p in "${CANDIDATES[@]}"; do
-            if [[ -d "$p" ]]; then
-              XCODE_APP="$p"
-              break
-            fi
-          done
-
-          if [[ -z "${XCODE_APP}" ]]; then
-            echo "ERROR: Could not find an Xcode app for version '${XCODE_VERSION}'."
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-
-          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
-          xcodebuild -version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
 
       - name: Download artifact
         uses: actions/download-artifact@v8
