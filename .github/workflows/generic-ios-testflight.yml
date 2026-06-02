@@ -323,10 +323,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          CCACHE_BIN="$(command -v ccache)"
+
           ccache --max-size=2G
           ccache --set-config=compression=true
+          ccache --set-config=sloppiness=file_stat_matches
+
           echo "CCACHE_DIR=$HOME/Library/Caches/ccache" >> "$GITHUB_ENV"
-          echo "/opt/homebrew/opt/ccache/libexec" >> "$GITHUB_PATH"
+          echo "CCACHE_BIN=${CCACHE_BIN}" >> "$GITHUB_ENV"
+
+          # Keep this because it already gave you the 12 min -> 5 min improvement.
+          # It lets clang/clang++ resolve through ccache's compiler wrappers.
+          if [[ -d "/opt/homebrew/opt/ccache/libexec" ]]; then
+            echo "/opt/homebrew/opt/ccache/libexec" >> "$GITHUB_PATH"
+          elif [[ -d "/usr/local/opt/ccache/libexec" ]]; then
+            echo "/usr/local/opt/ccache/libexec" >> "$GITHUB_PATH"
+          fi
+
+          ccache --show-config
 
       - name: Initialize runtime paths
         shell: bash
@@ -775,6 +790,14 @@ jobs:
           bundleId: ${{ inputs.bundle-id-override }}
           keychainPath: ${{ runner.temp }}/build.keychain-db
           debugBuildSettings: ${{ inputs.debug-build-settings && 'true' || 'false' }}
+      
+
+      - name: Reset ccache stats before archive
+        if: ${{ inputs.enable-ccache && inputs.use-manual-inline-archive }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ccache --zero-stats || true
 
       - name: Archive (manual inline xcodebuild, profile name)
         if: ${{ inputs.use-manual-inline-archive }}
@@ -786,6 +809,15 @@ jobs:
           TEAM_ID="${{ secrets.ios-team-id }}"
           if [[ -z "${TEAM_ID}" ]]; then
             TEAM_ID="${TEAM_ID_FROM_PROFILE}"
+          fi
+
+          CCACHE_XCODE_FLAGS=()
+          if [[ "${{ inputs.enable-ccache }}" == "true" ]]; then
+            CCACHE_XCODE_FLAGS=(
+              C_COMPILER_LAUNCHER="${CCACHE_BIN}"
+              CXX_COMPILER_LAUNCHER="${CCACHE_BIN}"
+              CLANG_ENABLE_EXPLICIT_MODULES_WITH_COMPILER_LAUNCHER=YES
+            )
           fi
 
           xcodebuild \
@@ -801,13 +833,27 @@ jobs:
             CODE_SIGN_IDENTITY="${{ inputs.code-sign-identity }}" \
             PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
+            "${CCACHE_XCODE_FLAGS[@]}" \
             -parallelizeTargets \
             COMPILER_INDEX_STORE_ENABLE=NO \
             -quiet \
             -hideShellScriptEnvironment \
             -showBuildTimingSummary
+
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
+      
+      - name: Show ccache stats after archive
+        if: ${{ always() && inputs.enable-ccache && inputs.use-manual-inline-archive }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "## ccache stats" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          ccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate exportOptions.plist
         if: ${{ inputs.generate-export-options }}
