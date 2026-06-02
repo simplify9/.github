@@ -827,7 +827,9 @@ jobs:
             CODE_SIGN_IDENTITY="${{ inputs.code-sign-identity }}" \
             PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
+            -parallelizeTargets \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            -quiet \
             -hideShellScriptEnvironment \
             -showBuildTimingSummary
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"

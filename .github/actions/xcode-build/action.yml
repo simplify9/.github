@@ -78,7 +78,7 @@ runs:
           -sdk iphoneos
           -destination "${{ inputs.destination }}"
           -archivePath "${{ inputs.archivePath }}"
-          clean archive
+          archive
           -showBuildTimingSummary
         )
 
