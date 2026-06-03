@@ -16,27 +16,44 @@ runs:
   steps:
     - name: Announce IPA export
       shell: bash
+      env:
+        ARCHIVE_PATH: ${{ inputs.archivePath }}
+        EXPORT_PLIST: ${{ inputs.exportOptionsPlist }}
+        EXPORT_PATH: ${{ inputs.exportPath }}
       run: |
-        echo "::notice title=🍎 [IOS] Export IPA::Exporting archive to IPA — archive: ${{ inputs.archivePath }}, output: ${{ inputs.exportPath }}"
-        echo "📋 [IOS] Export options: ${{ inputs.exportOptionsPlist }}"
+        set -euo pipefail
+        echo "::notice title=🍎 [IOS] Export IPA::Exporting archive to IPA — archive: ${ARCHIVE_PATH}, output: ${EXPORT_PATH}"
+        echo "📋 [IOS] Export options: ${EXPORT_PLIST}"
         echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     - name: Export IPA
       shell: bash
+      env:
+        ARCHIVE_PATH: ${{ inputs.archivePath }}
+        EXPORT_PLIST: ${{ inputs.exportOptionsPlist }}
+        EXPORT_PATH: ${{ inputs.exportPath }}
       run: |
+        set -euo pipefail
         echo "::group::🍎 [CHECKPOINT 1/1] Export IPA"
-        mkdir -p "${{ inputs.exportPath }}"
+        if [[ ! -d "${ARCHIVE_PATH}" ]]; then
+          echo "ERROR: Archive not found at '${ARCHIVE_PATH}'"
+          exit 1
+        fi
+        mkdir -p "${EXPORT_PATH}"
         xcodebuild \
           -exportArchive \
-          -archivePath "${{ inputs.archivePath }}" \
-          -exportOptionsPlist "${{ inputs.exportOptionsPlist }}" \
-          -exportPath "${{ inputs.exportPath }}"
+          -archivePath "${ARCHIVE_PATH}" \
+          -exportOptionsPlist "${EXPORT_PLIST}" \
+          -exportPath "${EXPORT_PATH}"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [IOS] IPA exported::Output: ${{ inputs.exportPath }}"
+        echo "::notice title=✅ [IOS] IPA exported::Output: ${EXPORT_PATH}"
         echo "::endgroup::"
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        ARCHIVE_PATH: ${{ inputs.archivePath }}
       run: |
-        echo "::error title=❌ [IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${{ inputs.archivePath }}'. Check exportOptionsPlist path and signing configuration."
+        set -euo pipefail
+        echo "::error title=❌ [IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${ARCHIVE_PATH}'. Check exportOptionsPlist path and signing configuration."

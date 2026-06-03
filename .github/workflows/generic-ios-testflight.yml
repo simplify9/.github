@@ -1107,12 +1107,34 @@ jobs:
             exit 1
           fi
 
+          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
+          echo "→ IPA: ${IPA} (${IPA_SIZE_MB} MB)"
+          echo "→ Upload started at $(date -u +'%H:%M:%S UTC')"
+          UPLOAD_START=$(date +%s)
+
           xcrun iTMSTransporter \
             -m upload \
             -assetFile "${IPA}" \
             -apiKey "${{ secrets.appstore-api-key-id }}" \
             -apiIssuer "${{ secrets.appstore-issuer-id }}" \
-            -v informational
+            -v informational 2>&1 | while IFS= read -r line; do
+              if [[ "${line}" =~ ^DBG-X:[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*%[[:space:]]+of[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*MB ]]; then
+                PCT=$(printf '%.0f' "${BASH_REMATCH[1]}")
+                TOTAL="${BASH_REMATCH[3]}"
+                DONE_MB=$(awk "BEGIN { printf \"%.2f\", ${PCT} * ${TOTAL} / 100 }")
+                filled=$(( PCT * 30 / 100 ))
+                empty=$(( 30 - filled ))
+                bar=''
+                for (( i=0; i<filled; i++ )); do bar+="█"; done
+                for (( i=0; i<empty; i++ )); do bar+="░"; done
+                echo "  [${bar}] ${PCT}% — ${DONE_MB} / ${TOTAL} MB"
+              else
+                echo "${line}"
+              fi
+            done
+
+          echo "→ Completed in $(( $(date +%s) - UPLOAD_START ))s"
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
@@ -1123,6 +1145,12 @@ jobs:
           IPA='${{ steps.ipa.outputs.path }}'
           OUTPUT_FILE="$(mktemp)"
 
+          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
+          echo "→ IPA: ${IPA} (${IPA_SIZE_MB} MB)"
+          echo "→ Upload started at $(date -u +'%H:%M:%S UTC') — altool returns no progress; please wait"
+          UPLOAD_START=$(date +%s)
+
           set +e
           xcrun altool --upload-app \
             -f "${IPA}" \
@@ -1132,6 +1160,8 @@ jobs:
             --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
           ALTOOL_EXIT=${PIPESTATUS[0]}
           set -e
+
+          echo "→ Completed in $(( $(date +%s) - UPLOAD_START ))s"
 
           if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
             echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"

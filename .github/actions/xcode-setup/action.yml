@@ -1,5 +1,5 @@
-name: Simplify9 Xcode Setup
-description: Prepare Xcode environment and CocoaPods for iOS build.
+name: Simplify9 Xcode Setup (Legacy)
+description: (Legacy) Prepare Xcode environment and CocoaPods for iOS build.
 author: simplify9
 inputs:
   xcodeVersion:
