@@ -1130,7 +1130,7 @@ jobs:
           api-key-id: ${{ secrets.appstore-api-key-id }}
           api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
           backend: AppStoreAPI
-          wait-for-processing: 'false'
+          wait-for-processing: 'true'
 
       - name: Confirm TestFlight upload (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
@@ -1377,7 +1377,7 @@ jobs:
           api-key-id: ${{ secrets.appstore-api-key-id }}
           api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
           backend: AppStoreAPI
-          wait-for-processing: 'false'
+          wait-for-processing: 'true'
 
       - name: Confirm TestFlight upload (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
