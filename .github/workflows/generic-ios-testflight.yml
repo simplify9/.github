@@ -1090,6 +1090,7 @@ jobs:
           {
             echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
             cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+            printf '\n'
             echo "APPSTOREAPI_KEY_EOF"
           } >> "$GITHUB_ENV"
 
@@ -1252,6 +1253,7 @@ jobs:
           {
             echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
             cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+            printf '\n'
             echo "APPSTOREAPI_KEY_EOF"
           } >> "$GITHUB_ENV"
 
