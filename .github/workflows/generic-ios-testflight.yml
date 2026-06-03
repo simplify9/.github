@@ -224,43 +224,26 @@ on:
         default: ""
 
       # ── Versioning ───────────────────────────────────────────────────────────────
-      # Versioning modes:
-      #   none                  — VERSION = {marketing-prefix}.{run_number},
-      #                          BUILD_NUMBER = run_number. No pbxproj write.
-      #   pbxproj-counter       — MARKETING_VERSION = {prefix}.{run_number},
-      #                          CURRENT_PROJECT_VERSION incremented.
-      #   pbxproj-counter-rollover — X.Y or X.Y.Z prefix with single-digit
-      #                          carry logic. Recommended for App Store.
-      #   pbxproj-auto-increment — Bumps current pbxproj semver by
-      #                          marketing-version-bump segment.
+      # pbxproj-counter-rollover: marketing-prefix in X.Y or X.Y.Z format with
+      # single-digit carry logic. Sets MARKETING_VERSION and
+      # CURRENT_PROJECT_VERSION in the .pbxproj file on every run.
       versioning-strategy:
-        description: none, pbxproj-counter, pbxproj-counter-rollover, or pbxproj-auto-increment
+        description: Versioning strategy (pbxproj-counter-rollover)
         required: false
         type: string
         default: pbxproj-counter-rollover
       pbxproj-path:
-        description: Path to project.pbxproj when using pbxproj-driven versioning
+        description: Path to project.pbxproj
         required: false
         type: string
         default: ""
-      # For rollover strategy, this is the manual start version in X.Y or X.Y.Z format.
       marketing-prefix:
-        description: Marketing version prefix. For pbxproj-counter-rollover use X.Y or X.Y.Z as the start version.
+        description: Marketing version start in X.Y or X.Y.Z format (for example 1.0 or 2.3.0)
         required: false
         type: string
         default: "1.0"
-      marketing-version-bump:
-        description: For pbxproj-auto-increment, which segment to bump (patch, minor, or major)
-        required: false
-        type: string
-        default: patch
-      marketing-version-floor:
-        description: Optional minimum marketing version (for example 4.1 or 4.1.0)
-        required: false
-        type: string
-        default: ""
       build-number-offset:
-        description: Offset applied when computing CURRENT_PROJECT_VERSION in pbxproj-counter family modes (default 1)
+        description: Offset added to CURRENT_PROJECT_VERSION when computing the new build number (default 1)
         required: false
         type: string
         default: "1"
@@ -641,17 +624,12 @@ jobs:
       # Writes MARKETING_VERSION and CURRENT_PROJECT_VERSION into the
       # .pbxproj file. VERSION and BUILD_NUMBER are also exported to
       # GITHUB_ENV for use in downstream steps (IPA renaming, summaries).
-      # strategy=none skips pbxproj writes and uses run_number directly.
       - name: Update pbxproj versions (automated)
-        if: ${{ inputs.versioning-strategy == 'pbxproj-counter' || inputs.versioning-strategy == 'pbxproj-counter-rollover' || inputs.versioning-strategy == 'pbxproj-auto-increment' }}
         shell: bash
         env:
           PBXPROJ_PATH: ${{ inputs.pbxproj-path }}
-          VERSIONING_STRATEGY: ${{ inputs.versioning-strategy }}
           BUILD_NUMBER_OFFSET: ${{ inputs.build-number-offset }}
           MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
-          MARKETING_VERSION_BUMP: ${{ inputs.marketing-version-bump }}
-          MARKETING_VERSION_FLOOR: ${{ inputs.marketing-version-floor }}
         run: |
           set -euo pipefail
 
@@ -659,48 +637,6 @@ jobs:
             echo "ERROR: pbxproj versioning requires a valid pbxproj-path input"
             exit 1
           fi
-
-          normalize_semver() {
-            local v="$1"
-            if [[ "$v" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-              echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0"
-              return 0
-            fi
-            if [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo "$v"
-              return 0
-            fi
-            return 1
-          }
-
-          version_lt() {
-            local a="$1"
-            local b="$2"
-            local a1 a2 a3 b1 b2 b3
-            IFS='.' read -r a1 a2 a3 <<< "$a"
-            IFS='.' read -r b1 b2 b3 <<< "$b"
-            if (( a1 < b1 )); then return 0; fi
-            if (( a1 > b1 )); then return 1; fi
-            if (( a2 < b2 )); then return 0; fi
-            if (( a2 > b2 )); then return 1; fi
-            if (( a3 < b3 )); then return 0; fi
-            return 1
-          }
-
-          CURRENT_MARKETING_RAW=$(
-            grep -m 1 "MARKETING_VERSION = " "${PBXPROJ_PATH}" \
-              | sed -E 's/.*MARKETING_VERSION = ([^;]+);.*/\1/'
-          )
-
-          if [[ -z "${CURRENT_MARKETING_RAW}" ]]; then
-            echo "ERROR: Could not parse MARKETING_VERSION from ${PBXPROJ_PATH}"
-            exit 1
-          fi
-
-          CURRENT_MARKETING="$(normalize_semver "${CURRENT_MARKETING_RAW}")" || {
-            echo "ERROR: Unsupported MARKETING_VERSION format '${CURRENT_MARKETING_RAW}'. Expected X.Y or X.Y.Z"
-            exit 1
-          }
 
           BASE_BUILD=$(
             grep -m 1 "CURRENT_PROJECT_VERSION = " "${PBXPROJ_PATH}" \
@@ -712,101 +648,49 @@ jobs:
             exit 1
           fi
 
-          STRATEGY="${VERSIONING_STRATEGY}"
-          NEW_MARKETING_VERSION=""
-          NEW_BUILD_NUMBER=""
-
-          echo "Selected versioning strategy: ${STRATEGY}"
           echo "Original marketing-prefix input: ${MARKETING_PREFIX}"
           echo "github.run_number: ${GITHUB_RUN_NUMBER}"
-          echo "Original MARKETING_VERSION in pbxproj: ${CURRENT_MARKETING_RAW}"
           echo "Original CURRENT_PROJECT_VERSION in pbxproj: ${BASE_BUILD}"
 
-          if [[ "${STRATEGY}" == "pbxproj-counter" ]]; then
-            # Counter mode: MARKETING_VERSION = {marketing-prefix}.{run_number}
-            OFFSET="${BUILD_NUMBER_OFFSET}"
-            if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-              echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-              exit 1
-            fi
-
-            NEW_MARKETING_VERSION="${MARKETING_PREFIX}.${GITHUB_RUN_NUMBER}"
-            NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
-          elif [[ "${STRATEGY}" == "pbxproj-counter-rollover" ]]; then
-            # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
-            OFFSET="${BUILD_NUMBER_OFFSET}"
-            if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-              echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-              exit 1
-            fi
-
-            PREFIX_RAW="${MARKETING_PREFIX}"
-            if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
-              BASE_MAJOR="${BASH_REMATCH[1]}"
-              BASE_MINOR="${BASH_REMATCH[2]}"
-              BASE_PATCH="${BASH_REMATCH[3]}"
-            elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
-              BASE_MAJOR="${BASH_REMATCH[1]}"
-              BASE_MINOR="${BASH_REMATCH[2]}"
-              BASE_PATCH="0"
-            else
-              echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y or X.Y.Z format with single-digit minor/patch (0-9). Got '${PREFIX_RAW}'."
-              exit 1
-            fi
-
-            INCREMENT=$((GITHUB_RUN_NUMBER))
-            TOTAL_PATCH=$((BASE_PATCH + INCREMENT))
-            PATCH=$((TOTAL_PATCH % 10))
-            MINOR_CARRY=$((TOTAL_PATCH / 10))
-            TOTAL_MINOR=$((BASE_MINOR + MINOR_CARRY))
-            FINAL_MINOR=$((TOTAL_MINOR % 10))
-            MAJOR_CARRY=$((TOTAL_MINOR / 10))
-            FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
-
-            NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
-            NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
-
-            echo "Rollover base major: ${BASE_MAJOR}"
-            echo "Rollover base minor: ${BASE_MINOR}"
-            echo "Rollover base patch: ${BASE_PATCH}"
-            echo "Rollover increment: ${INCREMENT}"
-            echo "Rollover computed patch: ${PATCH}"
-            echo "Rollover computed minor carry: ${MINOR_CARRY}"
-          else
-            # Auto-increment mode: bump current MARKETING_VERSION in pbxproj.
-            CUR_NORM="${CURRENT_MARKETING}"
-            IFS='.' read -r M m p <<< "${CUR_NORM}"
-
-            BUMP="${MARKETING_VERSION_BUMP}"
-            case "${BUMP}" in
-              major)
-                M=$((M + 1)); m=0; p=0 ;;
-              minor)
-                m=$((m + 1)); p=0 ;;
-              patch)
-                p=$((p + 1)) ;;
-              *)
-                echo "ERROR: Unsupported marketing-version-bump '${BUMP}'. Use patch, minor, or major."
-                exit 1 ;;
-            esac
-
-            NEW_MARKETING_VERSION="${M}.${m}.${p}"
-
-            FLOOR_RAW="${MARKETING_VERSION_FLOOR}"
-            if [[ -n "${FLOOR_RAW}" ]]; then
-              FLOOR_NORM="$(normalize_semver "${FLOOR_RAW}")" || {
-                echo "ERROR: Invalid marketing-version-floor '${FLOOR_RAW}'. Expected X.Y or X.Y.Z"
-                exit 1
-              }
-
-              if version_lt "${NEW_MARKETING_VERSION}" "${FLOOR_NORM}"; then
-                NEW_MARKETING_VERSION="${FLOOR_NORM}"
-              fi
-            fi
-
-            NEW_BUILD_NUMBER=$((BASE_BUILD + 1))
+          # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
+          OFFSET="${BUILD_NUMBER_OFFSET}"
+          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
+            exit 1
           fi
 
+          PREFIX_RAW="${MARKETING_PREFIX}"
+          if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="${BASH_REMATCH[3]}"
+          elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="0"
+          else
+            echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y or X.Y.Z format with single-digit minor/patch (0-9). Got '${PREFIX_RAW}'."
+            exit 1
+          fi
+
+          INCREMENT=$((GITHUB_RUN_NUMBER))
+          TOTAL_PATCH=$((BASE_PATCH + INCREMENT))
+          PATCH=$((TOTAL_PATCH % 10))
+          MINOR_CARRY=$((TOTAL_PATCH / 10))
+          TOTAL_MINOR=$((BASE_MINOR + MINOR_CARRY))
+          FINAL_MINOR=$((TOTAL_MINOR % 10))
+          MAJOR_CARRY=$((TOTAL_MINOR / 10))
+          FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
+
+          NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
+          NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
+
+          echo "Rollover base major: ${BASE_MAJOR}"
+          echo "Rollover base minor: ${BASE_MINOR}"
+          echo "Rollover base patch: ${BASE_PATCH}"
+          echo "Rollover increment: ${INCREMENT}"
+          echo "Rollover computed patch: ${PATCH}"
+          echo "Rollover computed minor carry: ${MINOR_CARRY}"
           echo "Computed MARKETING_VERSION=${NEW_MARKETING_VERSION}"
           echo "Computed CURRENT_PROJECT_VERSION=${NEW_BUILD_NUMBER}"
 
@@ -887,25 +771,6 @@ jobs:
           echo "TEAM_ID_FROM_PROFILE=${TEAM_ID_FROM_PROFILE}" >> "$GITHUB_ENV"
           echo "TEAM_NAME=${TEAM_NAME}" >> "$GITHUB_ENV"  # informational only — not consumed downstream
           echo "IOS_BUNDLE_ID=${BUNDLE_ID}" >> "$GITHUB_ENV"
-
-      - name: Compute version variables
-        id: version_vars
-        # Fallback only for strategy=none. Other strategies already set VERSION/BUILD_NUMBER.
-        if: ${{ inputs.versioning-strategy == 'none' }}
-        shell: bash
-        env:
-          MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
-        run: |
-          set -euo pipefail
-
-          VERSION="${MARKETING_PREFIX}.${GITHUB_RUN_NUMBER}"
-          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
-
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Finalize version outputs
         id: final_version
