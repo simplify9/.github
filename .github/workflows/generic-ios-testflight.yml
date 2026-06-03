@@ -824,24 +824,13 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
             -parallelizeTargets \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            CLANG_ENABLE_EXPLICIT_MODULES_WITH_COMPILER_LAUNCHER=YES \
             -quiet \
             -hideShellScriptEnvironment \
             -showBuildTimingSummary
 
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
-      
-      - name: Show ccache stats after archive
-        if: ${{ always() && inputs.enable-ccache && inputs.use-manual-inline-archive }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "## ccache stats" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-          ccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate exportOptions.plist
         if: ${{ inputs.generate-export-options }}
@@ -958,6 +947,8 @@ jobs:
           NODE_VERSION: ${{ inputs.node-version }}
           REF_NAME: ${{ github.ref_name }}
           ACTOR: ${{ github.actor }}
+          ENABLE_CCACHE: ${{ inputs.enable-ccache }}
+          USE_MANUAL_INLINE_ARCHIVE: ${{ inputs.use-manual-inline-archive }}
         run: |
           STATUS=$( [ "${JOB_STATUS}" = "success" ] \
             && echo "✅ SUCCESS" || echo "❌ FAILED" )
@@ -983,7 +974,16 @@ jobs:
             echo "| 2 | Archive created | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
             echo "| 3 | IPA renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
           } >> "$GITHUB_STEP_SUMMARY"
-
+          if [[ "${ENABLE_CCACHE}" == "true" && "${USE_MANUAL_INLINE_ARCHIVE}" == "true" ]]; then
+            {
+              echo ""
+              echo "## ⚡ ccache Stats"
+              echo ""
+              echo '```text'
+              ccache --show-stats || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
   release:
     name: Upload to TestFlight
     runs-on: ${{ inputs.macos-runner }}
@@ -1107,12 +1107,34 @@ jobs:
             exit 1
           fi
 
+          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
+          echo "→ IPA: ${IPA} (${IPA_SIZE_MB} MB)"
+          echo "→ Upload started at $(date -u +'%H:%M:%S UTC')"
+          UPLOAD_START=$(date +%s)
+
           xcrun iTMSTransporter \
             -m upload \
             -assetFile "${IPA}" \
             -apiKey "${{ secrets.appstore-api-key-id }}" \
             -apiIssuer "${{ secrets.appstore-issuer-id }}" \
-            -v informational
+            -v informational 2>&1 | while IFS= read -r line; do
+              if [[ "${line}" =~ ^DBG-X:[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*%[[:space:]]+of[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*MB ]]; then
+                PCT=$(printf '%.0f' "${BASH_REMATCH[1]}")
+                TOTAL="${BASH_REMATCH[3]}"
+                DONE_MB=$(awk "BEGIN { printf \"%.2f\", ${PCT} * ${TOTAL} / 100 }")
+                filled=$(( PCT * 30 / 100 ))
+                empty=$(( 30 - filled ))
+                bar=''
+                for (( i=0; i<filled; i++ )); do bar+="█"; done
+                for (( i=0; i<empty; i++ )); do bar+="░"; done
+                echo "  [${bar}] ${PCT}% — ${DONE_MB} / ${TOTAL} MB"
+              else
+                echo "${line}"
+              fi
+            done
+
+          echo "→ Completed in $(( $(date +%s) - UPLOAD_START ))s"
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
@@ -1123,6 +1145,12 @@ jobs:
           IPA='${{ steps.ipa.outputs.path }}'
           OUTPUT_FILE="$(mktemp)"
 
+          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
+          echo "→ IPA: ${IPA} (${IPA_SIZE_MB} MB)"
+          echo "→ Upload started at $(date -u +'%H:%M:%S UTC') — altool returns no progress; please wait"
+          UPLOAD_START=$(date +%s)
+
           set +e
           xcrun altool --upload-app \
             -f "${IPA}" \
@@ -1132,6 +1160,8 @@ jobs:
             --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
           ALTOOL_EXIT=${PIPESTATUS[0]}
           set -e
+
+          echo "→ Completed in $(( $(date +%s) - UPLOAD_START ))s"
 
           if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
             echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"

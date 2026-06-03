@@ -1,11 +1,23 @@
 name: Install iOS Signing Certificate
 description: Installs an iOS signing certificate (.p12) into a temporary keychain for code signing
+inputs:
+  p12Base64:
+    description: Base64-encoded .p12 certificate
+    required: true
+  p12Password:
+    description: Password for the .p12 certificate
+    required: true
+  keychainPath:
+    description: Path for the temporary keychain. Defaults to $RUNNER_TEMP/build.keychain-db.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
     - name: Announce certificate installation
       shell: bash
       run: |
+        set -euo pipefail
         echo "::notice title=🔏 [SIGN] Install iOS Signing Certificate::Importing .p12 into temporary keychain — value suppressed"
         echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
@@ -14,15 +26,21 @@ runs:
       env:
         IOS_P12_BASE64: ${{ inputs.p12Base64 }}
         IOS_P12_PASSWORD: ${{ inputs.p12Password }}
+        KEYCHAIN_PATH_INPUT: ${{ inputs.keychainPath }}
       run: |
-        echo "::group::🔏 [CHECKPOINT 1/1] Install Signing Certificate"
         set -euo pipefail
+        echo "::group::🔏 [CHECKPOINT 1/1] Install Signing Certificate"
         echo "::add-mask::${IOS_P12_PASSWORD}"
 
-        KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+        KEYCHAIN_PATH="${KEYCHAIN_PATH_INPUT:-"$RUNNER_TEMP/build.keychain-db"}"
         KEYCHAIN_PASS="ci-pass"
 
-        echo "$IOS_P12_BASE64" | base64 -D > "$RUNNER_TEMP/cert.p12"
+        printf '%s' "${IOS_P12_BASE64}" | base64 -D > "$RUNNER_TEMP/cert.p12"
+
+        if [[ ! -s "$RUNNER_TEMP/cert.p12" ]]; then
+          echo "ERROR: base64 decoding produced an empty file. Check that p12Base64 is a valid base64-encoded .p12 file."
+          exit 1
+        fi
 
         security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
         security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -44,19 +62,15 @@ runs:
 
         echo "=== Available code signing identities ==="
         security find-identity -v -p codesigning
+
+        echo "KEYCHAIN_PATH=${KEYCHAIN_PATH}" >> "$GITHUB_ENV"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [SIGN] Certificate installed::Signing identity imported into keychain at $KEYCHAIN_PATH"
+        echo "::notice title=✅ [SIGN] Certificate installed::Signing identity imported into keychain at ${KEYCHAIN_PATH}"
         echo "::endgroup::"
 
     - name: Report failure
       if: failure()
       shell: bash
       run: |
+        set -euo pipefail
         echo "::error title=❌ [SIGN] Certificate installation failed::Failed to import .p12 into keychain. Check that p12Base64 is valid base64 and p12Password is correct."
-inputs:
-  p12Base64:
-    description: Base64-encoded .p12 certificate
-    required: true
-  p12Password:
-    description: Password for the .p12 certificate
-    required: true

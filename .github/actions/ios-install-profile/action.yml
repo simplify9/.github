@@ -1,11 +1,16 @@
 name: Install iOS Provisioning Profile
 description: Installs an iOS provisioning profile from a base64-encoded string
+inputs:
+  profileBase64:
+    description: Base64-encoded provisioning profile
+    required: true
 runs:
   using: composite
   steps:
     - name: Announce provisioning profile installation
       shell: bash
       run: |
+        set -euo pipefail
         echo "::notice title=🔏 [SIGN] Install iOS Provisioning Profile::Installing .mobileprovision from base64 input"
         echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
@@ -14,24 +19,35 @@ runs:
       env:
         IOS_MOBILEPROVISION_BASE64: ${{ inputs.profileBase64 }}
       run: |
-        echo "::group::🔏 [CHECKPOINT 1/1] Install Provisioning Profile"
         set -euo pipefail
+        echo "::group::🔏 [CHECKPOINT 1/1] Install Provisioning Profile"
         mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
         printf '%s' "${IOS_MOBILEPROVISION_BASE64}" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
+
+        if [[ ! -s "$RUNNER_TEMP/profile.mobileprovision" ]]; then
+          echo "ERROR: base64 decoding produced an empty file. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
+          exit 1
+        fi
+
         security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
 
         UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
         NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
 
-        echo "Profile UUID: $UUID"
-        echo "Profile Name: $NAME"
+        if [[ -z "${UUID}" ]]; then
+          echo "ERROR: Could not extract UUID from provisioning profile. The profile may be malformed."
+          exit 1
+        fi
+
+        echo "Profile UUID: ${UUID}"
+        echo "Profile Name: ${NAME}"
 
         cp "$RUNNER_TEMP/profile.mobileprovision" \
-          "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          "$HOME/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
 
-        echo "IOS_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
-        echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_UUID=${UUID}" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_NAME=${NAME}" >> "$GITHUB_ENV"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::notice title=✅ [SIGN] Profile installed::Name: ${NAME}, UUID: ${UUID}"
         echo "::endgroup::"
@@ -40,8 +56,5 @@ runs:
       if: failure()
       shell: bash
       run: |
+        set -euo pipefail
         echo "::error title=❌ [SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
-inputs:
-  profileBase64:
-    description: Base64-encoded provisioning profile
-    required: true
