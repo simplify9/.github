@@ -830,18 +830,6 @@ jobs:
 
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
-      
-      - name: Show ccache stats after archive
-        if: ${{ always() && inputs.enable-ccache && inputs.use-manual-inline-archive }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "## ccache stats" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```text' >> "$GITHUB_STEP_SUMMARY"
-          ccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate exportOptions.plist
         if: ${{ inputs.generate-export-options }}
@@ -958,6 +946,8 @@ jobs:
           NODE_VERSION: ${{ inputs.node-version }}
           REF_NAME: ${{ github.ref_name }}
           ACTOR: ${{ github.actor }}
+          ENABLE_CCACHE: ${{ inputs.enable-ccache }}
+          USE_MANUAL_INLINE_ARCHIVE: ${{ inputs.use-manual-inline-archive }}
         run: |
           STATUS=$( [ "${JOB_STATUS}" = "success" ] \
             && echo "✅ SUCCESS" || echo "❌ FAILED" )
@@ -983,7 +973,16 @@ jobs:
             echo "| 2 | Archive created | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
             echo "| 3 | IPA renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
           } >> "$GITHUB_STEP_SUMMARY"
-
+          if [[ "${ENABLE_CCACHE}" == "true" && "${USE_MANUAL_INLINE_ARCHIVE}" == "true" ]]; then
+            {
+              echo ""
+              echo "## ⚡ ccache Stats"
+              echo ""
+              echo '```text'
+              ccache --show-stats || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
   release:
     name: Upload to TestFlight
     runs-on: ${{ inputs.macos-runner }}
