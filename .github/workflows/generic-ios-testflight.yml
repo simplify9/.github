@@ -994,6 +994,7 @@ jobs:
       - name: Announce release job
         run: |
           echo "::notice title=🍎 [IOS] Upload to TestFlight — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+          echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
@@ -1087,12 +1088,38 @@ jobs:
             echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
           fi
+          # Mask each line of the private key to prevent it appearing in logs
+          while IFS= read -r line; do
+            if [[ -n "${line}" ]]; then
+              echo "::add-mask::${line}"
+            fi
+          done < "${PRIVATE_KEYS_DIR}/AuthKey.p8"
           {
             echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
             cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
             printf '\n'
             echo "APPSTOREAPI_KEY_EOF"
           } >> "$GITHUB_ENV"
+
+      - name: Prepare TestFlight upload (App Store Connect API)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA='${{ steps.ipa.outputs.path }}'
+          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
+          IPA_NAME="$(basename "${IPA}")"
+          echo "::notice title=🍎 [IOS] TestFlight Upload Starting::File: ${IPA_NAME} | Size: ${IPA_SIZE_MB} MB | Backend: AppStoreConnectAPI | Started: $(date -u +'%H:%M:%S UTC')"
+          echo "::group::🍎 [IOS] Upload details"
+          echo "  → File:    ${IPA_NAME}"
+          echo "  → Size:    ${IPA_SIZE_MB} MB"
+          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v4)"
+          echo "  → Started: $(date -u +'%H:%M:%S UTC')"
+          echo "::endgroup::"
+          echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
+          echo "APPSTOREAPI_IPA_SIZE_MB=${IPA_SIZE_MB}" >> "$GITHUB_ENV"
+          echo "APPSTOREAPI_IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload to TestFlight (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
@@ -1103,6 +1130,20 @@ jobs:
           api-key-id: ${{ secrets.appstore-api-key-id }}
           api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
           backend: AppStoreAPI
+          wait-for-processing: 'true'
+
+      - name: Confirm TestFlight upload (App Store Connect API)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
+        shell: bash
+        run: |
+          ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
+          bar='██████████████████████████████'
+          echo "::group::🍎 [IOS] Upload complete"
+          echo "  [${bar}] 100% — ${APPSTOREAPI_IPA_SIZE_MB} MB in ${ELAPSED}s"
+          echo "  → Completed at $(date -u +'%H:%M:%S UTC')"
+          echo "::endgroup::"
+          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
@@ -1146,6 +1187,49 @@ jobs:
             exit 1
           fi
 
+          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED (altool)"
+
+      - name: Report release failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }}"
+          echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
+
+      - name: Write release job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## 🍎 iOS TestFlight Upload — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` (build: ${BUILD_NUMBER}) |"
+            echo "| Upload tool | ${UPLOAD_TOOL} |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Triggered by | ${ACTOR} |"
+            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | TestFlight upload | ${UPLOAD_CHECKPOINT_STATUS:-⏭️ Skipped} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   release_with_environment:
     name: Upload to TestFlight
     runs-on: ${{ inputs.macos-runner }}
@@ -1157,6 +1241,7 @@ jobs:
       - name: Announce release-with-environment job
         run: |
           echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Env: ${{ inputs.release-environment }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+          echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
@@ -1250,12 +1335,38 @@ jobs:
             echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
           fi
+          # Mask each line of the private key to prevent it appearing in logs
+          while IFS= read -r line; do
+            if [[ -n "${line}" ]]; then
+              echo "::add-mask::${line}"
+            fi
+          done < "${PRIVATE_KEYS_DIR}/AuthKey.p8"
           {
             echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
             cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
             printf '\n'
             echo "APPSTOREAPI_KEY_EOF"
           } >> "$GITHUB_ENV"
+
+      - name: Prepare TestFlight upload (App Store Connect API)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA='${{ steps.ipa.outputs.path }}'
+          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
+          IPA_NAME="$(basename "${IPA}")"
+          echo "::notice title=🍎 [IOS] TestFlight Upload Starting::File: ${IPA_NAME} | Size: ${IPA_SIZE_MB} MB | Backend: AppStoreConnectAPI | Started: $(date -u +'%H:%M:%S UTC')"
+          echo "::group::🍎 [IOS] Upload details"
+          echo "  → File:    ${IPA_NAME}"
+          echo "  → Size:    ${IPA_SIZE_MB} MB"
+          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v4)"
+          echo "  → Started: $(date -u +'%H:%M:%S UTC')"
+          echo "::endgroup::"
+          echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
+          echo "APPSTOREAPI_IPA_SIZE_MB=${IPA_SIZE_MB}" >> "$GITHUB_ENV"
+          echo "APPSTOREAPI_IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload to TestFlight (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
@@ -1266,6 +1377,20 @@ jobs:
           api-key-id: ${{ secrets.appstore-api-key-id }}
           api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
           backend: AppStoreAPI
+          wait-for-processing: 'true'
+
+      - name: Confirm TestFlight upload (App Store Connect API)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
+        shell: bash
+        run: |
+          ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
+          bar='██████████████████████████████'
+          echo "::group::🍎 [IOS] Upload complete"
+          echo "  [${bar}] 100% — ${APPSTOREAPI_IPA_SIZE_MB} MB in ${ELAPSED}s"
+          echo "  → Completed at $(date -u +'%H:%M:%S UTC')"
+          echo "::endgroup::"
+          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
