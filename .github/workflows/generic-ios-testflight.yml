@@ -192,10 +192,10 @@ on:
         default: ipa
 
       upload-tool:
-        description: "TestFlight upload tool: transporter or altool"
+        description: "TestFlight upload tool: appstoreapi or altool. (transporter removed — iTMSTransporter was removed from Xcode 26)"
         required: false
         type: string
-        default: transporter
+        default: altool
       appstore-key-format:
         description: "API key secret format: raw or base64"
         required: false
@@ -1052,23 +1052,6 @@ jobs:
             exit 1
           fi
 
-      - name: Install App Store Connect API key (raw)
-        if: ${{ inputs.appstore-key-format == 'raw' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          KEY_CONTENT='${{ secrets.appstore-api-private-key }}'
-          if [[ -z "${KEY_CONTENT}" ]]; then
-            echo "ERROR: appstore-key-format=raw requires secret appstore-api-private-key"
-            exit 1
-          fi
-
-          mkdir -p "$HOME/private_keys"
-          KEY_PATH="$HOME/private_keys/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
-          printf '%s' "${KEY_CONTENT}" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
       - name: Install App Store Connect API key (base64)
         if: ${{ inputs.appstore-key-format == 'base64' }}
         shell: bash
@@ -1089,52 +1072,36 @@ jobs:
           printf '%s' "$KEY_B64" | base64 -D > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
-      - name: Upload to TestFlight (iTMSTransporter)
-        if: ${{ inputs.upload-tool == 'transporter' }}
+      - name: Decode App Store Connect API key (appstoreapi)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
+        env:
+          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
         run: |
           set -euo pipefail
-
-          IPA='${{ steps.ipa.outputs.path }}'
-
-          if ! command -v xcrun >/dev/null 2>&1; then
-            echo "ERROR: xcrun is not available on this runner."
+          umask 077
+          PRIVATE_KEYS_DIR="$RUNNER_TEMP/appstoreapi_keys"
+          mkdir -p "${PRIVATE_KEYS_DIR}"
+          printf '%s' "${KEY_B64}" | base64 -D > "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+          if [[ ! -s "${PRIVATE_KEYS_DIR}/AuthKey.p8" ]]; then
+            echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
           fi
+          {
+            echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
+            cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+            echo "APPSTOREAPI_KEY_EOF"
+          } >> "$GITHUB_ENV"
 
-          if ! xcrun --find iTMSTransporter >/dev/null 2>&1; then
-            echo "ERROR: iTMSTransporter is not available in selected Xcode on this runner."
-            exit 1
-          fi
-
-          IPA_BYTES=$(stat -f%z "${IPA}")
-          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
-          echo "→ IPA: ${IPA} (${IPA_SIZE_MB} MB)"
-          echo "→ Upload started at $(date -u +'%H:%M:%S UTC')"
-          UPLOAD_START=$(date +%s)
-
-          xcrun iTMSTransporter \
-            -m upload \
-            -assetFile "${IPA}" \
-            -apiKey "${{ secrets.appstore-api-key-id }}" \
-            -apiIssuer "${{ secrets.appstore-issuer-id }}" \
-            -v informational 2>&1 | while IFS= read -r line; do
-              if [[ "${line}" =~ ^DBG-X:[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*%[[:space:]]+of[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*MB ]]; then
-                PCT=$(printf '%.0f' "${BASH_REMATCH[1]}")
-                TOTAL="${BASH_REMATCH[3]}"
-                DONE_MB=$(awk "BEGIN { printf \"%.2f\", ${PCT} * ${TOTAL} / 100 }")
-                filled=$(( PCT * 30 / 100 ))
-                empty=$(( 30 - filled ))
-                bar=''
-                for (( i=0; i<filled; i++ )); do bar+="█"; done
-                for (( i=0; i<empty; i++ )); do bar+="░"; done
-                echo "  [${bar}] ${PCT}% — ${DONE_MB} / ${TOTAL} MB"
-              else
-                echo "${line}"
-              fi
-            done
-
-          echo "→ Completed in $(( $(date +%s) - UPLOAD_START ))s"
+      - name: Upload to TestFlight (App Store Connect API)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
+        uses: apple-actions/upload-testflight-build@v4
+        with:
+          app-path: ${{ steps.ipa.outputs.path }}
+          issuer-id: ${{ secrets.appstore-issuer-id }}
+          api-key-id: ${{ secrets.appstore-api-key-id }}
+          api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
+          backend: AppStoreAPI
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
@@ -1247,23 +1214,6 @@ jobs:
             exit 1
           fi
 
-      - name: Install App Store Connect API key (raw)
-        if: ${{ inputs.appstore-key-format == 'raw' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          KEY_CONTENT='${{ secrets.appstore-api-private-key }}'
-          if [[ -z "${KEY_CONTENT}" ]]; then
-            echo "ERROR: appstore-key-format=raw requires secret appstore-api-private-key"
-            exit 1
-          fi
-
-          mkdir -p "$HOME/private_keys"
-          KEY_PATH="$HOME/private_keys/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
-          printf '%s' "${KEY_CONTENT}" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
       - name: Install App Store Connect API key (base64)
         if: ${{ inputs.appstore-key-format == 'base64' }}
         shell: bash
@@ -1284,30 +1234,36 @@ jobs:
           printf '%s' "$KEY_B64" | base64 -D > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
-      - name: Upload to TestFlight (iTMSTransporter)
-        if: ${{ inputs.upload-tool == 'transporter' }}
+      - name: Decode App Store Connect API key (appstoreapi)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
+        env:
+          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
         run: |
           set -euo pipefail
-
-          IPA='${{ steps.ipa.outputs.path }}'
-
-          if ! command -v xcrun >/dev/null 2>&1; then
-            echo "ERROR: xcrun is not available on this runner."
+          umask 077
+          PRIVATE_KEYS_DIR="$RUNNER_TEMP/appstoreapi_keys"
+          mkdir -p "${PRIVATE_KEYS_DIR}"
+          printf '%s' "${KEY_B64}" | base64 -D > "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+          if [[ ! -s "${PRIVATE_KEYS_DIR}/AuthKey.p8" ]]; then
+            echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
           fi
+          {
+            echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
+            cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+            echo "APPSTOREAPI_KEY_EOF"
+          } >> "$GITHUB_ENV"
 
-          if ! xcrun --find iTMSTransporter >/dev/null 2>&1; then
-            echo "ERROR: iTMSTransporter is not available in selected Xcode on this runner."
-            exit 1
-          fi
-
-          xcrun iTMSTransporter \
-            -m upload \
-            -assetFile "${IPA}" \
-            -apiKey "${{ secrets.appstore-api-key-id }}" \
-            -apiIssuer "${{ secrets.appstore-issuer-id }}" \
-            -v informational
+      - name: Upload to TestFlight (App Store Connect API)
+        if: ${{ inputs.upload-tool == 'appstoreapi' }}
+        uses: apple-actions/upload-testflight-build@v4
+        with:
+          app-path: ${{ steps.ipa.outputs.path }}
+          issuer-id: ${{ secrets.appstore-issuer-id }}
+          api-key-id: ${{ secrets.appstore-api-key-id }}
+          api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
+          backend: AppStoreAPI
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
