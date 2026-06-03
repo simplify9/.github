@@ -1,4 +1,4 @@
-name: Generic iOS Build and TestFlight (reusable)
+﻿name: Generic iOS Build and TestFlight (reusable)
 
 on:
   workflow_call:
@@ -195,9 +195,9 @@ on:
         description: "TestFlight upload tool: appstoreapi or altool. (transporter removed — iTMSTransporter was removed from Xcode 26)"
         required: false
         type: string
-        default: altool
+        default: appstoreapi
       appstore-key-format:
-        description: "API key secret format: raw or base64"
+        description: "API key secret format for altool path only: raw or base64. Not used by appstoreapi."
         required: false
         type: string
         default: raw
@@ -251,9 +251,6 @@ on:
       appstore-issuer-id:
         description: App Store Connect issuer id
         required: false
-      appstore-api-private-key:
-        description: Raw API private key contents (PEM) for transporter/raw mode
-        required: false
       appstore-api-private-key-base64:
         description: Base64 API private key for altool/base64 mode
         required: false
@@ -283,7 +280,9 @@ jobs:
 
     steps:
       - name: Announce build job
+        shell: bash
         run: |
+          set -euo pipefail
           echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${{ inputs.workspace }} | Scheme: ${{ inputs.scheme }} | Versioning: ${{ inputs.versioning-strategy }} | Triggered by: ${{ github.actor }}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
@@ -357,21 +356,25 @@ jobs:
         if: ${{ inputs.pre-build-script != '' }}
         shell: bash
         working-directory: ${{ inputs.pre-build-working-directory }}
+        env:
+          PRE_BUILD_SCRIPT: ${{ inputs.pre-build-script }}
         run: |
           set -euo pipefail
           echo "Running configured pre-build script in: $PWD"
-          ${{ inputs.pre-build-script }}
+          eval "${PRE_BUILD_SCRIPT}"
 
       - name: Resolve package manager settings
         id: package_manager
         shell: bash
+        env:
+          PACKAGE_MANAGER_RAW: ${{ inputs.package-manager }}
+          PACKAGE_DIR_RAW: ${{ inputs.package-manager-directory }}
+          CACHE_DEPENDENCY_PATH_INPUT: ${{ inputs.cache-dependency-path }}
         run: |
           set -euo pipefail
 
           # Normalize inputs so package-manager value handling is case-insensitive.
-          PACKAGE_MANAGER_RAW="${{ inputs.package-manager }}"
           PACKAGE_MANAGER="$(echo "${PACKAGE_MANAGER_RAW}" | tr '[:upper:]' '[:lower:]')"
-          PACKAGE_DIR_RAW="${{ inputs.package-manager-directory }}"
           PACKAGE_DIR="${PACKAGE_DIR_RAW:-.}"
 
           if [[ -z "${PACKAGE_DIR}" ]]; then
@@ -409,7 +412,6 @@ jobs:
           esac
 
           # Infer lockfile path from package-manager + directory when no explicit override is provided.
-          CACHE_DEPENDENCY_PATH_INPUT="${{ inputs.cache-dependency-path }}"
           CACHE_DEPENDENCY_PATH="${CACHE_DEPENDENCY_PATH_INPUT}"
 
           if [[ -z "${CACHE_DEPENDENCY_PATH}" ]]; then
@@ -440,7 +442,16 @@ jobs:
 
       - name: Install node dependencies
         shell: bash
-        run: ${{ inputs.install-command != '' && inputs.install-command || steps.package_manager.outputs.default_install_command }}
+        env:
+          INSTALL_COMMAND_INPUT: ${{ inputs.install-command }}
+          DEFAULT_INSTALL_COMMAND: ${{ steps.package_manager.outputs.default_install_command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INSTALL_COMMAND_INPUT}" ]]; then
+            eval "${INSTALL_COMMAND_INPUT}"
+          else
+            eval "${DEFAULT_INSTALL_COMMAND}"
+          fi
 
       - name: Install React Native CLI
         if: ${{ inputs.install-react-native-cli }}
@@ -519,10 +530,16 @@ jobs:
       - name: Update pbxproj versions (automated)
         if: ${{ inputs.versioning-strategy == 'pbxproj-counter' || inputs.versioning-strategy == 'pbxproj-counter-rollover' || inputs.versioning-strategy == 'pbxproj-auto-increment' }}
         shell: bash
+        env:
+          PBXPROJ_PATH: ${{ inputs.pbxproj-path }}
+          VERSIONING_STRATEGY: ${{ inputs.versioning-strategy }}
+          BUILD_NUMBER_OFFSET: ${{ inputs.build-number-offset }}
+          MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
+          MARKETING_VERSION_BUMP: ${{ inputs.marketing-version-bump }}
+          MARKETING_VERSION_FLOOR: ${{ inputs.marketing-version-floor }}
         run: |
           set -euo pipefail
 
-          PBXPROJ_PATH="${{ inputs.pbxproj-path }}"
           if [[ -z "${PBXPROJ_PATH}" || ! -f "${PBXPROJ_PATH}" ]]; then
             echo "ERROR: pbxproj versioning requires a valid pbxproj-path input"
             exit 1
@@ -580,35 +597,35 @@ jobs:
             exit 1
           fi
 
-          STRATEGY="${{ inputs.versioning-strategy }}"
+          STRATEGY="${VERSIONING_STRATEGY}"
           NEW_MARKETING_VERSION=""
           NEW_BUILD_NUMBER=""
 
           echo "Selected versioning strategy: ${STRATEGY}"
-          echo "Original marketing-prefix input: ${{ inputs.marketing-prefix }}"
+          echo "Original marketing-prefix input: ${MARKETING_PREFIX}"
           echo "github.run_number: ${GITHUB_RUN_NUMBER}"
           echo "Original MARKETING_VERSION in pbxproj: ${CURRENT_MARKETING_RAW}"
           echo "Original CURRENT_PROJECT_VERSION in pbxproj: ${BASE_BUILD}"
 
           if [[ "${STRATEGY}" == "pbxproj-counter" ]]; then
             # Counter mode: MARKETING_VERSION = {marketing-prefix}.{run_number}
-            OFFSET="${{ inputs.build-number-offset }}"
+            OFFSET="${BUILD_NUMBER_OFFSET}"
             if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
               echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
               exit 1
             fi
 
-            NEW_MARKETING_VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
+            NEW_MARKETING_VERSION="${MARKETING_PREFIX}.${GITHUB_RUN_NUMBER}"
             NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
           elif [[ "${STRATEGY}" == "pbxproj-counter-rollover" ]]; then
             # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
-            OFFSET="${{ inputs.build-number-offset }}"
+            OFFSET="${BUILD_NUMBER_OFFSET}"
             if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
               echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
               exit 1
             fi
 
-            PREFIX_RAW="${{ inputs.marketing-prefix }}"
+            PREFIX_RAW="${MARKETING_PREFIX}"
             if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
               BASE_MAJOR="${BASH_REMATCH[1]}"
               BASE_MINOR="${BASH_REMATCH[2]}"
@@ -645,7 +662,7 @@ jobs:
             CUR_NORM="${CURRENT_MARKETING}"
             IFS='.' read -r M m p <<< "${CUR_NORM}"
 
-            BUMP="${{ inputs.marketing-version-bump }}"
+            BUMP="${MARKETING_VERSION_BUMP}"
             case "${BUMP}" in
               major)
                 M=$((M + 1)); m=0; p=0 ;;
@@ -660,7 +677,7 @@ jobs:
 
             NEW_MARKETING_VERSION="${M}.${m}.${p}"
 
-            FLOOR_RAW="${{ inputs.marketing-version-floor }}"
+            FLOOR_RAW="${MARKETING_VERSION_FLOOR}"
             if [[ -n "${FLOOR_RAW}" ]]; then
               FLOOR_NORM="$(normalize_semver "${FLOOR_RAW}")" || {
                 echo "ERROR: Invalid marketing-version-floor '${FLOOR_RAW}'. Expected X.Y or X.Y.Z"
@@ -690,9 +707,11 @@ jobs:
       - name: Clean and reinstall Pods
         if: ${{ inputs.clean-reinstall-pods }}
         shell: bash
+        env:
+          IOS_DIR: ${{ inputs.ios-dir }}
         run: |
           set -euo pipefail
-          cd "${{ inputs.ios-dir }}"
+          cd "${IOS_DIR}"
           pod deintegrate
           rm -rf Pods Podfile.lock
           pod install --repo-update
@@ -704,7 +723,9 @@ jobs:
           p12Password: ${{ secrets.ios-p12-password }}
 
       - name: Confirm signing cert installed
+        shell: bash
         run: |
+          set -euo pipefail
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/3] Signing certificate installed — PASSED"
 
@@ -800,27 +821,36 @@ jobs:
       - name: Archive (manual inline xcodebuild, profile name)
         if: ${{ inputs.use-manual-inline-archive }}
         shell: bash
+        env:
+          IOS_TEAM_ID: ${{ secrets.ios-team-id }}
+          WORKSPACE: ${{ inputs.workspace }}
+          SCHEME: ${{ inputs.scheme }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          BUILD_DESTINATION: ${{ inputs.build-destination }}
+          ARCHIVE_PATH: ${{ inputs.archive-path }}
+          CODE_SIGN_IDENTITY: ${{ inputs.code-sign-identity }}
+          PROFILE_NAME: ${{ steps.profile_meta.outputs.profile_name }}
         run: |
           set -euo pipefail
           mkdir -p output
 
-          TEAM_ID="${{ secrets.ios-team-id }}"
+          TEAM_ID="${IOS_TEAM_ID}"
           if [[ -z "${TEAM_ID}" ]]; then
             TEAM_ID="${TEAM_ID_FROM_PROFILE}"
           fi
 
           xcodebuild \
-            -workspace "${{ inputs.workspace }}" \
-            -scheme "${{ inputs.scheme }}" \
-            -configuration "${{ inputs.configuration }}" \
+            -workspace "${WORKSPACE}" \
+            -scheme "${SCHEME}" \
+            -configuration "${CONFIGURATION}" \
             -sdk iphoneos \
-            -destination "${{ inputs.build-destination }}" \
-            -archivePath "${{ inputs.archive-path }}" \
+            -destination "${BUILD_DESTINATION}" \
+            -archivePath "${ARCHIVE_PATH}" \
             archive \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="${TEAM_ID}" \
-            CODE_SIGN_IDENTITY="${{ inputs.code-sign-identity }}" \
-            PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile_meta.outputs.profile_name }}" \
+            CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY}" \
+            PROVISIONING_PROFILE_SPECIFIER="${PROFILE_NAME}" \
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
             -parallelizeTargets \
             COMPILER_INDEX_STORE_ENABLE=NO \
@@ -830,15 +860,19 @@ jobs:
             -showBuildTimingSummary
 
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${{ inputs.archive-path }}"
+          echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${ARCHIVE_PATH}"
 
       - name: Generate exportOptions.plist
         if: ${{ inputs.generate-export-options }}
         shell: bash
+        env:
+          IOS_TEAM_ID: ${{ secrets.ios-team-id }}
+          BUNDLE_ID: ${{ steps.profile_meta.outputs.bundle_id }}
+          PROFILE_NAME: ${{ steps.profile_meta.outputs.profile_name }}
         run: |
           set -euo pipefail
 
-          TEAM_ID="${{ secrets.ios-team-id }}"
+          TEAM_ID="${IOS_TEAM_ID}"
           if [[ -z "${TEAM_ID}" ]]; then
             TEAM_ID="${TEAM_ID_FROM_PROFILE}"
           fi
@@ -850,15 +884,15 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>app-store</string>
+            <string>app-store-connect</string>
             <key>signingStyle</key>
             <string>manual</string>
             <key>teamID</key>
             <string>${TEAM_ID}</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>${{ steps.profile_meta.outputs.bundle_id }}</key>
-              <string>${{ steps.profile_meta.outputs.profile_name }}</string>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
             </dict>
             <key>uploadBitcode</key>
             <false/>
@@ -874,16 +908,19 @@ jobs:
       - name: Resolve export plist
         id: resolve_export
         shell: bash
+        env:
+          EXPORT_OPTIONS_PLIST: ${{ inputs.export-options-plist }}
+          GENERATE_EXPORT_OPTIONS: ${{ inputs.generate-export-options }}
         run: |
           set -euo pipefail
 
-          if [[ -n "${{ inputs.export-options-plist }}" ]]; then
-            echo "EXPORT_PLIST=${{ inputs.export-options-plist }}" >> "$GITHUB_ENV"
-            echo "export_plist=${{ inputs.export-options-plist }}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${EXPORT_OPTIONS_PLIST}" ]]; then
+            echo "EXPORT_PLIST=${EXPORT_OPTIONS_PLIST}" >> "$GITHUB_ENV"
+            echo "export_plist=${EXPORT_OPTIONS_PLIST}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          if [[ "${{ inputs.generate-export-options }}" != "true" ]]; then
+          if [[ "${GENERATE_EXPORT_OPTIONS}" != "true" ]]; then
             echo "ERROR: Either export-options-plist must be provided, or generate-export-options must be true."
             exit 1
           fi
@@ -900,13 +937,17 @@ jobs:
       - name: Rename IPA
         id: rename_ipa
         shell: bash
+        env:
+          EXPORT_PATH: ${{ inputs.export-path }}
+          IPA_NAME_PATTERN: ${{ inputs.ipa-name-pattern }}
+          SCHEME: ${{ inputs.scheme }}
         run: |
           set -euo pipefail
 
-          IPA_SRC="$(ls -1 "${{ inputs.export-path }}"/*.ipa | head -n 1)"
-          PATTERN='${{ inputs.ipa-name-pattern }}'
+          IPA_SRC="$(ls -1 "${EXPORT_PATH}"/*.ipa | head -n 1)"
+          PATTERN="${IPA_NAME_PATTERN}"
 
-          IPA_OUT="${PATTERN//\{scheme\}/${{ inputs.scheme }}}"
+          IPA_OUT="${PATTERN//\{scheme\}/${SCHEME}}"
           IPA_OUT="${IPA_OUT//\{version\}/${VERSION}}"
           IPA_OUT="${IPA_OUT//\{build_number\}/${BUILD_NUMBER}}"
           IPA_OUT="${IPA_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
@@ -928,8 +969,12 @@ jobs:
 
       - name: Report build failure
         if: failure()
+        shell: bash
+        env:
+          WORKSPACE: ${{ inputs.workspace }}
+          SCHEME: ${{ inputs.scheme }}
         run: |
-          echo "::error title=🍎 [IOS] Build Job Failed::Workspace: ${{ inputs.workspace }} | Scheme: ${{ inputs.scheme }}"
+          echo "::error title=🍎 [IOS] Build Job Failed::Workspace: ${WORKSPACE} | Scheme: ${SCHEME}"
           echo "  Checkpoint 1 — Signing cert installed: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — IPA renamed:           ${CHECKPOINT_3_STATUS:-❌ Not reached}"
@@ -1056,11 +1101,13 @@ jobs:
       - name: Install App Store Connect API key (base64)
         if: ${{ inputs.appstore-key-format == 'base64' }}
         shell: bash
+        env:
+          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
+          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
         run: |
           set -euo pipefail
           umask 077
 
-          KEY_B64='${{ secrets.appstore-api-private-key-base64 }}'
           if [[ -z "${KEY_B64}" ]]; then
             echo "ERROR: appstore-key-format=base64 requires secret appstore-api-private-key-base64"
             exit 1
@@ -1069,8 +1116,8 @@ jobs:
           PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
           mkdir -p "$PRIVATE_KEYS_DIR"
 
-          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
-          printf '%s' "$KEY_B64" | base64 -D > "$KEY_PATH"
+          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${API_KEY_ID}.p8"
+          printf '%s' "${KEY_B64}" | base64 -D > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
       - name: Decode App Store Connect API key (appstoreapi)
@@ -1148,10 +1195,14 @@ jobs:
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
         shell: bash
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
+          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
+          API_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
         run: |
           set -euo pipefail
 
-          IPA='${{ steps.ipa.outputs.path }}'
+          IPA="${IPA_PATH}"
           OUTPUT_FILE="$(mktemp)"
 
           IPA_BYTES=$(stat -f%z "${IPA}")
@@ -1164,8 +1215,8 @@ jobs:
           xcrun altool --upload-app \
             -f "${IPA}" \
             -t ios \
-            --apiKey "${{ secrets.appstore-api-key-id }}" \
-            --apiIssuer "${{ secrets.appstore-issuer-id }}" \
+            --apiKey "${API_KEY_ID}" \
+            --apiIssuer "${API_ISSUER_ID}" \
             --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
           ALTOOL_EXIT=${PIPESTATUS[0]}
           set -e
@@ -1303,11 +1354,13 @@ jobs:
       - name: Install App Store Connect API key (base64)
         if: ${{ inputs.appstore-key-format == 'base64' }}
         shell: bash
+        env:
+          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
+          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
         run: |
           set -euo pipefail
           umask 077
 
-          KEY_B64='${{ secrets.appstore-api-private-key-base64 }}'
           if [[ -z "${KEY_B64}" ]]; then
             echo "ERROR: appstore-key-format=base64 requires secret appstore-api-private-key-base64"
             exit 1
@@ -1316,8 +1369,8 @@ jobs:
           PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
           mkdir -p "$PRIVATE_KEYS_DIR"
 
-          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${{ secrets.appstore-api-key-id }}.p8"
-          printf '%s' "$KEY_B64" | base64 -D > "$KEY_PATH"
+          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${API_KEY_ID}.p8"
+          printf '%s' "${KEY_B64}" | base64 -D > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
       - name: Decode App Store Connect API key (appstoreapi)
@@ -1395,18 +1448,22 @@ jobs:
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
         shell: bash
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
+          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
+          API_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
         run: |
           set -euo pipefail
 
-          IPA='${{ steps.ipa.outputs.path }}'
+          IPA="${IPA_PATH}"
           OUTPUT_FILE="$(mktemp)"
 
           set +e
           xcrun altool --upload-app \
             -f "${IPA}" \
             -t ios \
-            --apiKey "${{ secrets.appstore-api-key-id }}" \
-            --apiIssuer "${{ secrets.appstore-issuer-id }}" \
+            --apiKey "${API_KEY_ID}" \
+            --apiIssuer "${API_ISSUER_ID}" \
             --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
           ALTOOL_EXIT=${PIPESTATUS[0]}
           set -e
@@ -1425,3 +1482,43 @@ jobs:
             echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
             exit 1
           fi
+
+      - name: Report release failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }}"
+          echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
+
+      - name: Write release job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## 🍎 iOS TestFlight Upload — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` (build: ${BUILD_NUMBER}) |"
+            echo "| Upload tool | ${UPLOAD_TOOL} |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Triggered by | ${ACTOR} |"
+            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | TestFlight upload | ${UPLOAD_CHECKPOINT_STATUS:-⏭️ Skipped} |"
+          } >> "$GITHUB_STEP_SUMMARY"
