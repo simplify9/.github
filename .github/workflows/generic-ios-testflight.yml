@@ -1087,6 +1087,12 @@ jobs:
             echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
           fi
+          # Mask each line of the private key to prevent it appearing in logs
+          while IFS= read -r line; do
+            if [[ -n "${line}" ]]; then
+              echo "::add-mask::${line}"
+            fi
+          done < "${PRIVATE_KEYS_DIR}/AuthKey.p8"
           {
             echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
             cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
@@ -1103,6 +1109,7 @@ jobs:
           api-key-id: ${{ secrets.appstore-api-key-id }}
           api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
           backend: AppStoreAPI
+          wait-for-processing: 'false'
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
@@ -1250,6 +1257,12 @@ jobs:
             echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
           fi
+          # Mask each line of the private key to prevent it appearing in logs
+          while IFS= read -r line; do
+            if [[ -n "${line}" ]]; then
+              echo "::add-mask::${line}"
+            fi
+          done < "${PRIVATE_KEYS_DIR}/AuthKey.p8"
           {
             echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
             cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
@@ -1266,6 +1279,7 @@ jobs:
           api-key-id: ${{ secrets.appstore-api-key-id }}
           api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
           backend: AppStoreAPI
+          wait-for-processing: 'false'
 
       - name: Upload to TestFlight (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
