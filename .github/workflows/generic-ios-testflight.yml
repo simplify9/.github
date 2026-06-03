@@ -20,7 +20,7 @@
 #
 # UPLOAD TOOLS (`upload-tool` input):
 #   appstoreapi (default) — App Store Connect REST API via
-#                           apple-actions/upload-testflight-build@v4.
+#                           apple-actions/upload-testflight-build@v5.
 #                           Requires no local Apple tooling. Recommended
 #                           for all projects on Xcode 26+.
 #   altool                — Deprecated xcrun altool --upload-app. Retained
@@ -1193,7 +1193,7 @@ jobs:
           echo "::group::🍎 [IOS] Upload details"
           echo "  → File:    ${IPA_NAME}"
           echo "  → Size:    ${IPA_SIZE_MB} MB"
-          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v4)"
+          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
           echo "  → Started: $(date -u +'%H:%M:%S UTC')"
           echo "::endgroup::"
           echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
@@ -1212,7 +1212,7 @@ jobs:
       # No processing confirmation. Retained for backwards compatibility.
       - name: Upload to TestFlight (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        uses: apple-actions/upload-testflight-build@v4
+        uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: ${{ steps.ipa.outputs.path }}
           issuer-id: ${{ secrets.appstore-issuer-id }}
@@ -1473,7 +1473,7 @@ jobs:
           echo "::group::🍎 [IOS] Upload details"
           echo "  → File:    ${IPA_NAME}"
           echo "  → Size:    ${IPA_SIZE_MB} MB"
-          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v4)"
+          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
           echo "  → Started: $(date -u +'%H:%M:%S UTC')"
           echo "::endgroup::"
           echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
@@ -1492,7 +1492,7 @@ jobs:
       # No processing confirmation. Retained for backwards compatibility.
       - name: Upload to TestFlight (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        uses: apple-actions/upload-testflight-build@v4
+        uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: ${{ steps.ipa.outputs.path }}
           issuer-id: ${{ secrets.appstore-issuer-id }}
