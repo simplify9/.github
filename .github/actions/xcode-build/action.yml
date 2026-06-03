@@ -19,37 +19,29 @@ inputs:
     required: false
     description: Xcode destination (e.g., generic/platform=iOS).
     default: generic/platform=iOS
-
   signingStyle:
     required: false
     description: "manual or automatic"
     default: manual
-
   developmentTeam:
     required: false
-    description: Apple Developer Team ID (e.g., ABCDE12345). Required for manual signing.
-
+    description: Apple Developer Team ID. Required for manual signing.
   codeSignIdentity:
     required: false
-    description: Code signing identity for manual signing, e.g. "Apple Distribution" or "Apple Development".
-
+    description: Code signing identity for manual signing.
   provisioningProfileUuid:
     required: false
-    description: Provisioning profile UUID (CI-only, binds profile to app target like Azure DevOps).
-
+    description: Provisioning profile UUID.
   bundleId:
     required: false
     description: Bundle identifier override (PRODUCT_BUNDLE_IDENTIFIER), optional.
-
   keychainPath:
     required: false
-    description: Path to keychain that contains signing identity (e.g. $RUNNER_TEMP/build.keychain-db). Strongly recommended in CI.
-
+    description: Path to keychain that contains signing identity.
   derivedDataPath:
     required: false
     description: Optional derived data path.
     default: ""
-
   debugBuildSettings:
     required: false
     description: "true/false: print build settings before archive"
@@ -60,89 +52,118 @@ runs:
   steps:
     - name: Announce Xcode build
       shell: bash
+      env:
+        SCHEME: ${{ inputs.scheme }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        SIGNING_STYLE: ${{ inputs.signingStyle }}
+        WORKSPACE: ${{ inputs.workspace }}
+        ARCHIVE_PATH: ${{ inputs.archivePath }}
       run: |
-        echo "::notice title=🍎 [IOS] Build and Archive::scheme: ${{ inputs.scheme }}, config: ${{ inputs.configuration }}, signing: ${{ inputs.signingStyle }}"
-        echo "🔨 [IOS] Workspace: ${{ inputs.workspace }}, archive: ${{ inputs.archivePath }}"
+        set -euo pipefail
+        echo "::notice title=🍎 [IOS] Build and Archive::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}"
+        echo "🔨 [IOS] Workspace: ${WORKSPACE}, archive: ${ARCHIVE_PATH}"
         echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     - name: Build and archive
       shell: bash
+      env:
+        WORKSPACE: ${{ inputs.workspace }}
+        SCHEME: ${{ inputs.scheme }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        DESTINATION: ${{ inputs.destination }}
+        ARCHIVE_PATH: ${{ inputs.archivePath }}
+        SIGNING_STYLE: ${{ inputs.signingStyle }}
+        DEVELOPMENT_TEAM: ${{ inputs.developmentTeam }}
+        CODE_SIGN_IDENTITY_INPUT: ${{ inputs.codeSignIdentity }}
+        PROVISIONING_PROFILE_UUID: ${{ inputs.provisioningProfileUuid }}
+        BUNDLE_ID: ${{ inputs.bundleId }}
+        KEYCHAIN_PATH_INPUT: ${{ inputs.keychainPath }}
+        DERIVED_DATA_PATH: ${{ inputs.derivedDataPath }}
+        DEBUG_BUILD_SETTINGS: ${{ inputs.debugBuildSettings }}
       run: |
-        echo "::group::🍎 [CHECKPOINT 1/1] Build and Archive"
         set -euo pipefail
+        echo "::group::🍎 [CHECKPOINT 1/1] Build and Archive"
 
         ARGS=(
-          -workspace "${{ inputs.workspace }}"
-          -scheme "${{ inputs.scheme }}"
-          -configuration "${{ inputs.configuration }}"
+          -workspace "${WORKSPACE}"
+          -scheme "${SCHEME}"
+          -configuration "${CONFIGURATION}"
           -sdk iphoneos
-          -destination "${{ inputs.destination }}"
-          -archivePath "${{ inputs.archivePath }}"
+          -destination "${DESTINATION}"
+          -archivePath "${ARCHIVE_PATH}"
           archive
+          -parallelizeTargets
+          COMPILER_INDEX_STORE_ENABLE=NO
+          -hideShellScriptEnvironment
           -showBuildTimingSummary
         )
 
-        if [[ -n "${{ inputs.derivedDataPath }}" ]]; then
-          ARGS+=(-derivedDataPath "${{ inputs.derivedDataPath }}")
+        if [[ -n "${DERIVED_DATA_PATH}" ]]; then
+          ARGS+=(-derivedDataPath "${DERIVED_DATA_PATH}")
         fi
 
-        if [[ "${{ inputs.signingStyle }}" == "automatic" ]]; then
+        if [[ "${SIGNING_STYLE}" == "automatic" ]]; then
           ARGS+=(-allowProvisioningUpdates)
         else
-          if [[ -z "${{ inputs.developmentTeam }}" ]]; then
-            echo "ERROR: inputs.developmentTeam is required for manual signing"
+          if [[ -z "${DEVELOPMENT_TEAM}" ]]; then
+            echo "ERROR: developmentTeam is required for manual signing"
             exit 1
           fi
 
           ARGS+=(
             CODE_SIGN_STYLE=Manual
-            DEVELOPMENT_TEAM="${{ inputs.developmentTeam }}"
+            DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM}"
           )
 
-          if [[ -n "${{ inputs.codeSignIdentity }}" ]]; then
-            ARGS+=(CODE_SIGN_IDENTITY="${{ inputs.codeSignIdentity }}")
+          if [[ -n "${CODE_SIGN_IDENTITY_INPUT}" ]]; then
+            ARGS+=(CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY_INPUT}")
           fi
 
-          # 🔑 THIS IS THE AZURE DEVOPS BEHAVIOR
-          # UUID-based profile binding is safe for Pods
-          if [[ -n "${{ inputs.provisioningProfileUuid }}" ]]; then
-            ARGS+=(PROVISIONING_PROFILE="${{ inputs.provisioningProfileUuid }}")
+          if [[ -n "${PROVISIONING_PROFILE_UUID}" ]]; then
+            ARGS+=(PROVISIONING_PROFILE="${PROVISIONING_PROFILE_UUID}")
           fi
 
-          if [[ -n "${{ inputs.bundleId }}" ]]; then
-            ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${{ inputs.bundleId }}")
+          if [[ -n "${BUNDLE_ID}" ]]; then
+            ARGS+=(PRODUCT_BUNDLE_IDENTIFIER="${BUNDLE_ID}")
           fi
 
-          if [[ -n "${{ inputs.keychainPath }}" ]]; then
-            ARGS+=(OTHER_CODE_SIGN_FLAGS="--keychain ${{ inputs.keychainPath }}")
+          if [[ -n "${KEYCHAIN_PATH_INPUT}" ]]; then
+            ARGS+=(OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH_INPUT}")
           fi
         fi
 
-        if [[ "${{ inputs.debugBuildSettings }}" == "true" ]]; then
+        if [[ "${DEBUG_BUILD_SETTINGS}" == "true" ]]; then
           echo "=== Build settings (summary) ==="
           xcodebuild \
-            -workspace "${{ inputs.workspace }}" \
-            -scheme "${{ inputs.scheme }}" \
-            -configuration "${{ inputs.configuration }}" \
+            -workspace "${WORKSPACE}" \
+            -scheme "${SCHEME}" \
+            -configuration "${CONFIGURATION}" \
             -sdk iphoneos \
-            -showBuildSettings | egrep -i \
+            -showBuildSettings | grep -Ei \
             'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
         fi
 
-        echo "🔨 Starting xcodebuild archive for scheme '${{ inputs.scheme }}' (configuration: ${{ inputs.configuration }})..."
+        echo "🔨 Starting xcodebuild archive for scheme '${SCHEME}' (configuration: ${CONFIGURATION})..."
 
         if command -v xcpretty >/dev/null 2>&1; then
           xcodebuild "${ARGS[@]}" | xcpretty --color
+          exit "${PIPESTATUS[0]}"
         else
           echo "WARN: xcpretty not found; falling back to raw xcodebuild output"
           xcodebuild "${ARGS[@]}"
         fi
+
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [IOS] Archive created::${{ inputs.archivePath }}"
+        echo "::notice title=✅ [IOS] Archive created::${ARCHIVE_PATH}"
         echo "::endgroup::"
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        SCHEME: ${{ inputs.scheme }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        SIGNING_STYLE: ${{ inputs.signingStyle }}
       run: |
-        echo "::error title=❌ [IOS] Build failed::scheme: ${{ inputs.scheme }}, config: ${{ inputs.configuration }}, signing: ${{ inputs.signingStyle }}. Checkpoints — 1) Archive: ${CHECKPOINT_1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
+        set -euo pipefail
+        echo "::error title=❌ [IOS] Build failed::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}. Checkpoints — 1) Archive: ${CHECKPOINT_1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
