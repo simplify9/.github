@@ -1,8 +1,72 @@
-﻿name: Generic iOS Build and TestFlight (reusable)
+﻿# =============================================================================
+# Generic iOS Build and TestFlight — Reusable Workflow
+# =============================================================================
+#
+# PURPOSE:
+#   Builds, signs, and archives a React Native iOS app using xcodebuild,
+#   exports an IPA, and uploads it to TestFlight via App Store Connect API.
+#   Called by per-app caller workflows via `workflow_call`.
+#
+# JOBS:
+#   build                    — Installs dependencies, sets up signing,
+#                              archives via xcodebuild, exports IPA, and
+#                              uploads the artifact for the release jobs.
+#   release                  — Downloads the IPA artifact and uploads to
+#                              TestFlight. Runs when `release-environment`
+#                              input is empty (no environment gate).
+#   release_with_environment — Same as `release` but gated on a named
+#                              GitHub Environment (approval gates, secrets).
+#                              Runs when `release-environment` is set.
+#
+# UPLOAD TOOLS (`upload-tool` input):
+#   appstoreapi (default) — App Store Connect REST API via
+#                           apple-actions/upload-testflight-build@v5.
+#                           Requires no local Apple tooling. Recommended
+#                           for all projects on Xcode 26+.
+#   altool                — Deprecated xcrun altool --upload-app. Retained
+#                           as a fallback. iTMSTransporter (transporter) was
+#                           removed from Xcode 26 and is no longer supported.
+#
+# ARCHIVE PATHS (`use-manual-inline-archive` input):
+#   true (default) — Inline xcodebuild archive. Binds provisioning profile
+#                    by NAME (PROVISIONING_PROFILE_SPECIFIER). Recommended.
+#   false          — Routes through the simplify9 xcode-build composite
+#                    action. Binds profile by UUID (PROVISIONING_PROFILE).
+#                    Matches Azure DevOps signing behavior. No active
+#                    callers use this path — use default unless migrating.
+#
+# SIGNING:
+#   Manual signing only. Certificate (.p12) and provisioning profile are
+#   installed from base64-encoded repository secrets. Team ID is extracted
+#   from the provisioning profile automatically; override with `ios-team-id`
+#   secret if needed.
+#
+# CACHING:
+#   - Node modules       — via actions/setup-node cache
+#   - CocoaPods spec repo — ~/.cocoapods/repos, keyed on Podfile.lock hash
+#   - CocoaPods Pods dir  — ios/Pods, keyed on Podfile.lock hash
+#                           (skipped when clean-reinstall-pods=true)
+#   - ccache             — ~/Library/Caches/ccache, keyed on Podfile.lock
+#                           hash. Speeds up ObjC/C++ pod compilation.
+#                           No benefit for Swift targets.
+#   - Ruby gems          — via ruby/setup-ruby bundler-cache
+#
+# KNOWN LIMITATIONS:
+#   - App Store Connect JWT tokens expire after 20 minutes. If Apple's
+#     build processing takes longer, the upload step may report 401
+#     NOT_AUTHORIZED. The IPA was still delivered — check TestFlight
+#     directly. Set wait-for-processing: false to avoid this.
+#   - -showBuildTimingSummary is a no-op in Xcode 26 (timing table does
+#     not appear regardless of flag).
+#   - ccache only caches ObjC/C++ compilation. Swift targets compile fresh
+#     on every ephemeral runner run.
+# =============================================================================
+name: Generic iOS Build and TestFlight (reusable)
 
 on:
   workflow_call:
     inputs:
+      # ── Runner & Node ───────────────────────────────────────────────────────
       macos-runner:
         description: GitHub-hosted macOS runner label
         required: false
@@ -13,8 +77,12 @@ on:
         required: false
         type: string
         default: "24"
-      # Package manager inputs keep setup-node cache and install commands aligned.
-      # Defaults preserve legacy behavior (Yarn at repository root).
+      # ── Package Manager ─────────────────────────────────────────────────────
+      # package-manager, package-manager-directory, cache-dependency-path, and
+      # install-command work together. setup-node cache type and the default
+      # install command are both derived from package-manager. Set
+      # install-command only when the default (yarn install --frozen-lockfile
+      # or npm ci) is not suitable.
       package-manager:
         description: Node package manager used for cache and default dependency commands (yarn or npm)
         required: false
@@ -30,18 +98,19 @@ on:
         required: false
         type: string
         default: ""
-      # Leave install-command empty to use package-manager defaults.
-      # Set this only when a caller needs a fully custom install command.
       install-command:
         description: Optional explicit dependency install command; if empty uses package-manager default
         required: false
         type: string
         default: ""
+      # ── React Native CLI ────────────────────────────────────────────────────
+      # Legacy 2019 CLI. Disabled by default. Not required for RN 0.60+.
       install-react-native-cli:
         description: Install react-native-cli globally
         required: false
         type: boolean
         default: false
+      # ── Xcode ───────────────────────────────────────────────────────────────
       xcode-version:
         description: "Optional Xcode major or major.minor selector (for example: 26 or 16.4)"
         required: false
@@ -52,6 +121,7 @@ on:
         required: false
         type: boolean
         default: false
+      # ── CocoaPods ───────────────────────────────────────────────────────────
       verify-cocoapods:
         description: Run `pod --version` check
         required: false
@@ -67,6 +137,10 @@ on:
         required: false
         type: string
         default: ios
+      # ── Pre-build Hook ──────────────────────────────────────────────────────
+      # Runs before dependency install. Useful for writing .env files or
+      # mutating config before yarn/npm runs. Content is passed to eval —
+      # never pass untrusted input here.
       pre-build-script:
         description: Optional bash script to run before dependency install (for example, env file mutation)
         required: false
@@ -78,6 +152,7 @@ on:
         type: string
         default: "."
 
+      # ── Xcode Project ─────────────────────────────────────────────────────────────
       workspace:
         description: Path to .xcworkspace
         required: true
@@ -112,6 +187,7 @@ on:
         type: boolean
         default: false
 
+      # ── Signing ─────────────────────────────────────────────────────────────────
       signing-style:
         description: Signing style for xcode-build action (manual or automatic)
         required: false
@@ -132,6 +208,10 @@ on:
         required: false
         type: boolean
         default: false
+      # ── Archive Path ────────────────────────────────────────────────────────────
+      # use-manual-inline-archive=true (default): inline xcodebuild, profile
+      # bound by NAME. use-manual-inline-archive=false: routes through
+      # simplify9 xcode-build action, profile bound by UUID.
       use-manual-inline-archive:
         description: Use direct xcodebuild archive command (profile NAME) instead of simplify9 xcode-build action (profile UUID)
         required: false
@@ -143,43 +223,34 @@ on:
         type: string
         default: ""
 
-      # Versioning modes:
-      # - none: compute VERSION/BUILD_NUMBER from run number only.
-      # - pbxproj-counter: write prefix.run_number into MARKETING_VERSION.
-      # - pbxproj-counter-rollover: X.Y[.Z] start version with run-based carry to X.Y.Z.
-      # - pbxproj-auto-increment: semver-like bump from current pbxproj value.
+      # ── Versioning ───────────────────────────────────────────────────────────────
+      # pbxproj-counter-rollover: marketing-prefix in X.Y or X.Y.Z format with
+      # single-digit carry logic. Sets MARKETING_VERSION and
+      # CURRENT_PROJECT_VERSION in the .pbxproj file on every run.
       versioning-strategy:
-        description: none, pbxproj-counter, pbxproj-counter-rollover, or pbxproj-auto-increment
+        description: Versioning strategy (pbxproj-counter-rollover)
         required: false
         type: string
         default: pbxproj-counter-rollover
       pbxproj-path:
-        description: Path to project.pbxproj when using pbxproj-driven versioning
+        description: Path to project.pbxproj
         required: false
         type: string
         default: ""
-      # For rollover strategy, this is the manual start version in X.Y or X.Y.Z format.
       marketing-prefix:
-        description: Marketing version prefix. For pbxproj-counter-rollover use X.Y or X.Y.Z as the start version.
+        description: Marketing version start in X.Y or X.Y.Z format (for example 1.0 or 2.3.0)
         required: false
         type: string
         default: "1.0"
-      marketing-version-bump:
-        description: For pbxproj-auto-increment, which segment to bump (patch, minor, or major)
-        required: false
-        type: string
-        default: patch
-      marketing-version-floor:
-        description: Optional minimum marketing version (for example 4.1 or 4.1.0)
-        required: false
-        type: string
-        default: ""
       build-number-offset:
-        description: Offset applied when computing CURRENT_PROJECT_VERSION in pbxproj-counter family modes (default 1)
+        description: Offset added to CURRENT_PROJECT_VERSION when computing the new build number (default 1)
         required: false
         type: string
         default: "1"
 
+      # ── Artifact ────────────────────────────────────────────────────────────────
+      # ipa-name-pattern tokens: {scheme}, {version}, {build_number},
+      # {run_number}
       ipa-name-pattern:
         description: Output IPA file name pattern with tokens {scheme},{version},{build_number},{run_number}
         required: false
@@ -191,6 +262,11 @@ on:
         type: string
         default: ipa
 
+      # ── Upload ────────────────────────────────────────────────────────────────
+      # appstoreapi (default): App Store Connect REST API. No local tooling
+      # required. Recommended for Xcode 26+.
+      # altool: deprecated xcrun altool --upload-app. Fallback only.
+      # transporter: REMOVED. iTMSTransporter was removed from Xcode 26.
       upload-tool:
         description: "TestFlight upload tool: appstoreapi or altool. (transporter removed — iTMSTransporter was removed from Xcode 26)"
         required: false
@@ -202,6 +278,10 @@ on:
         type: string
         default: raw
 
+      # ── Release Gating ───────────────────────────────────────────────────────
+      # Set release-environment to route through release_with_environment job,
+      # which enforces GitHub Environment approval gates. Leave empty to use
+      # the ungated release job.
       release-environment:
         description: Optional GitHub environment for release job
         required: false
@@ -214,6 +294,10 @@ on:
         type: boolean
         default: false
 
+      # ── Ruby & Bundler ──────────────────────────────────────────────────────────
+      # Required when using bundler-managed CocoaPods. Set ruby-version to
+      # match the version in .ruby-version or Gemfile. CFPropertyList 3.0.9
+      # requires ruby < 3.2; use 3.1 for RN 0.85 projects.
       ruby-version:
         description: "Ruby version for bundler/CocoaPods setup. Empty disables Ruby setup."
         required: false
@@ -225,6 +309,10 @@ on:
         type: boolean
         default: false
 
+      # ── Build Acceleration ───────────────────────────────────────────────────────
+      # ccache caches ObjC/C++ compilation. No benefit for Swift targets.
+      # Requires :ccache_enabled => true in Podfile react_native_post_install.
+      # Cache keyed on Podfile.lock — any pod version change invalidates it.
       enable-ccache:
         description: "Enable ccache for Objective-C/C++ pod compilation (partial speedup; no Swift benefit)."
         required: false
@@ -288,6 +376,7 @@ jobs:
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+      # ── Environment Setup ────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -298,6 +387,10 @@ jobs:
           ruby-version: ${{ inputs.ruby-version }}
           bundler-cache: ${{ inputs.use-bundler }}
 
+      # ── Build Acceleration (ccache) ─────────────────────────────────────────────────────
+      # ccache intercepts the ObjC/C++ compiler via Homebrew libexec symlinks.
+      # Cache is keyed on Podfile.lock so any pod version change invalidates it.
+      # Stats are reset before archive and printed in the job summary.
       - name: Install ccache (optional)
         if: ${{ inputs.enable-ccache }}
         shell: bash
@@ -340,6 +433,7 @@ jobs:
           ccache --version
           ccache --show-config
 
+      # ── Runtime Paths & Xcode ───────────────────────────────────────────────────────
       - name: Initialize runtime paths
         shell: bash
         run: |
@@ -352,6 +446,7 @@ jobs:
         with:
           xcode-version: ${{ inputs.xcode-version }}
 
+      # ── Pre-build Hook ──────────────────────────────────────────────────────────────
       - name: Run pre-build mutation script (optional)
         if: ${{ inputs.pre-build-script != '' }}
         shell: bash
@@ -363,6 +458,7 @@ jobs:
           echo "Running configured pre-build script in: $PWD"
           eval "${PRE_BUILD_SCRIPT}"
 
+      # ── Node Dependencies ───────────────────────────────────────────────────────────────
       - name: Resolve package manager settings
         id: package_manager
         shell: bash
@@ -379,12 +475,6 @@ jobs:
 
           if [[ -z "${PACKAGE_DIR}" ]]; then
             PACKAGE_DIR="."
-          fi
-
-          if [[ "${PACKAGE_DIR}" == "." ]]; then
-            DISPLAY_DIR="repository root"
-          else
-            DISPLAY_DIR="${PACKAGE_DIR}"
           fi
 
           # Keep cache type and install commands tied to the selected package manager.
@@ -456,23 +546,26 @@ jobs:
       - name: Install React Native CLI
         if: ${{ inputs.install-react-native-cli }}
         shell: bash
-        run: npm install -g react-native-cli
+        run: |
+          set -euo pipefail
+          npm install -g react-native-cli
 
-      # CocoaPods caching — split into two steps.
+      # ── CocoaPods ──────────────────────────────────────────────────────────────────
+      # CocoaPods caching — split into two independent cache steps.
       #
-      # Keyed on Podfile.lock (NOT Podfile): the lock file pins exact pod versions and
-      # source URLs; the Podfile only declares ranges. Key changes whenever `pod update`
-      # produces a new Podfile.lock commit.
+      # Cache key: Podfile.lock (NOT Podfile). The lock file pins exact
+      # versions and source URLs. The Podfile only declares ranges.
+      # Key rotates automatically on every `pod update` commit.
       #
       # Why two steps?
-      # ~/.cocoapods/repos (the global spec repository, 1-3 GB) is safe to reuse even
-      # during a clean reinstall — the clean only removes the project's Pods dir and
-      # Podfile.lock, not the global spec repo. Caching it always eliminates the dominant
-      # time cost of `pod install --repo-update`.
+      #   ~/.cocoapods/repos (global spec repo, 1-3 GB) — safe to restore
+      #   even during clean reinstalls. Eliminates the dominant time cost
+      #   of `pod install --repo-update`.
       #
-      # The project Pods dir (ios/Pods) is only useful when NOT doing a clean reinstall;
-      # restoring it before pod deintegrate + reinstall adds overhead and is immediately
-      # discarded, so that cache is bypassed when clean-reinstall-pods=true.
+      #   ios/Pods (project Pods dir) — only useful when NOT doing a clean
+      #   reinstall. Restoring it before `pod deintegrate` adds overhead
+      #   and is immediately discarded, so this cache is skipped when
+      #   clean-reinstall-pods=true.
       - name: Cache CocoaPods spec repo
         id: cache-pods-specs
         uses: actions/cache@v5
@@ -527,16 +620,16 @@ jobs:
           set -euo pipefail
           pod --version
 
+      # ── Versioning ──────────────────────────────────────────────────────────────────
+      # Writes MARKETING_VERSION and CURRENT_PROJECT_VERSION into the
+      # .pbxproj file. VERSION and BUILD_NUMBER are also exported to
+      # GITHUB_ENV for use in downstream steps (IPA renaming, summaries).
       - name: Update pbxproj versions (automated)
-        if: ${{ inputs.versioning-strategy == 'pbxproj-counter' || inputs.versioning-strategy == 'pbxproj-counter-rollover' || inputs.versioning-strategy == 'pbxproj-auto-increment' }}
         shell: bash
         env:
           PBXPROJ_PATH: ${{ inputs.pbxproj-path }}
-          VERSIONING_STRATEGY: ${{ inputs.versioning-strategy }}
           BUILD_NUMBER_OFFSET: ${{ inputs.build-number-offset }}
           MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
-          MARKETING_VERSION_BUMP: ${{ inputs.marketing-version-bump }}
-          MARKETING_VERSION_FLOOR: ${{ inputs.marketing-version-floor }}
         run: |
           set -euo pipefail
 
@@ -544,48 +637,6 @@ jobs:
             echo "ERROR: pbxproj versioning requires a valid pbxproj-path input"
             exit 1
           fi
-
-          normalize_semver() {
-            local v="$1"
-            if [[ "$v" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-              echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0"
-              return 0
-            fi
-            if [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo "$v"
-              return 0
-            fi
-            return 1
-          }
-
-          version_lt() {
-            local a="$1"
-            local b="$2"
-            local a1 a2 a3 b1 b2 b3
-            IFS='.' read -r a1 a2 a3 <<< "$a"
-            IFS='.' read -r b1 b2 b3 <<< "$b"
-            if (( a1 < b1 )); then return 0; fi
-            if (( a1 > b1 )); then return 1; fi
-            if (( a2 < b2 )); then return 0; fi
-            if (( a2 > b2 )); then return 1; fi
-            if (( a3 < b3 )); then return 0; fi
-            return 1
-          }
-
-          CURRENT_MARKETING_RAW=$(
-            grep -m 1 "MARKETING_VERSION = " "${PBXPROJ_PATH}" \
-              | sed -E 's/.*MARKETING_VERSION = ([^;]+);.*/\1/'
-          )
-
-          if [[ -z "${CURRENT_MARKETING_RAW}" ]]; then
-            echo "ERROR: Could not parse MARKETING_VERSION from ${PBXPROJ_PATH}"
-            exit 1
-          fi
-
-          CURRENT_MARKETING="$(normalize_semver "${CURRENT_MARKETING_RAW}")" || {
-            echo "ERROR: Unsupported MARKETING_VERSION format '${CURRENT_MARKETING_RAW}'. Expected X.Y or X.Y.Z"
-            exit 1
-          }
 
           BASE_BUILD=$(
             grep -m 1 "CURRENT_PROJECT_VERSION = " "${PBXPROJ_PATH}" \
@@ -597,101 +648,49 @@ jobs:
             exit 1
           fi
 
-          STRATEGY="${VERSIONING_STRATEGY}"
-          NEW_MARKETING_VERSION=""
-          NEW_BUILD_NUMBER=""
-
-          echo "Selected versioning strategy: ${STRATEGY}"
           echo "Original marketing-prefix input: ${MARKETING_PREFIX}"
           echo "github.run_number: ${GITHUB_RUN_NUMBER}"
-          echo "Original MARKETING_VERSION in pbxproj: ${CURRENT_MARKETING_RAW}"
           echo "Original CURRENT_PROJECT_VERSION in pbxproj: ${BASE_BUILD}"
 
-          if [[ "${STRATEGY}" == "pbxproj-counter" ]]; then
-            # Counter mode: MARKETING_VERSION = {marketing-prefix}.{run_number}
-            OFFSET="${BUILD_NUMBER_OFFSET}"
-            if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-              echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-              exit 1
-            fi
-
-            NEW_MARKETING_VERSION="${MARKETING_PREFIX}.${GITHUB_RUN_NUMBER}"
-            NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
-          elif [[ "${STRATEGY}" == "pbxproj-counter-rollover" ]]; then
-            # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
-            OFFSET="${BUILD_NUMBER_OFFSET}"
-            if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-              echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-              exit 1
-            fi
-
-            PREFIX_RAW="${MARKETING_PREFIX}"
-            if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
-              BASE_MAJOR="${BASH_REMATCH[1]}"
-              BASE_MINOR="${BASH_REMATCH[2]}"
-              BASE_PATCH="${BASH_REMATCH[3]}"
-            elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
-              BASE_MAJOR="${BASH_REMATCH[1]}"
-              BASE_MINOR="${BASH_REMATCH[2]}"
-              BASE_PATCH="0"
-            else
-              echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y or X.Y.Z format with single-digit minor/patch (0-9). Got '${PREFIX_RAW}'."
-              exit 1
-            fi
-
-            INCREMENT=$((GITHUB_RUN_NUMBER))
-            TOTAL_PATCH=$((BASE_PATCH + INCREMENT))
-            PATCH=$((TOTAL_PATCH % 10))
-            MINOR_CARRY=$((TOTAL_PATCH / 10))
-            TOTAL_MINOR=$((BASE_MINOR + MINOR_CARRY))
-            FINAL_MINOR=$((TOTAL_MINOR % 10))
-            MAJOR_CARRY=$((TOTAL_MINOR / 10))
-            FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
-
-            NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
-            NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
-
-            echo "Rollover base major: ${BASE_MAJOR}"
-            echo "Rollover base minor: ${BASE_MINOR}"
-            echo "Rollover base patch: ${BASE_PATCH}"
-            echo "Rollover increment: ${INCREMENT}"
-            echo "Rollover computed patch: ${PATCH}"
-            echo "Rollover computed minor carry: ${MINOR_CARRY}"
-          else
-            # Auto-increment mode: bump current MARKETING_VERSION in pbxproj.
-            CUR_NORM="${CURRENT_MARKETING}"
-            IFS='.' read -r M m p <<< "${CUR_NORM}"
-
-            BUMP="${MARKETING_VERSION_BUMP}"
-            case "${BUMP}" in
-              major)
-                M=$((M + 1)); m=0; p=0 ;;
-              minor)
-                m=$((m + 1)); p=0 ;;
-              patch)
-                p=$((p + 1)) ;;
-              *)
-                echo "ERROR: Unsupported marketing-version-bump '${BUMP}'. Use patch, minor, or major."
-                exit 1 ;;
-            esac
-
-            NEW_MARKETING_VERSION="${M}.${m}.${p}"
-
-            FLOOR_RAW="${MARKETING_VERSION_FLOOR}"
-            if [[ -n "${FLOOR_RAW}" ]]; then
-              FLOOR_NORM="$(normalize_semver "${FLOOR_RAW}")" || {
-                echo "ERROR: Invalid marketing-version-floor '${FLOOR_RAW}'. Expected X.Y or X.Y.Z"
-                exit 1
-              }
-
-              if version_lt "${NEW_MARKETING_VERSION}" "${FLOOR_NORM}"; then
-                NEW_MARKETING_VERSION="${FLOOR_NORM}"
-              fi
-            fi
-
-            NEW_BUILD_NUMBER=$((BASE_BUILD + 1))
+          # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
+          OFFSET="${BUILD_NUMBER_OFFSET}"
+          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
+            exit 1
           fi
 
+          PREFIX_RAW="${MARKETING_PREFIX}"
+          if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="${BASH_REMATCH[3]}"
+          elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="0"
+          else
+            echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y or X.Y.Z format with single-digit minor/patch (0-9). Got '${PREFIX_RAW}'."
+            exit 1
+          fi
+
+          INCREMENT=$((GITHUB_RUN_NUMBER))
+          TOTAL_PATCH=$((BASE_PATCH + INCREMENT))
+          PATCH=$((TOTAL_PATCH % 10))
+          MINOR_CARRY=$((TOTAL_PATCH / 10))
+          TOTAL_MINOR=$((BASE_MINOR + MINOR_CARRY))
+          FINAL_MINOR=$((TOTAL_MINOR % 10))
+          MAJOR_CARRY=$((TOTAL_MINOR / 10))
+          FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
+
+          NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
+          NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
+
+          echo "Rollover base major: ${BASE_MAJOR}"
+          echo "Rollover base minor: ${BASE_MINOR}"
+          echo "Rollover base patch: ${BASE_PATCH}"
+          echo "Rollover increment: ${INCREMENT}"
+          echo "Rollover computed patch: ${PATCH}"
+          echo "Rollover computed minor carry: ${MINOR_CARRY}"
           echo "Computed MARKETING_VERSION=${NEW_MARKETING_VERSION}"
           echo "Computed CURRENT_PROJECT_VERSION=${NEW_BUILD_NUMBER}"
 
@@ -716,6 +715,11 @@ jobs:
           rm -rf Pods Podfile.lock
           pod install --repo-update
 
+      # ── Signing ──────────────────────────────────────────────────────────────────
+      # Certificate (.p12) and provisioning profile are installed from
+      # base64-encoded secrets. Profile metadata (UUID, name, bundle ID,
+      # team ID) is extracted from the installed profile for use in the
+      # archive and export steps.
       - name: Install signing certificate
         uses: simplify9/.github/.github/actions/ios-install-cert@main
         with:
@@ -765,25 +769,8 @@ jobs:
           echo "IOS_PROFILE_UUID=${PROFILE_UUID}" >> "$GITHUB_ENV"
           echo "IOS_PROFILE_NAME=${PROFILE_NAME}" >> "$GITHUB_ENV"
           echo "TEAM_ID_FROM_PROFILE=${TEAM_ID_FROM_PROFILE}" >> "$GITHUB_ENV"
-          echo "TEAM_NAME=${TEAM_NAME}" >> "$GITHUB_ENV"
+          echo "TEAM_NAME=${TEAM_NAME}" >> "$GITHUB_ENV"  # informational only — not consumed downstream
           echo "IOS_BUNDLE_ID=${BUNDLE_ID}" >> "$GITHUB_ENV"
-
-      - name: Compute version variables
-        id: version_vars
-        # Fallback only for strategy=none. Other strategies already set VERSION/BUILD_NUMBER.
-        if: ${{ inputs.versioning-strategy == 'none' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="${{ inputs.marketing-prefix }}.${GITHUB_RUN_NUMBER}"
-          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
-
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Finalize version outputs
         id: final_version
@@ -793,6 +780,25 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      # ── Archive ───────────────────────────────────────────────────────────────────
+      # Two paths controlled by use-manual-inline-archive:
+      #   true (default) — Inline xcodebuild. Binds provisioning profile
+      #                    by NAME (PROVISIONING_PROFILE_SPECIFIER).
+      #   false          — simplify9 xcode-build composite action. Binds
+      #                    profile by UUID. No active callers use this path.
+      #
+      # Archive flags:
+      #   -parallelizeTargets            — builds independent targets in parallel
+      #   COMPILER_INDEX_STORE_ENABLE=NO — disables Xcode IDE indexing (CI-only)
+      #   CLANG_ENABLE_EXPLICIT_MODULES_WITH_COMPILER_LAUNCHER=YES
+      #                                  — keeps explicit modules active with
+      #                                    ccache as the compiler launcher
+      #   -quiet                         — suppresses per-file compilation logs
+      #   -hideShellScriptEnvironment    — suppresses env var dumps from
+      #                                    script phases
+      #   -showBuildTimingSummary        — no-op in Xcode 26 (timing table
+      #                                    does not appear); retained for
+      #                                    future Xcode versions
       - name: Archive (simplify9 xcode-build action)
         if: ${{ !inputs.use-manual-inline-archive }}
         uses: simplify9/.github/.github/actions/xcode-build@main
@@ -862,6 +868,11 @@ jobs:
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${ARCHIVE_PATH}"
 
+      # ── Export ───────────────────────────────────────────────────────────────────
+      # exportOptions.plist can be provided statically via export-options-plist
+      # or generated from provisioning profile metadata when
+      # generate-export-options=true. The generated plist uses
+      # app-store-connect method (Xcode 26 — replaces deprecated app-store).
       - name: Generate exportOptions.plist
         if: ${{ inputs.generate-export-options }}
         shell: bash
@@ -934,6 +945,10 @@ jobs:
           exportOptionsPlist: ${{ steps.resolve_export.outputs.export_plist }}
           exportPath: ${{ inputs.export-path }}
 
+      # ── Artifact ───────────────────────────────────────────────────────────────────
+      # IPA is renamed using ipa-name-pattern, then uploaded as a GitHub
+      # Actions artifact. compression-level=0: IPAs are already compressed;
+      # recompressing wastes runner time with no size benefit.
       - name: Rename IPA
         id: rename_ipa
         shell: bash
@@ -1037,16 +1052,20 @@ jobs:
 
     steps:
       - name: Announce release job
+        shell: bash
         run: |
+          set -euo pipefail
           echo "::notice title=🍎 [IOS] Upload to TestFlight — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
           echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+      # ── Environment Setup ────────────────────────────────────────────────────────────
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ inputs.xcode-version }}
 
+      # ── IPA Retrieval ──────────────────────────────────────────────────────────────
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
@@ -1056,10 +1075,12 @@ jobs:
       - name: Resolve IPA path for release runner
         id: ipa
         shell: bash
+        env:
+          CANDIDATE: ${{ needs.build.outputs.ipa-file }}
         run: |
           set -euo pipefail
 
-          CANDIDATE='${{ needs.build.outputs.ipa-file }}'
+          CANDIDATE="${CANDIDATE}"
           IPA_FILE=""
 
           if [[ -n "${CANDIDATE}" ]]; then
@@ -1078,6 +1099,15 @@ jobs:
 
           echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
 
+      # ── Credentials ─────────────────────────────────────────────────────────────────
+      # App Store Connect API key is decoded from base64 into two locations:
+      #   1. $HOME/.appstoreconnect/private_keys/ — for altool path
+      #   2. $RUNNER_TEMP/appstoreapi_keys/       — for appstoreapi path,
+      #      written to GITHUB_ENV as APPSTOREAPI_KEY_CONTENT
+      # Each line of the decoded PEM is masked to prevent it appearing
+      # in the action input block printed before apple-actions runs.
+      # Note: GitHub only auto-masks declared secrets, not derived env vars,
+      # so the per-line masking is required.
       - name: Validate release credentials
         shell: bash
         env:
@@ -1151,9 +1181,11 @@ jobs:
       - name: Prepare TestFlight upload (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
         run: |
           set -euo pipefail
-          IPA='${{ steps.ipa.outputs.path }}'
+          IPA="${IPA_PATH}"
           IPA_BYTES=$(stat -f%z "${IPA}")
           IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
           IPA_NAME="$(basename "${IPA}")"
@@ -1161,16 +1193,26 @@ jobs:
           echo "::group::🍎 [IOS] Upload details"
           echo "  → File:    ${IPA_NAME}"
           echo "  → Size:    ${IPA_SIZE_MB} MB"
-          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v4)"
+          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
           echo "  → Started: $(date -u +'%H:%M:%S UTC')"
           echo "::endgroup::"
           echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
           echo "APPSTOREAPI_IPA_SIZE_MB=${IPA_SIZE_MB}" >> "$GITHUB_ENV"
           echo "APPSTOREAPI_IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
 
+      # ── Upload ──────────────────────────────────────────────────────────────────────
+      # appstoreapi path: uses App Store Connect REST API. No local tooling.
+      # Uploads chunks then polls for Apple processing confirmation.
+      # KNOWN LIMITATION: App Store Connect JWT tokens expire after 20 minutes.
+      # If Apple processing takes longer, the poll returns 401 NOT_AUTHORIZED.
+      # The IPA was still delivered. Check TestFlight directly if this occurs.
+      # Set wait-for-processing: false to skip polling (fire-and-forget).
+      #
+      # altool path: deprecated xcrun altool --upload-app. Fire-and-forget.
+      # No processing confirmation. Retained for backwards compatibility.
       - name: Upload to TestFlight (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        uses: apple-actions/upload-testflight-build@v4
+        uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: ${{ steps.ipa.outputs.path }}
           issuer-id: ${{ secrets.appstore-issuer-id }}
@@ -1290,16 +1332,20 @@ jobs:
 
     steps:
       - name: Announce release-with-environment job
+        shell: bash
         run: |
+          set -euo pipefail
           echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Env: ${{ inputs.release-environment }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
           echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+      # ── Environment Setup ────────────────────────────────────────────────────────────
       - name: Select Xcode (optional)
         if: ${{ inputs.xcode-version != '' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ inputs.xcode-version }}
 
+      # ── IPA Retrieval ──────────────────────────────────────────────────────────────
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
@@ -1309,10 +1355,12 @@ jobs:
       - name: Resolve IPA path for release runner
         id: ipa
         shell: bash
+        env:
+          CANDIDATE: ${{ needs.build.outputs.ipa-file }}
         run: |
           set -euo pipefail
 
-          CANDIDATE='${{ needs.build.outputs.ipa-file }}'
+          CANDIDATE="${CANDIDATE}"
           IPA_FILE=""
 
           if [[ -n "${CANDIDATE}" ]]; then
@@ -1331,6 +1379,15 @@ jobs:
 
           echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
 
+      # ── Credentials ─────────────────────────────────────────────────────────────────
+      # App Store Connect API key is decoded from base64 into two locations:
+      #   1. $HOME/.appstoreconnect/private_keys/ — for altool path
+      #   2. $RUNNER_TEMP/appstoreapi_keys/       — for appstoreapi path,
+      #      written to GITHUB_ENV as APPSTOREAPI_KEY_CONTENT
+      # Each line of the decoded PEM is masked to prevent it appearing
+      # in the action input block printed before apple-actions runs.
+      # Note: GitHub only auto-masks declared secrets, not derived env vars,
+      # so the per-line masking is required.
       - name: Validate release credentials
         shell: bash
         env:
@@ -1404,9 +1461,11 @@ jobs:
       - name: Prepare TestFlight upload (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
         run: |
           set -euo pipefail
-          IPA='${{ steps.ipa.outputs.path }}'
+          IPA="${IPA_PATH}"
           IPA_BYTES=$(stat -f%z "${IPA}")
           IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
           IPA_NAME="$(basename "${IPA}")"
@@ -1414,16 +1473,26 @@ jobs:
           echo "::group::🍎 [IOS] Upload details"
           echo "  → File:    ${IPA_NAME}"
           echo "  → Size:    ${IPA_SIZE_MB} MB"
-          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v4)"
+          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
           echo "  → Started: $(date -u +'%H:%M:%S UTC')"
           echo "::endgroup::"
           echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
           echo "APPSTOREAPI_IPA_SIZE_MB=${IPA_SIZE_MB}" >> "$GITHUB_ENV"
           echo "APPSTOREAPI_IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
 
+      # ── Upload ───────────────────────────────────────────────────────────────────
+      # appstoreapi path: uses App Store Connect REST API. No local tooling.
+      # Uploads chunks then polls for Apple processing confirmation.
+      # KNOWN LIMITATION: App Store Connect JWT tokens expire after 20 minutes.
+      # If Apple processing takes longer, the poll returns 401 NOT_AUTHORIZED.
+      # The IPA was still delivered. Check TestFlight directly if this occurs.
+      # Set wait-for-processing: false to skip polling (fire-and-forget).
+      #
+      # altool path: deprecated xcrun altool --upload-app. Fire-and-forget.
+      # No processing confirmation. Retained for backwards compatibility.
       - name: Upload to TestFlight (App Store Connect API)
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        uses: apple-actions/upload-testflight-build@v4
+        uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: ${{ steps.ipa.outputs.path }}
           issuer-id: ${{ secrets.appstore-issuer-id }}
@@ -1482,6 +1551,9 @@ jobs:
             echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
             exit 1
           fi
+
+          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED (altool)"
 
       - name: Report release failure
         if: failure()
