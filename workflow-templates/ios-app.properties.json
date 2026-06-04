@@ -1,0 +1,10 @@
+{
+    "name": "iOS App CI/CD",
+    "description": "Builds, signs, and uploads an iOS React Native app to TestFlight using the Simplify9 reusable workflow.",
+    "iconName": "octicon-device-mobile",
+    "categories": [
+        "iOS",
+        "React Native",
+        "TestFlight"
+    ]
+}
