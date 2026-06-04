@@ -14,7 +14,7 @@
 #
 # INPUTS (only non-default values are declared — see generic template for
 #   full input reference):
-#   https://github.com/simplify9/.github/blob/main/.github/workflows/generic-ios-testflight.yml
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/ios-build.yml
 # =============================================================================
 name: iOS CI/CD                          # REPLACE: e.g. "Mealivery Customer iOS"
 run-name: ios-${{ github.ref_name }}-${{ github.run_number }}
@@ -39,7 +39,7 @@ jobs:
   development:
     name: iOS Dev
     if: ${{ github.ref_name == 'staging' }}
-    uses: simplify9/.github/.github/workflows/generic-ios-testflight.yml@main
+    uses: simplify9/.github/.github/workflows/ios-build.yml@main
     with:
       # ── Runner ────────────────────────────────────────────────────────────
       xcode-version: "26"
@@ -76,7 +76,7 @@ jobs:
   production:
     name: iOS Prod
     if: ${{ github.ref_name == 'main' }}
-    uses: simplify9/.github/.github/workflows/generic-ios-testflight.yml@main
+    uses: simplify9/.github/.github/workflows/ios-build.yml@main
     with:
       # ── Runner ────────────────────────────────────────────────────────────
       xcode-version: "26"

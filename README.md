@@ -36,7 +36,7 @@
 | Docker image only (no deploy) | Container registry | [`ci-docker.yaml`](#ci-dockeryaml) |
 | Helm deploy only (no Docker) | Kubernetes via Helm | [`ci-helm.yaml`](#ci-helmyaml) |
 | Helm deploy from a values file | Kubernetes via Helm | [`helm-deploy-values.yml`](#helm-deploy-valuesyml) |
-| iOS app | TestFlight | [`generic-ios-testflight.yml`](#generic-ios-testflightyml) |
+| iOS app | TestFlight | [`ios-build.yml`](#ios-buildyml) |
 | Android app | Google Play | [`generic-android-google-play.yml`](#generic-android-google-playyml) |
 | Helm chart development | ChartMuseum / OCI | [`generic-chart-helm.yml`](#generic-chart-helmyml) |
 | Helm chart with Gateway API | ChartMuseum | [`generic-gateway-chart-cicd.yml`](#generic-gateway-chart-cicdyml) |
@@ -113,7 +113,7 @@ GOOGLE_PLAY_SERVICE_ACCOUNT_JSON     # Google Play service account JSON
     │   ├── ci-docker.yaml
     │   ├── ci-helm.yaml
     │   ├── helm-deploy-values.yml
-    │   ├── generic-ios-testflight.yml
+    │   ├── ios-build.yml
     │   ├── generic-android-google-play.yml
     │   ├── ios-testflight-dispatch-template.yml
     │   ├── android-google-play-dispatch-template.yml
@@ -540,7 +540,7 @@ Deploys a Helm chart using a **values file** from the calling repository. Useful
 
 ---
 
-#### `generic-ios-testflight.yml`
+#### `ios-build`
 
 Builds an iOS application and uploads it to TestFlight. Supports React Native and native Swift/ObjC projects. Uses **manual signing only** in CI.
 
@@ -578,7 +578,7 @@ Builds an iOS application and uploads it to TestFlight. Supports React Native an
 ```yaml
 jobs:
   build-and-release:
-    uses: simplify9/.github/.github/workflows/generic-ios-testflight.yml@main
+    uses: simplify9/.github/.github/workflows/ios-build.yml@main
     with:
       bundle-id: com.mycompany.myapp
       scheme: MyApp
