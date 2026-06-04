@@ -1,38 +1,56 @@
-# ============================================================
-# PURPOSE
-#   Reusable workflow — builds a signed Android App Bundle (AAB)
-#   and publishes it to a Google Play track.
+# =============================================================================
+# Generic Android Build and Google Play Release — Reusable Workflow
+# =============================================================================
 #
-# JOBS
-#   build                   — Compiles and signs the AAB; uploads it as a
-#                             workflow artifact.
-#   release_with_environment — Downloads the artifact, validates credentials,
-#                             and publishes to the requested Play track.
-#                             Runs only when release-environment is non-empty.
-#                             Uses a named GitHub environment so protection
-#                             rules (required reviewers, wait timers) gate the
-#                             publish step.
+# PURPOSE:
+#   Builds and signs a React Native Android app as an AAB using Gradle,
+#   then publishes it to the Google Play Store via the Play Developer API.
+#   Called by per-app caller workflows via `workflow_call`.
 #
-# UPLOAD
-#   Uses r0adkll/upload-google-play@v1.
+# JOBS:
+#   build                    — Installs dependencies, computes version,
+#                              builds and signs the AAB, renames it, and
+#                              uploads the artifact for the release job.
+#   release_with_environment — Downloads the AAB artifact and uploads to
+#                              Google Play. Gated on a named GitHub
+#                              Environment (approval gates, environment
+#                              secrets). Always runs via this path.
 #
-# VERSIONING
-#   version-code  = github.run_number + version-code-offset
-#   version-name  = <major>.<minor>.<version-code>
+# UPLOAD:
+#   Uses r0adkll/upload-google-play@v1 — the community-standard MIT-licensed
+#   action for Google Play uploads via the Play Developer API v3. Supports
+#   all tracks (internal, alpha, beta, production) and staged rollouts.
 #
-# SIGNING
-#   Keystore is stored as a base64 secret and decoded at runtime into a
-#   temp file; the decoded path is written to a masked step output so it
-#   never appears in logs.
+# VERSIONING:
+#   versionName: carry-based rollover from version-prefix + run counter.
+#                version-prefix X.Y.Z + (run_number + version-name-offset).
+#                Patch carries into minor at 9, minor carries into major
+#                at 9 (e.g. 4.9.9 at run 1 → 5.0.0).
+#                Optional version-name-override bypasses this logic.
+#   versionCode: strictly monotonic integer —
+#                run_number + version-code-offset.
+#                Intentionally decoupled from versionName for Play
+#                upgrade-path correctness.
 #
-# CACHING
-#   Gradle home is cached by gradle/actions/setup-gradle@v4.
-#   Node modules are cached by actions/setup-node@v6.
+# SIGNING:
+#   Keystore decoded from base64 secret at build time using printf to
+#   avoid newline corruption. Signing parameters passed to Gradle via
+#   environment variables — never via inline template expansion.
 #
-# KNOWN LIMITATIONS
-#   - Single NDK version (27.1.12297006) is pre-installed; projects that
-#     require a different version must set it via ndkVersion in build.gradle.
-# ============================================================
+# CACHING:
+#   - Node modules  — via actions/setup-node cache, keyed on lockfile
+#   - Gradle home   — via gradle/actions/setup-gradle@v5 (pinned; see
+#                     note above Setup Gradle step re: v6 upgrade path)
+#
+# KNOWN LIMITATIONS:
+#   - NDK version 27.1.12297006 (r27b LTS) is hardcoded for RN 0.85
+#     compatibility. Update when upgrading React Native.
+#   - setup-gradle@v5 is pinned. v6.1.0 introduced a free MIT-licensed
+#     Basic Caching option (cache-provider: basic). Evaluate upgrade when
+#     ready to move to @v6.
+#   - version-code-offset default (80000) keeps Play versionCode above
+#     any values set before CI migration.
+# =============================================================================
 name: Generic Android Build and Google Play Release (reusable)
 
 on:
@@ -259,11 +277,11 @@ jobs:
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
-      # ── SOURCE ──────────────────────────────────────────────────────────────
+      # ── Environment Setup ───────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v6
 
-      # ── VERSION ─────────────────────────────────────────────────────────────
+      # ── Versioning ──────────────────────────────────────────────────────────
       - name: Compute version
         id: compute
         shell: bash
@@ -358,7 +376,7 @@ jobs:
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
-      # ── PACKAGE MANAGER ─────────────────────────────────────────────────────
+      # ── Node Dependencies ───────────────────────────────────────────────────
       - name: Resolve package manager
         id: package_manager
         shell: bash
@@ -370,9 +388,7 @@ jobs:
           set -euo pipefail
 
           # Normalize inputs so package-manager value handling is case-insensitive.
-          PACKAGE_MANAGER_RAW="${PACKAGE_MANAGER_RAW}"
           PACKAGE_MANAGER="$(echo "${PACKAGE_MANAGER_RAW}" | tr '[:upper:]' '[:lower:]')"
-          PACKAGE_DIR_RAW="${PACKAGE_DIR_RAW}"
           PACKAGE_DIR="${PACKAGE_DIR_RAW:-.}"
 
           if [[ -z "${PACKAGE_DIR}" ]]; then
@@ -412,7 +428,6 @@ jobs:
             esac
 
             # Infer lockfile path from package-manager + directory when no explicit override is provided.
-            CACHE_DEPENDENCY_PATH_INPUT="${CACHE_DEPENDENCY_PATH_INPUT}"
             CACHE_DEPENDENCY_PATH="${CACHE_DEPENDENCY_PATH_INPUT}"
 
           if [[ -z "${CACHE_DEPENDENCY_PATH}" ]]; then
@@ -480,7 +495,7 @@ jobs:
           set -euo pipefail
           eval "${JETIFIER_RUN_CMD}"
 
-      # ── SIGNING ─────────────────────────────────────────────────────────────
+      # ── Signing ─────────────────────────────────────────────────────────────
       - name: Restore keystore
         shell: bash
         env:
@@ -502,7 +517,7 @@ jobs:
           ls -lah "$(dirname "${KEYSTORE_OUTPUT_PATH}")"
           test -f "${KEYSTORE_OUTPUT_PATH}"
 
-      # ── BUILD ────────────────────────────────────────────────────────────────
+      # ── Build ────────────────────────────────────────────────────────────────
       - name: Configure Gradle
         shell: bash
         env:
@@ -560,15 +575,16 @@ jobs:
           echo "→ Accepting SDK licenses"
           yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
           echo "→ Installing NDK 27.1.12297006"
-          "${SDKMANAGER}" \
-            # NDK 27.1.12297006 = NDK r27b (LTS). Upgrade only after validating CMake ABI compatibility.
-            "ndk;27.1.12297006"
+          # NDK 27.1.12297006 = NDK r27b (LTS). Upgrade only after
+          # validating CMake ABI compatibility with your RN version.
+          "${SDKMANAGER}" "ndk;27.1.12297006"
           echo "✅ NDK version pre-installed"
           echo "::endgroup::"
       
       # Pinned to setup-gradle@v5 (not v6).
-      # v6.1.0 re-licensed Basic Caching under the Gradle Toolchains Terms of Use (commercial).
-      # Stay on v5 until the runner floor is raised and the licensing position is confirmed.
+      # v6 (initial release) moved Gradle User Home caching to a proprietary closed-source
+      # component. v6.1.0 later added a free MIT-licensed alternative via cache-provider: basic.
+      # Upgrade to @v6 with cache-provider: basic to adopt the open-source caching path.
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
@@ -594,10 +610,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew ${GRADLE_TASK} \
-            -PversionName=${VERSION_NAME_OUT} \
-            -PversionCode=${VERSION_CODE_OUT} \
-            -PapplicationId=${APP_ID} \
+          # EXTRA_ARGS is intentionally unquoted to allow word splitting
+          # for callers that pass multiple space-separated Gradle flags.
+          ./gradlew "${GRADLE_TASK}" \
+            "-PversionName=${VERSION_NAME_OUT}" \
+            "-PversionCode=${VERSION_CODE_OUT}" \
+            "-PapplicationId=${APP_ID}" \
             -Pandroid.injected.signing.store.file="${STORE_FILE}" \
             -Pandroid.injected.signing.store.password="${STORE_PASSWORD}" \
             -Pandroid.injected.signing.key.alias="${KEY_ALIAS}" \
@@ -611,7 +629,7 @@ jobs:
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Gradle bundle built — PASSED"
 
-      # ── ARTIFACT ────────────────────────────────────────────────────────────
+      # ── Artifact ────────────────────────────────────────────────────────────
       - name: Rename bundle
         id: rename
         shell: bash
@@ -733,7 +751,7 @@ jobs:
           echo "::notice title=🤖 [ANDROID] Release to Google Play (env gated) — Job Started::App: ${APP_ID} | Version: ${VERSION_NAME} | Track: ${PLAY_TRACK} | Env: ${RELEASE_ENV} | Triggered by: ${ACTOR}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
-      # ── ARTIFACT ────────────────────────────────────────────────────────────
+      # ── AAB Retrieval ───────────────────────────────────────────────────────
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
@@ -766,7 +784,7 @@ jobs:
 
           echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
 
-      # ── RELEASE ─────────────────────────────────────────────────────────────
+      # ── Upload ──────────────────────────────────────────────────────────────
       - name: Validate credentials
         shell: bash
         env:
