@@ -898,6 +898,7 @@ jobs:
           WORKSPACE: ${{ inputs.workspace }}
           SCHEME: ${{ inputs.scheme }}
         run: |
+          set -euo pipefail
           echo "::error title=🍎 [IOS] Build Job Failed::Workspace: ${WORKSPACE} | Scheme: ${SCHEME}"
           echo "  Checkpoint 1 — Signing cert installed: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
@@ -905,6 +906,7 @@ jobs:
 
       - name: Build summary
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
           WORKSPACE: ${{ inputs.workspace }}
@@ -1137,6 +1139,7 @@ jobs:
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         run: |
+          set -euo pipefail
           ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
           bar='██████████████████████████████'
           echo "::group::🍎 [IOS] Upload complete"
@@ -1200,6 +1203,7 @@ jobs:
 
       - name: Release summary
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
           VERSION: ${{ needs.build.outputs.version }}
