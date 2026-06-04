@@ -1,3 +1,38 @@
+# ============================================================
+# PURPOSE
+#   Reusable workflow — builds a signed Android App Bundle (AAB)
+#   and publishes it to a Google Play track.
+#
+# JOBS
+#   build                   — Compiles and signs the AAB; uploads it as a
+#                             workflow artifact.
+#   release_with_environment — Downloads the artifact, validates credentials,
+#                             and publishes to the requested Play track.
+#                             Runs only when release-environment is non-empty.
+#                             Uses a named GitHub environment so protection
+#                             rules (required reviewers, wait timers) gate the
+#                             publish step.
+#
+# UPLOAD
+#   Uses r0adkll/upload-google-play@v1.
+#
+# VERSIONING
+#   version-code  = github.run_number + version-code-offset
+#   version-name  = <major>.<minor>.<version-code>
+#
+# SIGNING
+#   Keystore is stored as a base64 secret and decoded at runtime into a
+#   temp file; the decoded path is written to a masked step output so it
+#   never appears in logs.
+#
+# CACHING
+#   Gradle home is cached by gradle/actions/setup-gradle@v4.
+#   Node modules are cached by actions/setup-node@v6.
+#
+# KNOWN LIMITATIONS
+#   - Single NDK version (27.1.12297006) is pre-installed; projects that
+#     require a different version must set it via ndkVersion in build.gradle.
+# ============================================================
 name: Generic Android Build and Google Play Release (reusable)
 
 on:
@@ -200,7 +235,7 @@ permissions:
 
 jobs:
   build:
-    name: Build AAB
+    name: Build
     runs-on: ${{ inputs.ubuntu-runner }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -210,19 +245,33 @@ jobs:
       aab-file: ${{ steps.rename.outputs.aab_file }}
 
     steps:
-      - name: Announce build job
+      - name: Announce
+        shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_PREFIX: ${{ inputs.version-prefix }}
+          PLAY_TRACK: ${{ inputs.play-track }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🤖 [ANDROID] Build AAB — Job Started::App: ${{ inputs.app-id }} | Version prefix: ${{ inputs.version-prefix }} | Track: ${{ inputs.play-track }} | Triggered by: ${{ github.actor }}"
+          set -euo pipefail
+          echo "::notice title=🤖 [ANDROID] Build AAB — Job Started::App: ${APP_ID} | Version prefix: ${VERSION_PREFIX} | Track: ${PLAY_TRACK} | Triggered by: ${ACTOR}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+      # ── SOURCE ──────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Compute version values
+      # ── VERSION ─────────────────────────────────────────────────────────────
+      - name: Compute version
         id: compute
         shell: bash
+        env:
+          VERSION_NAME_OFFSET: ${{ inputs.version-name-offset }}
+          VERSION_CODE_OFFSET: ${{ inputs.version-code-offset }}
+          VERSION_NAME_OVERRIDE: ${{ inputs.version-name-override }}
+          VERSION_PREFIX: ${{ inputs.version-prefix }}
         run: |
           set -euo pipefail
 
@@ -231,8 +280,8 @@ jobs:
           # Keep versionName and versionCode intentionally decoupled:
           # - versionName is human-readable for release visibility.
           # - versionCode is a strictly increasing integer for Play upgrade-path checks.
-          NAME_OFFSET_RAW="${{ inputs.version-name-offset }}"
-          CODE_OFFSET_RAW="${{ inputs.version-code-offset }}"
+          NAME_OFFSET_RAW="${VERSION_NAME_OFFSET}"
+          CODE_OFFSET_RAW="${VERSION_CODE_OFFSET}"
           MAX_PLAY_VERSION_CODE=2100000000
 
           if ! [[ "${NAME_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
@@ -253,12 +302,12 @@ jobs:
           VERSION_NAME_SOURCE="computed"
           OVERRIDE_DISPLAY="<empty>"
 
-          if [[ -n "${{ inputs.version-name-override }}" ]]; then
-            VERSION_NAME="${{ inputs.version-name-override }}"
+          if [[ -n "${VERSION_NAME_OVERRIDE}" ]]; then
+            VERSION_NAME="${VERSION_NAME_OVERRIDE}"
             VERSION_NAME_SOURCE="override"
-            OVERRIDE_DISPLAY="${{ inputs.version-name-override }}"
+            OVERRIDE_DISPLAY="${VERSION_NAME_OVERRIDE}"
           else
-            BASE_VERSION_RAW="${{ inputs.version-prefix }}"
+            BASE_VERSION_RAW="${VERSION_PREFIX}"
             BASE_MAJOR=""
             BASE_MINOR=""
             BASE_PATCH=""
@@ -309,26 +358,25 @@ jobs:
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve package manager settings
+      # ── PACKAGE MANAGER ─────────────────────────────────────────────────────
+      - name: Resolve package manager
         id: package_manager
         shell: bash
+        env:
+          PACKAGE_MANAGER_RAW: ${{ inputs.package-manager }}
+          PACKAGE_DIR_RAW: ${{ inputs.package-manager-directory }}
+          CACHE_DEPENDENCY_PATH_INPUT: ${{ inputs.cache-dependency-path }}
         run: |
           set -euo pipefail
 
           # Normalize inputs so package-manager value handling is case-insensitive.
-          PACKAGE_MANAGER_RAW="${{ inputs.package-manager }}"
+          PACKAGE_MANAGER_RAW="${PACKAGE_MANAGER_RAW}"
           PACKAGE_MANAGER="$(echo "${PACKAGE_MANAGER_RAW}" | tr '[:upper:]' '[:lower:]')"
-          PACKAGE_DIR_RAW="${{ inputs.package-manager-directory }}"
+          PACKAGE_DIR_RAW="${PACKAGE_DIR_RAW}"
           PACKAGE_DIR="${PACKAGE_DIR_RAW:-.}"
 
           if [[ -z "${PACKAGE_DIR}" ]]; then
             PACKAGE_DIR="."
-          fi
-
-          if [[ "${PACKAGE_DIR}" == "." ]]; then
-            DISPLAY_DIR="repository root"
-          else
-            DISPLAY_DIR="${PACKAGE_DIR}"
           fi
 
           # Keep cache type and install commands tied to the selected package manager.
@@ -364,7 +412,7 @@ jobs:
             esac
 
             # Infer lockfile path from package-manager + directory when no explicit override is provided.
-            CACHE_DEPENDENCY_PATH_INPUT="${{ inputs.cache-dependency-path }}"
+            CACHE_DEPENDENCY_PATH_INPUT="${CACHE_DEPENDENCY_PATH_INPUT}"
             CACHE_DEPENDENCY_PATH="${CACHE_DEPENDENCY_PATH_INPUT}"
 
           if [[ -z "${CACHE_DEPENDENCY_PATH}" ]]; then
@@ -395,43 +443,67 @@ jobs:
           cache: ${{ steps.package_manager.outputs.cache }}
           cache-dependency-path: ${{ steps.package_manager.outputs.cache_dependency_path }}
 
-      - name: Setup Java (Android)
+      - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
 
-      - name: Install node dependencies
+      - name: Install dependencies
         shell: bash
-        run: ${{ inputs.install-command != '' && inputs.install-command || steps.package_manager.outputs.default_install_command }}
+        env:
+          INSTALL_COMMAND_INPUT: ${{ inputs.install-command }}
+          DEFAULT_INSTALL_COMMAND: ${{ steps.package_manager.outputs.default_install_command }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INSTALL_COMMAND_INPUT}" ]]; then
+            eval "${INSTALL_COMMAND_INPUT}"
+          else
+            eval "${DEFAULT_INSTALL_COMMAND}"
+          fi
 
       - name: Install jetifier
         if: ${{ inputs.install-jetifier }}
         shell: bash
-        run: ${{ steps.package_manager.outputs.jetifier_install_command }}
+        env:
+          JETIFIER_INSTALL_CMD: ${{ steps.package_manager.outputs.jetifier_install_command }}
+        run: |
+          set -euo pipefail
+          eval "${JETIFIER_INSTALL_CMD}"
 
       - name: Jetify
         if: ${{ inputs.run-jetifier }}
         shell: bash
-        run: ${{ steps.package_manager.outputs.jetifier_run_command }}
-
-      - name: Restore keystore
-        shell: bash
+        env:
+          JETIFIER_RUN_CMD: ${{ steps.package_manager.outputs.jetifier_run_command }}
         run: |
           set -euo pipefail
-          mkdir -p "$(dirname '${{ inputs.keystore-output-path }}')"
-          echo "${{ secrets.android-keystore-base64 }}" | base64 -d > "${{ inputs.keystore-output-path }}"
+          eval "${JETIFIER_RUN_CMD}"
+
+      # ── SIGNING ─────────────────────────────────────────────────────────────
+      - name: Restore keystore
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.android-keystore-base64 }}
+          KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${KEYSTORE_OUTPUT_PATH}")"
+          printf '%s' "${KEYSTORE_B64}" | base64 -d > "${KEYSTORE_OUTPUT_PATH}"
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/3] Keystore restored — PASSED"
 
-      - name: Verify keystore exists
+      - name: Verify keystore
         shell: bash
+        env:
+          KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
         run: |
           set -euo pipefail
-          ls -lah "$(dirname '${{ inputs.keystore-output-path }}')"
-          test -f "${{ inputs.keystore-output-path }}"
+          ls -lah "$(dirname "${KEYSTORE_OUTPUT_PATH}")"
+          test -f "${KEYSTORE_OUTPUT_PATH}"
 
-      - name: Normalize Gradle properties (CI performance settings)
+      # ── BUILD ────────────────────────────────────────────────────────────────
+      - name: Configure Gradle
         shell: bash
         env:
           GRADLE_PROPS_DIR: ${{ inputs.build-root-directory }}
@@ -479,7 +551,7 @@ jobs:
           echo "✅ Gradle properties normalized"
           echo "::endgroup::"
 
-      - name: Pre-install Android NDK versions
+      - name: Install NDK
         shell: bash
         run: |
           set -euo pipefail
@@ -489,11 +561,14 @@ jobs:
           yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
           echo "→ Installing NDK 27.1.12297006"
           "${SDKMANAGER}" \
+            # NDK 27.1.12297006 = NDK r27b (LTS). Upgrade only after validating CMake ABI compatibility.
             "ndk;27.1.12297006"
           echo "✅ NDK version pre-installed"
           echo "::endgroup::"
       
-      # Intentionally pinned to setup-gradle@v5 due to the @v6 policy changes and becoming closed source.
+      # Pinned to setup-gradle@v5 (not v6).
+      # v6.1.0 re-licensed Basic Caching under the Gradle Toolchains Terms of Use (commercial).
+      # Stay on v5 until the runner floor is raised and the licensing position is confirmed.
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
@@ -504,7 +579,7 @@ jobs:
             notifications
             wrapper
 
-      - name: Build Release Bundle (AAB)
+      - name: Build
         working-directory: ${{ inputs.build-root-directory }}
         env:
           STORE_FILE: ${{ github.workspace }}/${{ inputs.keystore-output-path }}
@@ -512,31 +587,42 @@ jobs:
           KEY_ALIAS: ${{ secrets.android-key-alias }}
           KEY_PASSWORD: ${{ secrets.android-key-password }}
           EXTRA_ARGS: ${{ inputs.gradle-extra-arguments }}
+          GRADLE_TASK: ${{ inputs.gradle-task }}
+          VERSION_NAME_OUT: ${{ steps.compute.outputs.version_name }}
+          VERSION_CODE_OUT: ${{ steps.compute.outputs.version_code }}
+          APP_ID: ${{ inputs.app-id }}
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew ${{ inputs.gradle-task }} \
-            -PversionName=${{ steps.compute.outputs.version_name }} \
-            -PversionCode=${{ steps.compute.outputs.version_code }} \
-            -PapplicationId=${{ inputs.app-id }} \
+          ./gradlew ${GRADLE_TASK} \
+            -PversionName=${VERSION_NAME_OUT} \
+            -PversionCode=${VERSION_CODE_OUT} \
+            -PapplicationId=${APP_ID} \
             -Pandroid.injected.signing.store.file="${STORE_FILE}" \
             -Pandroid.injected.signing.store.password="${STORE_PASSWORD}" \
             -Pandroid.injected.signing.key.alias="${KEY_ALIAS}" \
             -Pandroid.injected.signing.key.password="${KEY_PASSWORD}" \
             ${EXTRA_ARGS}
 
-      - name: Confirm bundle built
-        run: |
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Gradle bundle built — PASSED"
-
-      - name: Rename bundle
-        id: rename
+      - name: Confirm build
         shell: bash
         run: |
           set -euo pipefail
-          PATTERN='${{ inputs.aab-name-pattern }}'
-          AAB_OUT="${PATTERN//\{app_slug\}/${{ inputs.app-slug }}}"
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Gradle bundle built — PASSED"
+
+      # ── ARTIFACT ────────────────────────────────────────────────────────────
+      - name: Rename bundle
+        id: rename
+        shell: bash
+        env:
+          AAB_NAME_PATTERN: ${{ inputs.aab-name-pattern }}
+          APP_SLUG: ${{ inputs.app-slug }}
+          AAB_SOURCE_PATH: ${{ inputs.aab-source-path }}
+        run: |
+          set -euo pipefail
+          PATTERN="${AAB_NAME_PATTERN}"
+          AAB_OUT="${PATTERN//\{app_slug\}/${APP_SLUG}}"
           AAB_OUT="${AAB_OUT//\{version_name\}/${VERSION_NAME}}"
           AAB_OUT="${AAB_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
 
@@ -545,16 +631,16 @@ jobs:
             exit 1
           fi
 
-          SRC_DIR="$(dirname '${{ inputs.aab-source-path }}')"
+          SRC_DIR="$(dirname "${AAB_SOURCE_PATH}")"
           echo "Looking for built AAB in: ${SRC_DIR}"
           ls -lah "${SRC_DIR}" || true
 
-          if [[ ! -f "${{ inputs.aab-source-path }}" ]]; then
-            echo "ERROR: Expected AAB not found at '${{ inputs.aab-source-path }}'."
+          if [[ ! -f "${AAB_SOURCE_PATH}" ]]; then
+            echo "ERROR: Expected AAB not found at '${AAB_SOURCE_PATH}'."
             exit 1
           fi
 
-          mv "${{ inputs.aab-source-path }}" "${AAB_OUT}"
+          mv "${AAB_SOURCE_PATH}" "${AAB_OUT}"
 
           if [[ ! -f "${AAB_OUT}" ]]; then
             echo "ERROR: Rename succeeded but output AAB '${AAB_OUT}' is missing."
@@ -573,16 +659,21 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-      - name: Report build failure
+      - name: Build failure
         if: failure()
+        shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
         run: |
-          echo "::error title=🤖 [ANDROID] Build Job Failed::App: ${{ inputs.app-id }}"
+          set -euo pipefail
+          echo "::error title=🤖 [ANDROID] Build Job Failed::App: ${APP_ID}"
           echo "  Checkpoint 1 — Keystore restored: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Bundle built:      ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — Bundle renamed:    ${CHECKPOINT_3_STATUS:-❌ Not reached}"
 
-      - name: Write build job summary
+      - name: Build summary
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
           APP_ID: ${{ inputs.app-id }}
@@ -618,126 +709,8 @@ jobs:
             echo "| 3 | Bundle renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  release:
-    name: Release to Google Play
-    runs-on: ${{ inputs.ubuntu-runner }}
-    needs: build
-    # Release path without GitHub Environment protection.
-    if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-    steps:
-      - name: Announce release job
-        run: |
-          echo "::notice title=🤖 [ANDROID] Release to Google Play — Job Started::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }} | Track: ${{ inputs.play-track }} | Triggered by: ${{ github.actor }}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
-      - name: Download artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: .
-
-      - name: Resolve AAB path for release runner
-        id: aab
-        shell: bash
-        run: |
-          set -euo pipefail
-          CANDIDATE='${{ needs.build.outputs.aab-file }}'
-          AAB_FILE=""
-
-          if [[ -n "${CANDIDATE}" ]]; then
-            AAB_FILE="$(basename "${CANDIDATE}")"
-          fi
-
-          # Fallback for cases where reusable output is empty or path does not match release runner context.
-          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
-            AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
-          fi
-
-          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
-            echo "ERROR: No .aab file found in release workspace."
-            ls -lah
-            exit 1
-          fi
-
-          echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
-
-      - name: Verify AAB exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          ls -lah
-          test -f "${{ steps.aab.outputs.path }}"
-
-      - name: Validate release credentials
-        shell: bash
-        env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
-            echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
-            echo "Set disable-release=true to run build-only without Google Play publish."
-            exit 1
-          fi
-
-      - name: Upload to Google Play
-        uses: simplify9/.github/.github/actions/upload-google-play-release@main
-        with:
-          service_account_json: ${{ secrets.google-play-service-account-json }}
-          package_name: ${{ inputs.app-id }}
-          aab_path: ${{ steps.aab.outputs.path }}
-          track: ${{ inputs.play-track }}
-          release_name: ${{ needs.build.outputs.version-name }}
-          status: ${{ inputs.release-status }}
-          changes_not_sent_for_review: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
-
-      - name: Confirm Google Play upload
-        run: |
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — PASSED: ${{ inputs.app-id }} v${{ needs.build.outputs.version-name }} → ${{ inputs.play-track }}"
-
-      - name: Report release failure
-        if: failure()
-        run: |
-          echo "::error title=🤖 [ANDROID] Release Job Failed::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }}"
-          echo "  Checkpoint 1 — Google Play upload: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-
-      - name: Write release job summary
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          APP_ID: ${{ inputs.app-id }}
-          VERSION_NAME_OUT: ${{ needs.build.outputs.version-name }}
-          VERSION_CODE_OUT: ${{ needs.build.outputs.version-code }}
-          PLAY_TRACK: ${{ inputs.play-track }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🤖 Android Release to Google Play — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| App | \`${APP_ID}\` |"
-            echo "| Version | \`${VERSION_NAME_OUT}\` (code: ${VERSION_CODE_OUT}) |"
-            echo "| Track | ${PLAY_TRACK} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Google Play upload | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
   release_with_environment:
-    name: Release to Google Play
+    name: Release
     runs-on: ${{ inputs.ubuntu-runner }}
     needs: build
     # Release path with GitHub Environment protection/approvals.
@@ -747,23 +720,33 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: Announce release-with-environment job
+      - name: Announce
+        shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_NAME: ${{ needs.build.outputs.version-name }}
+          PLAY_TRACK: ${{ inputs.play-track }}
+          RELEASE_ENV: ${{ inputs.release-environment }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🤖 [ANDROID] Release to Google Play (env gated) — Job Started::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }} | Track: ${{ inputs.play-track }} | Env: ${{ inputs.release-environment }} | Triggered by: ${{ github.actor }}"
+          set -euo pipefail
+          echo "::notice title=🤖 [ANDROID] Release to Google Play (env gated) — Job Started::App: ${APP_ID} | Version: ${VERSION_NAME} | Track: ${PLAY_TRACK} | Env: ${RELEASE_ENV} | Triggered by: ${ACTOR}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+      # ── ARTIFACT ────────────────────────────────────────────────────────────
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}
           path: .
 
-      - name: Resolve AAB path for release runner
+      - name: Resolve AAB path
         id: aab
         shell: bash
+        env:
+          CANDIDATE: ${{ needs.build.outputs.aab-file }}
         run: |
           set -euo pipefail
-          CANDIDATE='${{ needs.build.outputs.aab-file }}'
           AAB_FILE=""
 
           if [[ -n "${CANDIDATE}" ]]; then
@@ -783,14 +766,8 @@ jobs:
 
           echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify AAB exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          ls -lah
-          test -f "${{ steps.aab.outputs.path }}"
-
-      - name: Validate release credentials
+      # ── RELEASE ─────────────────────────────────────────────────────────────
+      - name: Validate credentials
         shell: bash
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
@@ -802,30 +779,42 @@ jobs:
             exit 1
           fi
 
-      - name: Upload to Google Play
-        uses: simplify9/.github/.github/actions/upload-google-play-release@main
+      - name: Upload
+        uses: r0adkll/upload-google-play@v1
         with:
-          service_account_json: ${{ secrets.google-play-service-account-json }}
-          package_name: ${{ inputs.app-id }}
-          aab_path: ${{ steps.aab.outputs.path }}
+          serviceAccountJsonPlainText: ${{ secrets.google-play-service-account-json }}
+          packageName: ${{ inputs.app-id }}
+          releaseFiles: ${{ steps.aab.outputs.path }}
           track: ${{ inputs.play-track }}
-          release_name: ${{ needs.build.outputs.version-name }}
+          releaseName: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
-          changes_not_sent_for_review: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
+          changesNotSentForReview: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
 
-      - name: Confirm Google Play upload
+      - name: Confirm upload
+        shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_NAME: ${{ needs.build.outputs.version-name }}
+          PLAY_TRACK: ${{ inputs.play-track }}
         run: |
+          set -euo pipefail
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — PASSED: ${{ inputs.app-id }} v${{ needs.build.outputs.version-name }} → ${{ inputs.play-track }}"
+          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — PASSED: ${APP_ID} v${VERSION_NAME} → ${PLAY_TRACK}"
 
-      - name: Report release-with-environment failure
+      - name: Release failure
         if: failure()
+        shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_NAME: ${{ needs.build.outputs.version-name }}
         run: |
-          echo "::error title=🤖 [ANDROID] Release (env gated) Job Failed::App: ${{ inputs.app-id }} | Version: ${{ needs.build.outputs.version-name }}"
+          set -euo pipefail
+          echo "::error title=🤖 [ANDROID] Release (env gated) Job Failed::App: ${APP_ID} | Version: ${VERSION_NAME}"
           echo "  Checkpoint 1 — Google Play upload: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
 
-      - name: Write release-with-environment job summary
+      - name: Release summary
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
           APP_ID: ${{ inputs.app-id }}

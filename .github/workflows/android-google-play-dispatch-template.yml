@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   staging:
-    name: Android Staging Build and Release
+    name: Android Dev
     if: ${{ github.ref_name == 'staging' }}
     uses: ./.github/workflows/generic-android-google-play.yml
     with:
@@ -78,7 +78,7 @@ jobs:
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
 
   production:
-    name: Android Production Build and Release
+    name: Android Prod
     if: ${{ github.ref_name == 'main' }}
     uses: ./.github/workflows/generic-android-google-play.yml
     with:
