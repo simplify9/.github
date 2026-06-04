@@ -10,13 +10,11 @@
 # JOBS:
 #   build                    — Installs dependencies, sets up signing,
 #                              archives via xcodebuild, exports IPA, and
-#                              uploads the artifact for the release jobs.
-#   release                  — Downloads the IPA artifact and uploads to
-#                              TestFlight. Runs when `release-environment`
-#                              input is empty (no environment gate).
-#   release_with_environment — Same as `release` but gated on a named
-#                              GitHub Environment (approval gates, secrets).
-#                              Runs when `release-environment` is set.
+#                              uploads the artifact for the release job.
+#   release_with_environment — Downloads the IPA artifact and uploads to
+#                              TestFlight. Gated on a named GitHub
+#                              Environment (approval gates, environment
+#                              secrets). Always runs via this path.
 #
 # UPLOAD TOOLS (`upload-tool` input):
 #   appstoreapi (default) — App Store Connect REST API via
@@ -26,14 +24,6 @@
 #   altool                — Deprecated xcrun altool --upload-app. Retained
 #                           as a fallback. iTMSTransporter (transporter) was
 #                           removed from Xcode 26 and is no longer supported.
-#
-# ARCHIVE PATHS (`use-manual-inline-archive` input):
-#   true (default) — Inline xcodebuild archive. Binds provisioning profile
-#                    by NAME (PROVISIONING_PROFILE_SPECIFIER). Recommended.
-#   false          — Routes through the simplify9 xcode-build composite
-#                    action. Binds profile by UUID (PROVISIONING_PROFILE).
-#                    Matches Azure DevOps signing behavior. No active
-#                    callers use this path — use default unless migrating.
 #
 # SIGNING:
 #   Manual signing only. Certificate (.p12) and provisioning profile are
@@ -103,30 +93,13 @@ on:
         required: false
         type: string
         default: ""
-      # ── React Native CLI ────────────────────────────────────────────────────
-      # Legacy 2019 CLI. Disabled by default. Not required for RN 0.60+.
-      install-react-native-cli:
-        description: Install react-native-cli globally
-        required: false
-        type: boolean
-        default: false
       # ── Xcode ───────────────────────────────────────────────────────────────
       xcode-version:
         description: "Optional Xcode major or major.minor selector (for example: 26 or 16.4)"
         required: false
         type: string
         default: ""
-      use-simplify9-xcode-setup:
-        description: Use simplify9 xcode-setup composite action (pods + selected Xcode)
-        required: false
-        type: boolean
-        default: false
       # ── CocoaPods ───────────────────────────────────────────────────────────
-      verify-cocoapods:
-        description: Run `pod --version` check
-        required: false
-        type: boolean
-        default: false
       clean-reinstall-pods:
         description: Perform `pod deintegrate` and `pod install --repo-update`
         required: false
@@ -188,11 +161,6 @@ on:
         default: false
 
       # ── Signing ─────────────────────────────────────────────────────────────────
-      signing-style:
-        description: Signing style for xcode-build action (manual or automatic)
-        required: false
-        type: string
-        default: manual
       code-sign-identity:
         description: Code sign identity, for example Apple Distribution
         required: false
@@ -203,37 +171,13 @@ on:
         required: false
         type: string
         default: generic/platform=iOS
-      debug-build-settings:
-        description: Print selected signing build settings from xcode-build action
-        required: false
-        type: boolean
-        default: false
-      # ── Archive Path ────────────────────────────────────────────────────────────
-      # use-manual-inline-archive=true (default): inline xcodebuild, profile
-      # bound by NAME. use-manual-inline-archive=false: routes through
-      # simplify9 xcode-build action, profile bound by UUID.
-      use-manual-inline-archive:
-        description: Use direct xcodebuild archive command (profile NAME) instead of simplify9 xcode-build action (profile UUID)
-        required: false
-        type: boolean
-        default: true
-      bundle-id-override:
-        description: Optional bundle id override when using simplify9 xcode-build action
-        required: false
-        type: string
-        default: ""
 
       # ── Versioning ───────────────────────────────────────────────────────────────
-      # pbxproj-counter-rollover: marketing-prefix in X.Y or X.Y.Z format with
-      # single-digit carry logic. Sets MARKETING_VERSION and
-      # CURRENT_PROJECT_VERSION in the .pbxproj file on every run.
-      versioning-strategy:
-        description: Versioning strategy (pbxproj-counter-rollover)
-        required: false
-        type: string
-        default: pbxproj-counter-rollover
       pbxproj-path:
-        description: Path to project.pbxproj
+        description: >
+          Path to project.pbxproj. If empty, auto-detected from
+          ios-dir by locating the single .xcodeproj directory
+          (e.g. ios/MyApp.xcodeproj/project.pbxproj).
         required: false
         type: string
         default: ""
@@ -242,11 +186,6 @@ on:
         required: false
         type: string
         default: "1.0"
-      build-number-offset:
-        description: Offset added to CURRENT_PROJECT_VERSION when computing the new build number (default 1)
-        required: false
-        type: string
-        default: "1"
 
       # ── Artifact ────────────────────────────────────────────────────────────────
       # ipa-name-pattern tokens: {scheme}, {version}, {build_number},
@@ -280,8 +219,7 @@ on:
 
       # ── Release Gating ───────────────────────────────────────────────────────
       # Set release-environment to route through release_with_environment job,
-      # which enforces GitHub Environment approval gates. Leave empty to use
-      # the ungated release job.
+      # which enforces GitHub Environment approval gates.
       release-environment:
         description: Optional GitHub environment for release job
         required: false
@@ -359,7 +297,7 @@ permissions:
 
 jobs:
   build:
-    name: Build IPA
+    name: Build
     runs-on: ${{ inputs.macos-runner }}
     outputs:
       version: ${{ steps.final_version.outputs.version }}
@@ -367,11 +305,15 @@ jobs:
       ipa-file: ${{ steps.rename_ipa.outputs.ipa_file }}
 
     steps:
-      - name: Announce build job
+      - name: Announce
         shell: bash
+        env:
+          WORKSPACE: ${{ inputs.workspace }}
+          SCHEME: ${{ inputs.scheme }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${{ inputs.workspace }} | Scheme: ${{ inputs.scheme }} | Versioning: ${{ inputs.versioning-strategy }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${WORKSPACE} | Scheme: ${SCHEME} | Triggered by: ${ACTOR}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
@@ -380,7 +322,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Ruby (optional)
+      - name: Setup Ruby
         if: ${{ inputs.ruby-version != '' }}
         uses: ruby/setup-ruby@v1
         with:
@@ -391,7 +333,7 @@ jobs:
       # ccache intercepts the ObjC/C++ compiler via Homebrew libexec symlinks.
       # Cache is keyed on Podfile.lock so any pod version change invalidates it.
       # Stats are reset before archive and printed in the job summary.
-      - name: Install ccache (optional)
+      - name: Install ccache
         if: ${{ inputs.enable-ccache }}
         shell: bash
         run: |
@@ -401,7 +343,7 @@ jobs:
           fi
           ccache --version
 
-      - name: Cache ccache directory (optional)
+      - name: Cache ccache
         if: ${{ inputs.enable-ccache }}
         uses: actions/cache@v5
         with:
@@ -410,7 +352,7 @@ jobs:
           restore-keys: |
             ccache-ios-${{ runner.os }}-
 
-      - name: Configure ccache (optional)
+      - name: Configure ccache
         if: ${{ inputs.enable-ccache }}
         shell: bash
         run: |
@@ -434,20 +376,20 @@ jobs:
           ccache --show-config
 
       # ── Runtime Paths & Xcode ───────────────────────────────────────────────────────
-      - name: Initialize runtime paths
+      - name: Initialize paths
         shell: bash
         run: |
           set -euo pipefail
           echo "KEYCHAIN_PATH=${RUNNER_TEMP}/build.keychain-db" >> "$GITHUB_ENV"
 
-      - name: Select Xcode (optional)
+      - name: Select Xcode
         if: ${{ inputs.xcode-version != '' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ inputs.xcode-version }}
 
       # ── Pre-build Hook ──────────────────────────────────────────────────────────────
-      - name: Run pre-build mutation script (optional)
+      - name: Pre-build script
         if: ${{ inputs.pre-build-script != '' }}
         shell: bash
         working-directory: ${{ inputs.pre-build-working-directory }}
@@ -459,7 +401,7 @@ jobs:
           eval "${PRE_BUILD_SCRIPT}"
 
       # ── Node Dependencies ───────────────────────────────────────────────────────────────
-      - name: Resolve package manager settings
+      - name: Resolve package manager
         id: package_manager
         shell: bash
         env:
@@ -530,7 +472,7 @@ jobs:
           cache: ${{ steps.package_manager.outputs.cache }}
           cache-dependency-path: ${{ steps.package_manager.outputs.cache_dependency_path }}
 
-      - name: Install node dependencies
+      - name: Install dependencies
         shell: bash
         env:
           INSTALL_COMMAND_INPUT: ${{ inputs.install-command }}
@@ -542,13 +484,6 @@ jobs:
           else
             eval "${DEFAULT_INSTALL_COMMAND}"
           fi
-
-      - name: Install React Native CLI
-        if: ${{ inputs.install-react-native-cli }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install -g react-native-cli
 
       # ── CocoaPods ──────────────────────────────────────────────────────────────────
       # CocoaPods caching — split into two independent cache steps.
@@ -566,7 +501,7 @@ jobs:
       #   reinstall. Restoring it before `pod deintegrate` adds overhead
       #   and is immediately discarded, so this cache is skipped when
       #   clean-reinstall-pods=true.
-      - name: Cache CocoaPods spec repo
+      - name: Cache pod specs
         id: cache-pods-specs
         uses: actions/cache@v5
         with:
@@ -577,7 +512,7 @@ jobs:
 
       # Project Pods dir cache — only when NOT doing a clean reinstall.
       # A clean reinstall deletes ios/Pods, so caching it then is wasted.
-      - name: Cache CocoaPods Pods directory
+      - name: Cache pods
         id: cache-pods-dir
         if: ${{ !inputs.clean-reinstall-pods }}
         uses: actions/cache@v5
@@ -587,8 +522,8 @@ jobs:
           restore-keys: |
             pods-dir-${{ runner.os }}-
 
-      - name: Install CocoaPods
-        if: ${{ !inputs.clean-reinstall-pods && !inputs.use-simplify9-xcode-setup }}
+      - name: Install pods
+        if: ${{ !inputs.clean-reinstall-pods }}
         shell: bash
         working-directory: ${{ inputs.ios-dir }}
         env:
@@ -607,34 +542,38 @@ jobs:
           echo "✅ CocoaPods installed"
           echo "::endgroup::"
 
-      - name: Xcode setup (simplify9 action)
-        if: ${{ inputs.use-simplify9-xcode-setup }}
-        uses: simplify9/.github/.github/actions/xcode-setup@main
-        with:
-          xcodeVersion: ${{ inputs.xcode-version != '' && inputs.xcode-version || '26' }}
-
-      - name: Verify CocoaPods
-        if: ${{ inputs.verify-cocoapods }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          pod --version
-
       # ── Versioning ──────────────────────────────────────────────────────────────────
       # Writes MARKETING_VERSION and CURRENT_PROJECT_VERSION into the
       # .pbxproj file. VERSION and BUILD_NUMBER are also exported to
       # GITHUB_ENV for use in downstream steps (IPA renaming, summaries).
-      - name: Update pbxproj versions (automated)
+      - name: Bump version
         shell: bash
         env:
           PBXPROJ_PATH: ${{ inputs.pbxproj-path }}
-          BUILD_NUMBER_OFFSET: ${{ inputs.build-number-offset }}
+          IOS_DIR: ${{ inputs.ios-dir }}
           MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${PBXPROJ_PATH}" || ! -f "${PBXPROJ_PATH}" ]]; then
-            echo "ERROR: pbxproj versioning requires a valid pbxproj-path input"
+          # Auto-detect pbxproj path when not explicitly provided.
+          # Expects exactly one .xcodeproj directory inside ios-dir,
+          # following the standard React Native project structure:
+          #   ios/{AppName}.xcodeproj/project.pbxproj
+          if [[ -z "${PBXPROJ_PATH}" ]]; then
+            XCODEPROJ_DIR=$(find "${IOS_DIR}" -maxdepth 1 \
+              -name "*.xcodeproj" -type d 2>/dev/null | head -n 1)
+            if [[ -z "${XCODEPROJ_DIR}" ]]; then
+              echo "ERROR: Could not auto-detect .xcodeproj in '${IOS_DIR}'."
+              echo "Set pbxproj-path explicitly if the project structure differs."
+              exit 1
+            fi
+            PBXPROJ_PATH="${XCODEPROJ_DIR}/project.pbxproj"
+            echo "Auto-detected pbxproj path: ${PBXPROJ_PATH}"
+          fi
+
+          if [[ ! -f "${PBXPROJ_PATH}" ]]; then
+            echo "ERROR: project.pbxproj not found at '${PBXPROJ_PATH}'."
+            echo "Set pbxproj-path explicitly if the project structure differs."
             exit 1
           fi
 
@@ -653,12 +592,6 @@ jobs:
           echo "Original CURRENT_PROJECT_VERSION in pbxproj: ${BASE_BUILD}"
 
           # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
-          OFFSET="${BUILD_NUMBER_OFFSET}"
-          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-            exit 1
-          fi
-
           PREFIX_RAW="${MARKETING_PREFIX}"
           if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
             BASE_MAJOR="${BASH_REMATCH[1]}"
@@ -683,7 +616,8 @@ jobs:
           FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
 
           NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
-          NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
+          # build-number-offset is fixed at 0; formula: BASE + run_number
+          NEW_BUILD_NUMBER=$((BASE_BUILD + GITHUB_RUN_NUMBER))
 
           echo "Rollover base major: ${BASE_MAJOR}"
           echo "Rollover base minor: ${BASE_MINOR}"
@@ -703,7 +637,7 @@ jobs:
           echo "Updated pbxproj (diff):"
           git --no-pager diff -- "${PBXPROJ_PATH}" || true
 
-      - name: Clean and reinstall Pods
+      - name: Reinstall pods
         if: ${{ inputs.clean-reinstall-pods }}
         shell: bash
         env:
@@ -720,26 +654,26 @@ jobs:
       # base64-encoded secrets. Profile metadata (UUID, name, bundle ID,
       # team ID) is extracted from the installed profile for use in the
       # archive and export steps.
-      - name: Install signing certificate
+      - name: Install certificate
         uses: simplify9/.github/.github/actions/ios-install-cert@main
         with:
           p12Base64: ${{ secrets.ios-p12-base64 }}
           p12Password: ${{ secrets.ios-p12-password }}
 
-      - name: Confirm signing cert installed
+      - name: Confirm certificate
         shell: bash
         run: |
           set -euo pipefail
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/3] Signing certificate installed — PASSED"
 
-      - name: Install provisioning profile
+      - name: Install profile
         id: install_profile
         uses: simplify9/.github/.github/actions/ios-install-profile@main
         with:
           profileBase64: ${{ secrets.ios-mobileprovision-base64 }}
 
-      - name: Enrich profile metadata (bundle/team)
+      - name: Extract profile metadata
         id: profile_meta
         shell: bash
         env:
@@ -772,7 +706,7 @@ jobs:
           echo "TEAM_NAME=${TEAM_NAME}" >> "$GITHUB_ENV"  # informational only — not consumed downstream
           echo "IOS_BUNDLE_ID=${BUNDLE_ID}" >> "$GITHUB_ENV"
 
-      - name: Finalize version outputs
+      - name: Finalize version
         id: final_version
         shell: bash
         run: |
@@ -781,12 +715,6 @@ jobs:
           echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
       # ── Archive ───────────────────────────────────────────────────────────────────
-      # Two paths controlled by use-manual-inline-archive:
-      #   true (default) — Inline xcodebuild. Binds provisioning profile
-      #                    by NAME (PROVISIONING_PROFILE_SPECIFIER).
-      #   false          — simplify9 xcode-build composite action. Binds
-      #                    profile by UUID. No active callers use this path.
-      #
       # Archive flags:
       #   -parallelizeTargets            — builds independent targets in parallel
       #   COMPILER_INDEX_STORE_ENABLE=NO — disables Xcode IDE indexing (CI-only)
@@ -799,33 +727,14 @@ jobs:
       #   -showBuildTimingSummary        — no-op in Xcode 26 (timing table
       #                                    does not appear); retained for
       #                                    future Xcode versions
-      - name: Archive (simplify9 xcode-build action)
-        if: ${{ !inputs.use-manual-inline-archive }}
-        uses: simplify9/.github/.github/actions/xcode-build@main
-        with:
-          workspace: ${{ inputs.workspace }}
-          scheme: ${{ inputs.scheme }}
-          configuration: ${{ inputs.configuration }}
-          archivePath: ${{ inputs.archive-path }}
-          destination: ${{ inputs.build-destination }}
-          signingStyle: ${{ inputs.signing-style }}
-          developmentTeam: ${{ secrets.ios-team-id != '' && secrets.ios-team-id || steps.profile_meta.outputs.team_id }}
-          codeSignIdentity: ${{ inputs.code-sign-identity }}
-          provisioningProfileUuid: ${{ steps.profile_meta.outputs.profile_uuid }}
-          bundleId: ${{ inputs.bundle-id-override }}
-          keychainPath: ${{ runner.temp }}/build.keychain-db
-          debugBuildSettings: ${{ inputs.debug-build-settings && 'true' || 'false' }}
-      
-
-      - name: Reset ccache stats before archive
-        if: ${{ inputs.enable-ccache && inputs.use-manual-inline-archive }}
+      - name: Reset ccache stats
+        if: ${{ inputs.enable-ccache }}
         shell: bash
         run: |
           set -euo pipefail
           ccache --zero-stats || true
 
-      - name: Archive (manual inline xcodebuild, profile name)
-        if: ${{ inputs.use-manual-inline-archive }}
+      - name: Archive
         shell: bash
         env:
           IOS_TEAM_ID: ${{ secrets.ios-team-id }}
@@ -873,7 +782,7 @@ jobs:
       # or generated from provisioning profile metadata when
       # generate-export-options=true. The generated plist uses
       # app-store-connect method (Xcode 26 — replaces deprecated app-store).
-      - name: Generate exportOptions.plist
+      - name: Generate export options
         if: ${{ inputs.generate-export-options }}
         shell: bash
         env:
@@ -916,7 +825,7 @@ jobs:
           echo "EXPORT_PLIST=${EXPORT_PLIST}" >> "$GITHUB_ENV"
           /usr/bin/plutil -p "${EXPORT_PLIST}" >/dev/null
 
-      - name: Resolve export plist
+      - name: Resolve export options
         id: resolve_export
         shell: bash
         env:
@@ -982,25 +891,26 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-      - name: Report build failure
+      - name: Build failure
         if: failure()
         shell: bash
         env:
           WORKSPACE: ${{ inputs.workspace }}
           SCHEME: ${{ inputs.scheme }}
         run: |
+          set -euo pipefail
           echo "::error title=🍎 [IOS] Build Job Failed::Workspace: ${WORKSPACE} | Scheme: ${SCHEME}"
           echo "  Checkpoint 1 — Signing cert installed: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — IPA renamed:           ${CHECKPOINT_3_STATUS:-❌ Not reached}"
 
-      - name: Write build job summary
+      - name: Build summary
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
           WORKSPACE: ${{ inputs.workspace }}
           SCHEME: ${{ inputs.scheme }}
-          VERSIONING: ${{ inputs.versioning-strategy }}
           RUNNER_OS: ${{ runner.os }}
           MACOS_RUNNER: ${{ inputs.macos-runner }}
           XCODE_VERSION: ${{ inputs.xcode-version }}
@@ -1008,7 +918,6 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           ACTOR: ${{ github.actor }}
           ENABLE_CCACHE: ${{ inputs.enable-ccache }}
-          USE_MANUAL_INLINE_ARCHIVE: ${{ inputs.use-manual-inline-archive }}
         run: |
           STATUS=$( [ "${JOB_STATUS}" = "success" ] \
             && echo "✅ SUCCESS" || echo "❌ FAILED" )
@@ -1019,7 +928,6 @@ jobs:
             echo "|-------|-------|"
             echo "| Workspace | \`${WORKSPACE}\` |"
             echo "| Scheme | \`${SCHEME}\` |"
-            echo "| Versioning | ${VERSIONING} |"
             echo "| Runner | ${RUNNER_OS} (${MACOS_RUNNER}) |"
             echo "| Xcode | ${XCODE_VERSION} |"
             echo "| Node.js | ${NODE_VERSION} |"
@@ -1034,7 +942,7 @@ jobs:
             echo "| 2 | Archive created | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
             echo "| 3 | IPA renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${ENABLE_CCACHE}" == "true" && "${USE_MANUAL_INLINE_ARCHIVE}" == "true" ]]; then
+          if [[ "${ENABLE_CCACHE}" == "true" ]]; then
             {
               echo ""
               echo "## ⚡ ccache Stats"
@@ -1044,302 +952,29 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-  release:
-    name: Upload to TestFlight
-    runs-on: ${{ inputs.macos-runner }}
-    needs: build
-    if: ${{ inputs.release-environment == '' && !inputs.disable-release }}
-
-    steps:
-      - name: Announce release job
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "::notice title=🍎 [IOS] Upload to TestFlight — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
-          echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
-      # ── Environment Setup ────────────────────────────────────────────────────────────
-      - name: Select Xcode (optional)
-        if: ${{ inputs.xcode-version != '' }}
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ inputs.xcode-version }}
-
-      # ── IPA Retrieval ──────────────────────────────────────────────────────────────
-      - name: Download artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: .
-
-      - name: Resolve IPA path for release runner
-        id: ipa
-        shell: bash
-        env:
-          CANDIDATE: ${{ needs.build.outputs.ipa-file }}
-        run: |
-          set -euo pipefail
-
-          CANDIDATE="${CANDIDATE}"
-          IPA_FILE=""
-
-          if [[ -n "${CANDIDATE}" ]]; then
-            IPA_FILE="$(basename "${CANDIDATE}")"
-          fi
-
-          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
-            IPA_FILE="$(ls -1 *.ipa 2>/dev/null | head -n 1 || true)"
-          fi
-
-          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
-            echo "ERROR: No .ipa file found in release workspace."
-            ls -lah
-            exit 1
-          fi
-
-          echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
-
-      # ── Credentials ─────────────────────────────────────────────────────────────────
-      # App Store Connect API key is decoded from base64 into two locations:
-      #   1. $HOME/.appstoreconnect/private_keys/ — for altool path
-      #   2. $RUNNER_TEMP/appstoreapi_keys/       — for appstoreapi path,
-      #      written to GITHUB_ENV as APPSTOREAPI_KEY_CONTENT
-      # Each line of the decoded PEM is masked to prevent it appearing
-      # in the action input block printed before apple-actions runs.
-      # Note: GitHub only auto-masks declared secrets, not derived env vars,
-      # so the per-line masking is required.
-      - name: Validate release credentials
-        shell: bash
-        env:
-          APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
-          APPSTORE_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${APPSTORE_API_KEY_ID:-}" ]; then
-            echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
-            echo "Set disable-release=true to run build-only without TestFlight upload."
-            exit 1
-          fi
-
-          if [ -z "${APPSTORE_ISSUER_ID:-}" ]; then
-            echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
-            echo "Set disable-release=true to run build-only without TestFlight upload."
-            exit 1
-          fi
-
-      - name: Install App Store Connect API key (base64)
-        if: ${{ inputs.appstore-key-format == 'base64' }}
-        shell: bash
-        env:
-          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
-          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
-        run: |
-          set -euo pipefail
-          umask 077
-
-          if [[ -z "${KEY_B64}" ]]; then
-            echo "ERROR: appstore-key-format=base64 requires secret appstore-api-private-key-base64"
-            exit 1
-          fi
-
-          PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
-          mkdir -p "$PRIVATE_KEYS_DIR"
-
-          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${API_KEY_ID}.p8"
-          printf '%s' "${KEY_B64}" | base64 -D > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
-      - name: Decode App Store Connect API key (appstoreapi)
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        shell: bash
-        env:
-          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
-        run: |
-          set -euo pipefail
-          umask 077
-          PRIVATE_KEYS_DIR="$RUNNER_TEMP/appstoreapi_keys"
-          mkdir -p "${PRIVATE_KEYS_DIR}"
-          printf '%s' "${KEY_B64}" | base64 -D > "${PRIVATE_KEYS_DIR}/AuthKey.p8"
-          if [[ ! -s "${PRIVATE_KEYS_DIR}/AuthKey.p8" ]]; then
-            echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
-            exit 1
-          fi
-          # Mask each line of the private key to prevent it appearing in logs
-          while IFS= read -r line; do
-            if [[ -n "${line}" ]]; then
-              echo "::add-mask::${line}"
-            fi
-          done < "${PRIVATE_KEYS_DIR}/AuthKey.p8"
-          {
-            echo "APPSTOREAPI_KEY_CONTENT<<APPSTOREAPI_KEY_EOF"
-            cat "${PRIVATE_KEYS_DIR}/AuthKey.p8"
-            printf '\n'
-            echo "APPSTOREAPI_KEY_EOF"
-          } >> "$GITHUB_ENV"
-
-      - name: Prepare TestFlight upload (App Store Connect API)
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        shell: bash
-        env:
-          IPA_PATH: ${{ steps.ipa.outputs.path }}
-        run: |
-          set -euo pipefail
-          IPA="${IPA_PATH}"
-          IPA_BYTES=$(stat -f%z "${IPA}")
-          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
-          IPA_NAME="$(basename "${IPA}")"
-          echo "::notice title=🍎 [IOS] TestFlight Upload Starting::File: ${IPA_NAME} | Size: ${IPA_SIZE_MB} MB | Backend: AppStoreConnectAPI | Started: $(date -u +'%H:%M:%S UTC')"
-          echo "::group::🍎 [IOS] Upload details"
-          echo "  → File:    ${IPA_NAME}"
-          echo "  → Size:    ${IPA_SIZE_MB} MB"
-          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
-          echo "  → Started: $(date -u +'%H:%M:%S UTC')"
-          echo "::endgroup::"
-          echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
-          echo "APPSTOREAPI_IPA_SIZE_MB=${IPA_SIZE_MB}" >> "$GITHUB_ENV"
-          echo "APPSTOREAPI_IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
-
-      # ── Upload ──────────────────────────────────────────────────────────────────────
-      # appstoreapi path: uses App Store Connect REST API. No local tooling.
-      # Uploads chunks then polls for Apple processing confirmation.
-      # KNOWN LIMITATION: App Store Connect JWT tokens expire after 20 minutes.
-      # If Apple processing takes longer, the poll returns 401 NOT_AUTHORIZED.
-      # The IPA was still delivered. Check TestFlight directly if this occurs.
-      # Set wait-for-processing: false to skip polling (fire-and-forget).
-      #
-      # altool path: deprecated xcrun altool --upload-app. Fire-and-forget.
-      # No processing confirmation. Retained for backwards compatibility.
-      - name: Upload to TestFlight (App Store Connect API)
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        uses: apple-actions/upload-testflight-build@v5
-        with:
-          app-path: ${{ steps.ipa.outputs.path }}
-          issuer-id: ${{ secrets.appstore-issuer-id }}
-          api-key-id: ${{ secrets.appstore-api-key-id }}
-          api-private-key: ${{ env.APPSTOREAPI_KEY_CONTENT }}
-          backend: AppStoreAPI
-          wait-for-processing: 'true'
-
-      - name: Confirm TestFlight upload (App Store Connect API)
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
-        shell: bash
-        run: |
-          ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
-          bar='██████████████████████████████'
-          echo "::group::🍎 [IOS] Upload complete"
-          echo "  [${bar}] 100% — ${APPSTOREAPI_IPA_SIZE_MB} MB in ${ELAPSED}s"
-          echo "  → Completed at $(date -u +'%H:%M:%S UTC')"
-          echo "::endgroup::"
-          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
-
-      - name: Upload to TestFlight (altool)
-        if: ${{ inputs.upload-tool == 'altool' }}
-        shell: bash
-        env:
-          IPA_PATH: ${{ steps.ipa.outputs.path }}
-          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
-          API_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
-        run: |
-          set -euo pipefail
-
-          IPA="${IPA_PATH}"
-          OUTPUT_FILE="$(mktemp)"
-
-          IPA_BYTES=$(stat -f%z "${IPA}")
-          IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
-          echo "→ IPA: ${IPA} (${IPA_SIZE_MB} MB)"
-          echo "→ Upload started at $(date -u +'%H:%M:%S UTC') — altool returns no progress; please wait"
-          UPLOAD_START=$(date +%s)
-
-          set +e
-          xcrun altool --upload-app \
-            -f "${IPA}" \
-            -t ios \
-            --apiKey "${API_KEY_ID}" \
-            --apiIssuer "${API_ISSUER_ID}" \
-            --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
-          ALTOOL_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          echo "→ Completed in $(( $(date +%s) - UPLOAD_START ))s"
-
-          if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
-            echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"
-            exit ${ALTOOL_EXIT}
-          fi
-
-          if grep -qiE "NOT_AUTHORIZED|failed to authenticate|Authentication credentials are missing or invalid|received status code 401|Unable to authenticate|auth issue" "${OUTPUT_FILE}"; then
-            echo "ERROR: App Store authentication error detected in altool output. Failing workflow by policy."
-            exit 1
-          fi
-
-          if grep -qiE "Validation failed|STATE_ERROR\.VALIDATION_ERROR|Invalid Version|CFBundleShortVersionString" "${OUTPUT_FILE}"; then
-            echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
-            exit 1
-          fi
-
-          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED (altool)"
-
-      - name: Report release failure
-        if: failure()
-        shell: bash
-        run: |
-          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }}"
-          echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
-
-      - name: Write release job summary
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          VERSION: ${{ needs.build.outputs.version }}
-          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
-          UPLOAD_TOOL: ${{ inputs.upload-tool }}
-          REF_NAME: ${{ github.ref_name }}
-          ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🍎 iOS TestFlight Upload — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` (build: ${BUILD_NUMBER}) |"
-            echo "| Upload tool | ${UPLOAD_TOOL} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | TestFlight upload | ${UPLOAD_CHECKPOINT_STATUS:-⏭️ Skipped} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
   release_with_environment:
-    name: Upload to TestFlight
+    name: Release
     runs-on: ${{ inputs.macos-runner }}
     needs: build
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
 
     steps:
-      - name: Announce release-with-environment job
+      - name: Announce
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          RELEASE_ENV: ${{ inputs.release-environment }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Env: ${{ inputs.release-environment }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Env: ${RELEASE_ENV} | Upload tool: ${UPLOAD_TOOL} | Triggered by: ${ACTOR}"
           echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       # ── Environment Setup ────────────────────────────────────────────────────────────
-      - name: Select Xcode (optional)
+      - name: Select Xcode
         if: ${{ inputs.xcode-version != '' }}
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -1352,7 +987,7 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: .
 
-      - name: Resolve IPA path for release runner
+      - name: Resolve IPA path
         id: ipa
         shell: bash
         env:
@@ -1360,7 +995,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          CANDIDATE="${CANDIDATE}"
           IPA_FILE=""
 
           if [[ -n "${CANDIDATE}" ]]; then
@@ -1388,7 +1022,7 @@ jobs:
       # in the action input block printed before apple-actions runs.
       # Note: GitHub only auto-masks declared secrets, not derived env vars,
       # so the per-line masking is required.
-      - name: Validate release credentials
+      - name: Validate credentials
         shell: bash
         env:
           APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
@@ -1408,7 +1042,7 @@ jobs:
             exit 1
           fi
 
-      - name: Install App Store Connect API key (base64)
+      - name: Install API key
         if: ${{ inputs.appstore-key-format == 'base64' }}
         shell: bash
         env:
@@ -1430,7 +1064,7 @@ jobs:
           printf '%s' "${KEY_B64}" | base64 -D > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
-      - name: Decode App Store Connect API key (appstoreapi)
+      - name: Decode API key
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         env:
@@ -1458,7 +1092,7 @@ jobs:
             echo "APPSTOREAPI_KEY_EOF"
           } >> "$GITHUB_ENV"
 
-      - name: Prepare TestFlight upload (App Store Connect API)
+      - name: Prepare upload
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         env:
@@ -1490,7 +1124,7 @@ jobs:
       #
       # altool path: deprecated xcrun altool --upload-app. Fire-and-forget.
       # No processing confirmation. Retained for backwards compatibility.
-      - name: Upload to TestFlight (App Store Connect API)
+      - name: Upload
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         uses: apple-actions/upload-testflight-build@v5
         with:
@@ -1501,10 +1135,11 @@ jobs:
           backend: AppStoreAPI
           wait-for-processing: 'true'
 
-      - name: Confirm TestFlight upload (App Store Connect API)
+      - name: Confirm upload
         if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         run: |
+          set -euo pipefail
           ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
           bar='██████████████████████████████'
           echo "::group::🍎 [IOS] Upload complete"
@@ -1514,7 +1149,7 @@ jobs:
           echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
 
-      - name: Upload to TestFlight (altool)
+      - name: Upload (altool)
         if: ${{ inputs.upload-tool == 'altool' }}
         shell: bash
         env:
@@ -1555,15 +1190,20 @@ jobs:
           echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED (altool)"
 
-      - name: Report release failure
+      - name: Release failure
         if: failure()
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
         run: |
-          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }}"
+          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Upload tool: ${UPLOAD_TOOL}"
           echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
 
-      - name: Write release job summary
+      - name: Release summary
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
           VERSION: ${{ needs.build.outputs.version }}

@@ -557,7 +557,6 @@ Builds an iOS application and uploads it to TestFlight. Supports React Native an
 | `macos-runner` | | `macos-latest` | macOS runner label |
 | `node-version` | | `24` | Node.js version (for React Native) |
 | `package-manager` | | `yarn` | `yarn` or `npm` |
-| `use-simplify9-xcode-setup` | | `true` | Run `xcode-setup` (pod install + selector) |
 | `ios-dir` | | `ios` | iOS directory for pod operations |
 | `artifact-name` | | `app` | Artifact name for IPA transfer between jobs |
 | `release-environment` | | `''` | GitHub environment for release job (optional) |
@@ -600,7 +599,7 @@ jobs:
 - Always uses **manual signing** (`signingStyle: manual`) — automatic signing requires an interactive Xcode session unavailable in CI.
 - Certificate and profile installation uses `ios-install-cert` and `ios-install-profile` composite actions internally.
 - **CocoaPods caching:** The `~/.cocoapods/repos` spec repository and `ios/Pods` directory are cached between runs, keyed on `Podfile.lock`. This eliminates the spec repo re-download on warm runs (typically the largest time sink). The cache is bypassed automatically when `clean-reinstall-pods: true` is set.
-- Two release paths exist: `release` (no environment protection) and `release_with_environment` (with approval gate via `release-environment` input).
+- Release runs in the `release_with_environment` job, protected by an approval gate via the `release-environment` input.
 - Use `ios-testflight-dispatch-template.yml` to add a manual `workflow_dispatch` trigger to your repo.
 
 ---
