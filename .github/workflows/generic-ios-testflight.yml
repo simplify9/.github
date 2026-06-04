@@ -224,16 +224,11 @@ on:
         default: ""
 
       # ── Versioning ───────────────────────────────────────────────────────────────
-      # pbxproj-counter-rollover: marketing-prefix in X.Y or X.Y.Z format with
-      # single-digit carry logic. Sets MARKETING_VERSION and
-      # CURRENT_PROJECT_VERSION in the .pbxproj file on every run.
-      versioning-strategy:
-        description: Versioning strategy (pbxproj-counter-rollover)
-        required: false
-        type: string
-        default: pbxproj-counter-rollover
       pbxproj-path:
-        description: Path to project.pbxproj
+        description: >
+          Path to project.pbxproj. If empty, auto-detected from
+          ios-dir by locating the single .xcodeproj directory
+          (e.g. ios/MyApp.xcodeproj/project.pbxproj).
         required: false
         type: string
         default: ""
@@ -242,11 +237,6 @@ on:
         required: false
         type: string
         default: "1.0"
-      build-number-offset:
-        description: Offset added to CURRENT_PROJECT_VERSION when computing the new build number (default 1)
-        required: false
-        type: string
-        default: "1"
 
       # ── Artifact ────────────────────────────────────────────────────────────────
       # ipa-name-pattern tokens: {scheme}, {version}, {build_number},
@@ -369,9 +359,13 @@ jobs:
     steps:
       - name: Announce build job
         shell: bash
+        env:
+          WORKSPACE: ${{ inputs.workspace }}
+          SCHEME: ${{ inputs.scheme }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${{ inputs.workspace }} | Scheme: ${{ inputs.scheme }} | Versioning: ${{ inputs.versioning-strategy }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${WORKSPACE} | Scheme: ${SCHEME} | Triggered by: ${ACTOR}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
@@ -628,13 +622,30 @@ jobs:
         shell: bash
         env:
           PBXPROJ_PATH: ${{ inputs.pbxproj-path }}
-          BUILD_NUMBER_OFFSET: ${{ inputs.build-number-offset }}
+          IOS_DIR: ${{ inputs.ios-dir }}
           MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${PBXPROJ_PATH}" || ! -f "${PBXPROJ_PATH}" ]]; then
-            echo "ERROR: pbxproj versioning requires a valid pbxproj-path input"
+          # Auto-detect pbxproj path when not explicitly provided.
+          # Expects exactly one .xcodeproj directory inside ios-dir,
+          # following the standard React Native project structure:
+          #   ios/{AppName}.xcodeproj/project.pbxproj
+          if [[ -z "${PBXPROJ_PATH}" ]]; then
+            XCODEPROJ_DIR=$(find "${IOS_DIR}" -maxdepth 1 \
+              -name "*.xcodeproj" -type d 2>/dev/null | head -n 1)
+            if [[ -z "${XCODEPROJ_DIR}" ]]; then
+              echo "ERROR: Could not auto-detect .xcodeproj in '${IOS_DIR}'."
+              echo "Set pbxproj-path explicitly if the project structure differs."
+              exit 1
+            fi
+            PBXPROJ_PATH="${XCODEPROJ_DIR}/project.pbxproj"
+            echo "Auto-detected pbxproj path: ${PBXPROJ_PATH}"
+          fi
+
+          if [[ ! -f "${PBXPROJ_PATH}" ]]; then
+            echo "ERROR: project.pbxproj not found at '${PBXPROJ_PATH}'."
+            echo "Set pbxproj-path explicitly if the project structure differs."
             exit 1
           fi
 
@@ -653,12 +664,6 @@ jobs:
           echo "Original CURRENT_PROJECT_VERSION in pbxproj: ${BASE_BUILD}"
 
           # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
-          OFFSET="${BUILD_NUMBER_OFFSET}"
-          if ! [[ "${OFFSET}" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: build-number-offset must be numeric. Got '${OFFSET}'"
-            exit 1
-          fi
-
           PREFIX_RAW="${MARKETING_PREFIX}"
           if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
             BASE_MAJOR="${BASH_REMATCH[1]}"
@@ -683,7 +688,8 @@ jobs:
           FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
 
           NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
-          NEW_BUILD_NUMBER=$((BASE_BUILD + OFFSET + GITHUB_RUN_NUMBER))
+          # build-number-offset is fixed at 0; formula: BASE + run_number
+          NEW_BUILD_NUMBER=$((BASE_BUILD + GITHUB_RUN_NUMBER))
 
           echo "Rollover base major: ${BASE_MAJOR}"
           echo "Rollover base minor: ${BASE_MINOR}"
@@ -1000,7 +1006,6 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           WORKSPACE: ${{ inputs.workspace }}
           SCHEME: ${{ inputs.scheme }}
-          VERSIONING: ${{ inputs.versioning-strategy }}
           RUNNER_OS: ${{ runner.os }}
           MACOS_RUNNER: ${{ inputs.macos-runner }}
           XCODE_VERSION: ${{ inputs.xcode-version }}
@@ -1019,7 +1024,6 @@ jobs:
             echo "|-------|-------|"
             echo "| Workspace | \`${WORKSPACE}\` |"
             echo "| Scheme | \`${SCHEME}\` |"
-            echo "| Versioning | ${VERSIONING} |"
             echo "| Runner | ${RUNNER_OS} (${MACOS_RUNNER}) |"
             echo "| Xcode | ${XCODE_VERSION} |"
             echo "| Node.js | ${NODE_VERSION} |"
@@ -1053,9 +1057,14 @@ jobs:
     steps:
       - name: Announce release job
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Upload to TestFlight — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] Upload to TestFlight — Job Started::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Upload tool: ${UPLOAD_TOOL} | Triggered by: ${ACTOR}"
           echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       # ── Environment Setup ────────────────────────────────────────────────────────────
@@ -1080,7 +1089,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          CANDIDATE="${CANDIDATE}"
           IPA_FILE=""
 
           if [[ -n "${CANDIDATE}" ]]; then
@@ -1286,8 +1294,12 @@ jobs:
       - name: Report release failure
         if: failure()
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
         run: |
-          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }}"
+          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Upload tool: ${UPLOAD_TOOL}"
           echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
 
       - name: Write release job summary
@@ -1333,9 +1345,15 @@ jobs:
     steps:
       - name: Announce release-with-environment job
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          RELEASE_ENV: ${{ inputs.release-environment }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Env: ${{ inputs.release-environment }} | Upload tool: ${{ inputs.upload-tool }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Env: ${RELEASE_ENV} | Upload tool: ${UPLOAD_TOOL} | Triggered by: ${ACTOR}"
           echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       # ── Environment Setup ────────────────────────────────────────────────────────────
@@ -1360,7 +1378,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          CANDIDATE="${CANDIDATE}"
           IPA_FILE=""
 
           if [[ -n "${CANDIDATE}" ]]; then
@@ -1558,8 +1575,12 @@ jobs:
       - name: Report release failure
         if: failure()
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
         run: |
-          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${{ needs.build.outputs.version }} | Build: ${{ needs.build.outputs.build-number }} | Upload tool: ${{ inputs.upload-tool }}"
+          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Upload tool: ${UPLOAD_TOOL}"
           echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
 
       - name: Write release job summary
