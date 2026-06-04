@@ -53,12 +53,9 @@ jobs:
       package-manager-directory: "."
       cache-dependency-path: ""
       install-command: ""
-      install-jetifier: true
-      run-jetifier: true
 
       build-root-directory: android
       gradle-task: bundleRelease
-      gradle-version: wrapper
 
       keystore-output-path: android/app/release.keystore
       aab-source-path: android/app/build/outputs/bundle/release/app-release.aab
@@ -103,12 +100,9 @@ jobs:
       package-manager-directory: "."
       cache-dependency-path: ""
       install-command: ""
-      install-jetifier: true
-      run-jetifier: true
 
       build-root-directory: android
       gradle-task: bundleRelease
-      gradle-version: wrapper
 
       keystore-output-path: android/app/release.keystore
       aab-source-path: android/app/build/outputs/bundle/release/app-release.aab

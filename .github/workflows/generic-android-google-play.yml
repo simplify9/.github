@@ -135,13 +135,8 @@ on:
         required: false
         type: string
         default: ""
-      install-jetifier:
-        description: Install jetifier as dev dependency
-        required: false
-        type: boolean
-        default: true
-      run-jetifier:
-        description: Run npx jetify
+      use-jetifier:
+        description: Install and run jetifier (npx jetify). Disable for projects that do not need AndroidX migration.
         required: false
         type: boolean
         default: true
@@ -156,11 +151,6 @@ on:
         required: false
         type: string
         default: bundleRelease
-      gradle-version:
-        description: Gradle version input for gradle-build-action
-        required: false
-        type: string
-        default: wrapper
       gradle-extra-arguments:
         description: Optional extra Gradle args
         required: false
@@ -478,7 +468,7 @@ jobs:
           fi
 
       - name: Install jetifier
-        if: ${{ inputs.install-jetifier }}
+        if: ${{ inputs.use-jetifier }}
         shell: bash
         env:
           JETIFIER_INSTALL_CMD: ${{ steps.package_manager.outputs.jetifier_install_command }}
@@ -487,7 +477,7 @@ jobs:
           eval "${JETIFIER_INSTALL_CMD}"
 
       - name: Jetify
-        if: ${{ inputs.run-jetifier }}
+        if: ${{ inputs.use-jetifier }}
         shell: bash
         env:
           JETIFIER_RUN_CMD: ${{ steps.package_manager.outputs.jetifier_run_command }}
@@ -588,7 +578,9 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
-          gradle-version: ${{ inputs.gradle-version }}
+          # wrapper — always use the project's gradle-wrapper.properties.
+          # All RN projects in this fleet manage their Gradle version via the wrapper.
+          gradle-version: wrapper
           cache-read-only: false
           gradle-home-cache-includes: |
             caches
