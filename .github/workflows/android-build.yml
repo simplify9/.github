@@ -178,7 +178,7 @@ on:
         default: aab
 
       play-track:
-        description: Google Play track (internal, alpha, beta, production)
+        description: Google Play tracks (internal, alpha, beta, production)
         required: false
         type: string
         default: internal
@@ -782,7 +782,7 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.google-play-service-account-json }}
           packageName: ${{ inputs.app-id }}
           releaseFiles: ${{ steps.aab.outputs.path }}
-          track: ${{ inputs.play-track }}
+          tracks: ${{ inputs.play-track }}
           releaseName: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
           changesNotSentForReview: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
