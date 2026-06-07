@@ -27,7 +27,7 @@
 #
 # INPUTS (only non-default values are declared — see generic template for
 #   full input reference):
-#   https://github.com/simplify9/.github/blob/main/.github/workflows/generic-android-google-play.yml
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/android-build.yml
 # =============================================================================
 name: Android CI/CD                          # REPLACE: e.g. "Mealivery Customer Android"
 run-name: android-${{ github.ref_name }}-${{ github.run_number }}
@@ -52,7 +52,7 @@ jobs:
   development:
     name: Android Dev
     if: ${{ github.ref_name == 'staging' }}
-    uses: simplify9/.github/.github/workflows/generic-android-google-play.yml@main
+    uses: simplify9/.github/.github/workflows/android-build.yml@main
     with:
       # ── App ───────────────────────────────────────────────────────────────
       app-id: com.example.app              # REPLACE: e.g. com.shanap.customer
@@ -81,7 +81,7 @@ jobs:
   production:
     name: Android Prod
     if: ${{ github.ref_name == 'main' }}
-    uses: simplify9/.github/.github/workflows/generic-android-google-play.yml@main
+    uses: simplify9/.github/.github/workflows/android-build.yml@main
     with:
       # ── App ───────────────────────────────────────────────────────────────
       app-id: com.example.app              # REPLACE

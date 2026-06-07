@@ -1,5 +1,5 @@
 # =============================================================================
-# Generic Android Build and Google Play Release — Reusable Workflow
+# Android Build and Google Play Release — Reusable Workflow
 # =============================================================================
 #
 # PURPOSE:
@@ -294,7 +294,7 @@ jobs:
           CODE_OFFSET=$((CODE_OFFSET_RAW))
 
           VERSION_CODE=$((GITHUB_RUN_NUMBER + CODE_OFFSET))
-          INCREMENT_COUNT=$((GITHUB_RUN_NUMBER))
+          INCREMENT_COUNT=${GITHUB_RUN_NUMBER}
 
           if [[ -n "${VERSION_NAME_OVERRIDE}" ]]; then
             VERSION_NAME="${VERSION_NAME_OVERRIDE}"
