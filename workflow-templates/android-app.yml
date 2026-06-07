@@ -1,0 +1,108 @@
+# =============================================================================
+# Android App CI/CD Caller — Template for app repositories
+# =============================================================================
+#
+# USAGE:
+#   Copy this file to your app repo at:
+#     .github/workflows/{app-name}-android.yml
+#
+#   Replace all values marked with # REPLACE with your app-specific values.
+#
+# BRANCHES:
+#   staging → triggers Android Dev job → uploads to android-internal environment
+#   main    → triggers Android Prod job → uploads to android-production environment
+#
+# VERSIONING:
+#   versionName: carry-based rollover from version-prefix + run_number.
+#                Single-digit carry: 4.9.9 + 1 run → 5.0.0.
+#   versionCode: strictly monotonic — run_number + version-code-offset.
+#                Set version-code-offset above your last shipped versionCode
+#                to avoid Play upgrade-path failures on CI migration.
+#                Example: last shipped versionCode was 500 → set offset to 1000.
+#
+# RE-RUNS:
+#   GitHub re-runs keep the same run_number. A re-run produces the same
+#   versionCode as the original attempt. Play will reject a duplicate
+#   versionCode — trigger a new run instead of re-running a failed one.
+#
+# INPUTS (only non-default values are declared — see generic template for
+#   full input reference):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/generic-android-google-play.yml
+# =============================================================================
+name: Android CI/CD                          # REPLACE: e.g. "Mealivery Customer Android"
+run-name: android-${{ github.ref_name }}-${{ github.run_number }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      disable_release:
+        description: Build AAB only — skip Google Play upload
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  development:
+    name: Android Dev
+    if: ${{ github.ref_name == 'staging' }}
+    uses: simplify9/.github/.github/workflows/generic-android-google-play.yml@main
+    with:
+      # ── App ───────────────────────────────────────────────────────────────
+      app-id: com.example.app              # REPLACE: e.g. com.shanap.customer
+      app-slug: app                        # REPLACE: e.g. mealivery-customer
+
+      # ── Versioning ────────────────────────────────────────────────────────
+      version-prefix: "1.0.0"             # REPLACE: your X.Y.Z start version
+      version-code-offset: "1000000"      # REPLACE: set above last shipped versionCode
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      keystore-output-path: android/app/release.keystore   # REPLACE if differs
+      aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE: e.g. myapp-{version_name}.aab
+
+      # ── Release ───────────────────────────────────────────────────────────
+      play-track: internal
+      changes-not-sent-for-review: true   # internal track: skip review queue for instant tester access
+      release-environment: android-internal   # REPLACE if env name differs
+      disable-release: ${{ inputs.disable_release }}
+    secrets:
+      android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      android-keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+
+  production:
+    name: Android Prod
+    if: ${{ github.ref_name == 'main' }}
+    uses: simplify9/.github/.github/workflows/generic-android-google-play.yml@main
+    with:
+      # ── App ───────────────────────────────────────────────────────────────
+      app-id: com.example.app              # REPLACE
+      app-slug: app                        # REPLACE
+
+      # ── Versioning ────────────────────────────────────────────────────────
+      version-prefix: "1.0.0"             # REPLACE
+      version-code-offset: "1000000"      # REPLACE
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      keystore-output-path: android/app/release.keystore   # REPLACE if differs
+      aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE
+
+      # ── Release ───────────────────────────────────────────────────────────
+      play-track: production
+      # changes-not-sent-for-review defaults to false — Google review triggered on commit
+      release-environment: android-production  # REPLACE if env name differs
+      disable-release: ${{ inputs.disable_release }}
+    secrets:
+      android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      android-keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
