@@ -23,7 +23,7 @@
 #
 # VERSIONING:
 #   versionName: carry-based rollover from version-prefix + run counter.
-#                version-prefix X.Y.Z + (run_number + version-name-offset).
+#                version-prefix X.Y.Z + run_number.
 #                Patch carries into minor at 9, minor carries into major
 #                at 9 (e.g. 4.9.9 at run 1 → 5.0.0).
 #                Optional version-name-override bypasses this logic.
@@ -88,7 +88,6 @@ on:
         default: app
       # Versioning inputs:
       # - version-prefix is the base release line.
-      # - version-name-offset moves the run counter for versionName.
       # - version-code-offset keeps Play versionCode strictly increasing.
       version-prefix:
         description: Base version for VERSION_NAME (X.Y or X.Y.Z, for example 4.0.0)
@@ -100,11 +99,6 @@ on:
         required: false
         type: string
         default: ""
-      version-name-offset:
-        description: Numeric offset added to github.run_number when computing VERSION_NAME
-        required: false
-        type: string
-        default: "0"
       version-code-offset:
         description: Numeric offset added to github.run_number for VERSION_CODE (set high for CI migrations)
         required: false
@@ -263,9 +257,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "::notice title=🤖 [ANDROID] Build AAB — Job Started::App: ${APP_ID} | Version prefix: ${VERSION_PREFIX} | Track: ${PLAY_TRACK} | Triggered by: ${ACTOR}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
 
       # ── Environment Setup ───────────────────────────────────────────────────
       - name: Checkout
@@ -276,7 +272,6 @@ jobs:
         id: compute
         shell: bash
         env:
-          VERSION_NAME_OFFSET: ${{ inputs.version-name-offset }}
           VERSION_CODE_OFFSET: ${{ inputs.version-code-offset }}
           VERSION_NAME_OVERRIDE: ${{ inputs.version-name-override }}
           VERSION_PREFIX: ${{ inputs.version-prefix }}
@@ -288,25 +283,18 @@ jobs:
           # Keep versionName and versionCode intentionally decoupled:
           # - versionName is human-readable for release visibility.
           # - versionCode is a strictly increasing integer for Play upgrade-path checks.
-          NAME_OFFSET_RAW="${VERSION_NAME_OFFSET}"
           CODE_OFFSET_RAW="${VERSION_CODE_OFFSET}"
           MAX_PLAY_VERSION_CODE=2100000000
-
-          if ! [[ "${NAME_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
-            echo "ERROR: version-name-offset must be a non-negative integer. Got '${NAME_OFFSET_RAW}'."
-            exit 1
-          fi
 
           if ! [[ "${CODE_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
             echo "ERROR: version-code-offset must be a non-negative integer. Got '${CODE_OFFSET_RAW}'."
             exit 1
           fi
 
-          NAME_OFFSET=$((NAME_OFFSET_RAW))
           CODE_OFFSET=$((CODE_OFFSET_RAW))
 
           VERSION_CODE=$((GITHUB_RUN_NUMBER + CODE_OFFSET))
-          INCREMENT_COUNT=$((GITHUB_RUN_NUMBER + NAME_OFFSET))
+          INCREMENT_COUNT=$((GITHUB_RUN_NUMBER))
 
           if [[ -n "${VERSION_NAME_OVERRIDE}" ]]; then
             VERSION_NAME="${VERSION_NAME_OVERRIDE}"
@@ -431,11 +419,13 @@ jobs:
             exit 1
           fi
 
-          echo "cache=${PACKAGE_MANAGER}" >> "$GITHUB_OUTPUT"
-          echo "cache_dependency_path=${CACHE_DEPENDENCY_PATH}" >> "$GITHUB_OUTPUT"
-          echo "default_install_command=${DEFAULT_INSTALL_COMMAND}" >> "$GITHUB_OUTPUT"
-          echo "jetifier_install_command=${JETIFIER_INSTALL_COMMAND}" >> "$GITHUB_OUTPUT"
-          echo "jetifier_run_command=${JETIFIER_RUN_COMMAND}" >> "$GITHUB_OUTPUT"
+          {
+            echo "cache=${PACKAGE_MANAGER}"
+            echo "cache_dependency_path=${CACHE_DEPENDENCY_PATH}"
+            echo "default_install_command=${DEFAULT_INSTALL_COMMAND}"
+            echo "jetifier_install_command=${JETIFIER_INSTALL_COMMAND}"
+            echo "jetifier_run_command=${JETIFIER_RUN_COMMAND}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -600,6 +590,7 @@ jobs:
           set -euo pipefail
           # EXTRA_ARGS is intentionally unquoted to allow word splitting
           # for callers that pass multiple space-separated Gradle flags.
+          # shellcheck disable=SC2086
           ./gradlew "${GRADLE_TASK}" \
             "-PversionName=${VERSION_NAME_OUT}" \
             "-PversionCode=${VERSION_CODE_OUT}" \
@@ -761,7 +752,7 @@ jobs:
 
           # Fallback for cases where reusable output is empty or path does not match release runner context.
           if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
-            AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
+            AAB_FILE="$(find . -maxdepth 1 -name '*.aab' -printf '%f\n' | head -n 1 || true)"
           fi
 
           if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then

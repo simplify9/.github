@@ -60,7 +60,7 @@ jobs:
 
       # ── Versioning ────────────────────────────────────────────────────────
       version-prefix: "1.0.0"             # REPLACE: your X.Y.Z start version
-      version-code-offset: "1000000"      # REPLACE: set above last shipped versionCode
+      version-code-offset: "80000"      # REPLACE: set above last shipped versionCode
 
       # ── Build ─────────────────────────────────────────────────────────────
       keystore-output-path: android/app/release.keystore   # REPLACE if differs
@@ -89,7 +89,7 @@ jobs:
 
       # ── Versioning ────────────────────────────────────────────────────────
       version-prefix: "1.0.0"             # REPLACE
-      version-code-offset: "1000000"      # REPLACE
+      version-code-offset: "80000"      # REPLACE
 
       # ── Build ─────────────────────────────────────────────────────────────
       keystore-output-path: android/app/release.keystore   # REPLACE if differs
