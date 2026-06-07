@@ -1,0 +1,111 @@
+# =============================================================================
+# iOS CI/CD Caller — Template for app repositories
+# =============================================================================
+#
+# USAGE:
+#   Copy this file to your app repo at:
+#     .github/workflows/{app-name}-ios.yml
+#
+#   Replace all values marked with # REPLACE with your app-specific values.
+#
+# BRANCHES:
+#   staging → triggers iOS Dev job → uploads to ios-staging environment
+#   main    → triggers iOS Prod job → uploads to ios-production environment
+#
+# INPUTS (only non-default values are declared — see generic template for
+#   full input reference):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/ios-build.yml
+# =============================================================================
+name: iOS CI/CD                          # REPLACE: e.g. "Mealivery Customer iOS"
+run-name: ios-${{ github.ref_name }}-${{ github.run_number }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      disable_release:
+        description: Build IPA only — skip TestFlight upload
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  development:
+    name: iOS Dev
+    if: ${{ github.ref_name == 'staging' }}
+    uses: simplify9/.github/.github/workflows/ios-build.yml@main
+    with:
+      # ── Runner ────────────────────────────────────────────────────────────
+      xcode-version: "26"
+
+      # ── Ruby / CocoaPods ─────────────────────────────────────────────────
+      ruby-version: "3.1"
+      use-bundler: true
+      enable-ccache: true
+
+      # ── Xcode Project ────────────────────────────────────────────────────
+      workspace: ios/App.xcworkspace          # REPLACE
+      scheme: App                             # REPLACE
+      archive-path: output/App.xcarchive      # REPLACE
+
+      # ── Versioning ────────────────────────────────────────────────────────
+      pbxproj-path: ios/App.xcodeproj/project.pbxproj  # REPLACE
+      marketing-prefix: "1.0"                           # REPLACE
+
+      # ── Export & Upload ───────────────────────────────────────────────────
+      generate-export-options: true
+      ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
+      upload-tool: appstoreapi
+      release-environment: ios-staging          # REPLACE if env name differs
+      disable-release: ${{ inputs.disable_release }}
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+
+  production:
+    name: iOS Prod
+    if: ${{ github.ref_name == 'main' }}
+    uses: simplify9/.github/.github/workflows/ios-build.yml@main
+    with:
+      # ── Runner ────────────────────────────────────────────────────────────
+      xcode-version: "26"
+
+      # ── Ruby / CocoaPods ─────────────────────────────────────────────────
+      ruby-version: "3.1"
+      use-bundler: true
+      enable-ccache: true
+
+      # ── Xcode Project ────────────────────────────────────────────────────
+      workspace: ios/App.xcworkspace          # REPLACE
+      scheme: App                             # REPLACE
+      archive-path: output/App.xcarchive      # REPLACE
+
+      # ── Versioning ────────────────────────────────────────────────────────
+      pbxproj-path: ios/App.xcodeproj/project.pbxproj  # REPLACE
+      marketing-prefix: "1.0"                           # REPLACE
+
+      # ── Export & Upload ───────────────────────────────────────────────────
+      generate-export-options: true
+      ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
+      upload-tool: appstoreapi
+      release-environment: ios-production       # REPLACE if env name differs
+      disable-release: ${{ inputs.disable_release }}
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}

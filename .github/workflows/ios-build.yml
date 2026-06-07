@@ -1,5 +1,5 @@
 ﻿# =============================================================================
-# Generic iOS Build and TestFlight — Reusable Workflow
+# iOS Build & Deploy — Reusable Workflow
 # =============================================================================
 #
 # PURPOSE:
@@ -51,7 +51,7 @@
 #   - ccache only caches ObjC/C++ compilation. Swift targets compile fresh
 #     on every ephemeral runner run.
 # =============================================================================
-name: Generic iOS Build and TestFlight (reusable)
+name: iOS Build & Deploy (reusable)
 
 on:
   workflow_call:

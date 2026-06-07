@@ -245,9 +245,9 @@ steps:
 
 | Workflow | Purpose | Key inputs |
 |---|---|---|
-| `generic-ios-testflight.yml` | iOS → TestFlight | `macos-runner`, `xcode-version`, `bundle-id`, signing inputs |
+| `ios-build.yml` | iOS → TestFlight | `macos-runner`, `xcode-version`, `bundle-id`, signing inputs |
 | `generic-android-google-play.yml` | Android AAB → Google Play | `app-id`, `gradle-task`, `version-code-offset`, `keystore-*` |
-| `ios-testflight-dispatch-template.yml` | `workflow_dispatch` entry point for iOS | Wraps `generic-ios-testflight.yml` |
+| `ios-testflight-dispatch-template.yml` | `workflow_dispatch` entry point for iOS | Wraps `ios-build.yml` |
 | `android-google-play-dispatch-template.yml` | `workflow_dispatch` entry point for Android | Wraps `generic-android-google-play.yml` |
 
 ### Helm Chart Development

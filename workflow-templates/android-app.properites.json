@@ -1,0 +1,10 @@
+{
+    "name": "Android App CI/CD",
+    "description": "Builds, signs, and uploads an Android React Native app to Google Play using the Simplify9 reusable workflow.",
+    "iconName": "octicon-device-mobile",
+    "categories": [
+        "Android",
+        "React Native",
+        "Google Play"
+    ]
+}
