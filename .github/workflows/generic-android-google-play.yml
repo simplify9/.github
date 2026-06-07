@@ -307,13 +307,9 @@ jobs:
 
           VERSION_CODE=$((GITHUB_RUN_NUMBER + CODE_OFFSET))
           INCREMENT_COUNT=$((GITHUB_RUN_NUMBER + NAME_OFFSET))
-          VERSION_NAME_SOURCE="computed"
-          OVERRIDE_DISPLAY="<empty>"
 
           if [[ -n "${VERSION_NAME_OVERRIDE}" ]]; then
             VERSION_NAME="${VERSION_NAME_OVERRIDE}"
-            VERSION_NAME_SOURCE="override"
-            OVERRIDE_DISPLAY="${VERSION_NAME_OVERRIDE}"
           else
             BASE_VERSION_RAW="${VERSION_PREFIX}"
             BASE_MAJOR=""
@@ -415,10 +411,10 @@ jobs:
               echo "ERROR: Unsupported package-manager '${PACKAGE_MANAGER_RAW}'. Supported values: yarn, npm."
               exit 1
               ;;
-            esac
+          esac
 
-            # Infer lockfile path from package-manager + directory when no explicit override is provided.
-            CACHE_DEPENDENCY_PATH="${CACHE_DEPENDENCY_PATH_INPUT}"
+          # Infer lockfile path from package-manager + directory when no explicit override is provided.
+          CACHE_DEPENDENCY_PATH="${CACHE_DEPENDENCY_PATH_INPUT}"
 
           if [[ -z "${CACHE_DEPENDENCY_PATH}" ]]; then
             if [[ "${PACKAGE_DIR}" == "." ]]; then
