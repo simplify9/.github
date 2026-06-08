@@ -194,7 +194,7 @@ on:
         default: false
       release-environment:
         description: GitHub environment for release job (android-staging or android-production)
-        required: true
+        required: false
         type: string
         default: "android-staging"
       # Build-only toggle. When true, both Google Play release jobs are skipped.
