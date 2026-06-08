@@ -221,8 +221,8 @@ on:
       # Set release-environment to route through release_with_environment job,
       # which enforces GitHub Environment approval gates.
       release-environment:
-        description: Optional GitHub environment for release job
-        required: true
+        description: GitHub environment for release job (ios-staging or ios-production)
+        required: false
         type: string
         default: "ios-staging"
       # Build-only toggle. When true, TestFlight upload jobs are skipped.
