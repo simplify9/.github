@@ -196,7 +196,7 @@ on:
         description: Optional GitHub environment for release job
         required: false
         type: string
-        default: ""
+        default: "android-internal"
       # Build-only toggle. When true, both Google Play release jobs are skipped.
       disable-release:
         description: If true, skip Google Play release jobs and run build-only
