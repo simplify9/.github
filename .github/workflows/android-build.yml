@@ -193,7 +193,7 @@ on:
         type: boolean
         default: false
       release-environment:
-        description: Optional GitHub environment for release job
+        description: GitHub environment for release job (android-internal or android-production)
         required: true
         type: string
         default: "android-internal"
