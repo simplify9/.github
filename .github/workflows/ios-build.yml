@@ -222,9 +222,9 @@ on:
       # which enforces GitHub Environment approval gates.
       release-environment:
         description: Optional GitHub environment for release job
-        required: false
+        required: true
         type: string
-        default: ""
+        default: "ios-staging"
       # Build-only toggle. When true, TestFlight upload jobs are skipped.
       disable-release:
         description: If true, skip TestFlight upload jobs and run build-only
