@@ -764,6 +764,36 @@ jobs:
               "          from: All")
           }
 
+          # ---------------------------------------------------------------------------
+          # Pre-flight: check gateway listener capacity before touching anything.
+          # The Gateway API hard limit is 64 listeners. Each new hostname needs 2
+          # (HTTP + HTTPS). If adding the next host would exceed 64 we abort with a
+          # clear, actionable message — no partial state is ever written.
+          # ---------------------------------------------------------------------------
+          preflight_capacity_check() {
+            local current_count needed="$1"
+            current_count=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+              -o jsonpath='{.spec.listeners}' 2>/dev/null \
+              | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
+            if (( current_count + needed > 64 )); then
+              echo "❌ GATEWAY CAPACITY ERROR: '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' currently has ${current_count}/64 listeners."
+              echo "   Adding ${needed} listener(s) for this host would reach $((current_count + needed)) — exceeding the hard Gateway API limit of 64."
+              echo "   ACTION REQUIRED: Prune stale listeners from the gateway before redeploying."
+              echo "   Run: kubectl get gateway ${GATEWAY_NAME} -n ${GATEWAY_NAMESPACE} -o jsonpath='{range .status.listeners[*]}{.name}: attachedRoutes={.attachedRoutes}{\"\\n\"}{end}'"
+              echo "   Remove any listener with attachedRoutes=0 that has no active HTTPRoute."
+              exit 1
+            fi
+            echo "Capacity check passed: ${current_count}/64 listeners in use, ${needed} needed."
+          }
+
+          # ---------------------------------------------------------------------------
+          # add_listener_if_missing: adds a single listener to the gateway.
+          # Returns exit code 0 on success or skip, non-zero on patch failure.
+          # Sets the caller-scoped variable _listener_was_added=true when a NEW
+          # listener is actually patched in (not when skipped). Used for rollback.
+          # ---------------------------------------------------------------------------
+          _listener_was_added=false
+
           add_listener_if_missing() {
             local listener_name="$1"
             local listener_protocol="$2"
@@ -782,6 +812,7 @@ jobs:
               -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
             if echo "$existing" | grep -Fxq "$listener_name"; then
               echo "Listener '${listener_name}' already exists by name; skipping."
+              _listener_was_added=false
               return 0
             fi
 
@@ -795,6 +826,7 @@ jobs:
                  | .name' 2>/dev/null || true)
             if [ -n "$conflict" ]; then
               echo "A ${listener_protocol} listener for '${listener_host}:${listener_port}' already exists (name: '${conflict}'); skipping."
+              _listener_was_added=false
               return 0
             fi
 
@@ -820,6 +852,27 @@ jobs:
                 }}
               ]"
             fi
+            _listener_was_added=true
+          }
+
+          # ---------------------------------------------------------------------------
+          # remove_listener_by_name: removes a listener from the gateway by name.
+          # Used for atomic rollback: if HTTP was added but HTTPS fails, the HTTP
+          # listener is removed so no half-baked state is left behind.
+          # ---------------------------------------------------------------------------
+          remove_listener_by_name() {
+            local target_name="$1" idx
+            idx=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}' \
+              | grep -n "^${target_name}$" | cut -d: -f1)
+            if [ -z "$idx" ]; then
+              echo "Rollback: listener '${target_name}' not found — nothing to remove."
+              return 0
+            fi
+            local zero_idx=$(( idx - 1 ))
+            kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' \
+              -p="[{\"op\":\"remove\",\"path\":\"/spec/listeners/${zero_idx}\"}]"
+            echo "Rollback: removed listener '${target_name}' (index ${zero_idx})."
           }
 
           while IFS= read -r host; do
@@ -833,6 +886,12 @@ jobs:
             https_listener=$(trim63 "https-${slug}")
 
             ensure_gateway_exists "$host"
+
+            # Pre-flight capacity check: count how many listeners this host actually
+            # needs to add (0, 1, or 2 — guards may skip some). We conservatively
+            # check for 2 slots needed regardless of guard outcomes, since we cannot
+            # know which guards will fire without querying the live state twice.
+            preflight_capacity_check 2
 
             kubectl apply -f <(printf '%s\n' \
               "apiVersion: cert-manager.io/v1" \
@@ -848,8 +907,23 @@ jobs:
               "  dnsNames:" \
               "    - ${host}")
 
+            # Add HTTP listener, track whether it was newly created.
+            _listener_was_added=false
             add_listener_if_missing "$http_listener" "HTTP" "$host" "$secret_name"
-            add_listener_if_missing "$https_listener" "HTTPS" "$host" "$secret_name"
+            http_was_new="$_listener_was_added"
+
+            # Add HTTPS listener. On failure, atomically roll back the HTTP listener
+            # if we added it in this run — prevents the half-baked HTTP-only state
+            # that caused the original overflow incident.
+            _listener_was_added=false
+            if ! add_listener_if_missing "$https_listener" "HTTPS" "$host" "$secret_name"; then
+              if [ "$http_was_new" = "true" ]; then
+                echo "⚠️  HTTPS listener patch failed. Rolling back HTTP listener '${http_listener}' added in this run..."
+                remove_listener_by_name "$http_listener"
+              fi
+              echo "❌ Failed to add HTTPS listener for host '${host}'. Aborting."
+              exit 1
+            fi
 
             if [ "$GATEWAY_CERT_WAIT" = "true" ]; then
               kubectl wait --for=condition=Ready=True "certificate/${cert_name}" -n "$GATEWAY_NAMESPACE" --timeout="${GATEWAY_CERT_WAIT_TIMEOUT}s"
