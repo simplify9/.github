@@ -137,7 +137,13 @@ on:
         default: s9-dev-edge
         type: string
       gateway-section-name:
-        description: Optional Gateway sectionName override
+        description: |
+          Optional Gateway sectionName override for the Helm chart parentRef.
+          When set, the auto-onboarding step runs in SHARED LISTENER MODE:
+          per-host listener and certificate provisioning is skipped entirely.
+          The named listener is expected to already exist on the gateway
+          (e.g. 'https-wildcard-sf9-io'). The step validates it exists and
+          exits cleanly. Use this for all apps on *.sf9.io, *.talmaro.com, etc.
         required: false
         default: ''
         type: string
@@ -686,6 +692,7 @@ jobs:
           GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
           GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
           HOST_LIST: ${{ steps.routing.outputs.gateway-host-list }}
+          GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
         run: |
           set -euo pipefail
 
@@ -708,6 +715,40 @@ jobs:
 
           if [ -z "$(echo "$HOST_LIST" | tr -d '[:space:]\r\n')" ]; then
             echo "No gateway hosts were provided. Skipping gateway auto-onboarding."
+            exit 0
+          fi
+
+          # ---------------------------------------------------------------------------
+          # Shared listener mode: when gateway-section-name is explicitly provided,
+          # the app is attaching to a pre-existing shared/wildcard listener.
+          # Skip all per-host listener and cert provisioning — just validate that
+          # the named listener exists on the gateway, then exit cleanly.
+          # ---------------------------------------------------------------------------
+          if [ -n "${GATEWAY_SECTION_NAME:-}" ]; then
+            echo "Shared listener mode: gateway-section-name='${GATEWAY_SECTION_NAME}' is set."
+            echo "Skipping per-host listener and cert provisioning."
+
+            KCFG_PATH="$RUNNER_TEMP/kubeconfig"
+            if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
+              printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
+            else
+              if printf "%s" "$KUBECONFIG_DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
+                true
+              else
+                printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
+              fi
+            fi
+            export KUBECONFIG="$KCFG_PATH"
+
+            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}' 2>/dev/null || true)
+            if ! echo "$existing" | grep -Fxq "${GATEWAY_SECTION_NAME}"; then
+              echo "❌ Shared listener '${GATEWAY_SECTION_NAME}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}'."
+              echo "   Available listeners:"
+              echo "$existing" | sed 's/^/     /'
+              exit 1
+            fi
+            echo "✅ Shared listener '${GATEWAY_SECTION_NAME}' confirmed present on gateway. Onboarding complete."
             exit 0
           fi
 
