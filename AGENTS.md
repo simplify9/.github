@@ -71,7 +71,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `gradle/actions/setup-gradle` | `@v4` | Do NOT use `gradle/gradle-build-action` (archived). Do NOT upgrade to v5/v6: v5 requires runner ≥ 2.327.1; v6 has commercial caching license terms |
 
 **Pinned CLI binary versions (defaults in action inputs):**
-- Helm CLI: `v3.21.0`
+- Helm CLI: `v4.2.0`
 - kubectl CLI: `v1.33.0`
 
 ---

@@ -64,7 +64,7 @@ on:
       helm-version:
         type: string
         required: false
-        default: v3.21.0
+        default: v4.2.0
 
       kubectl-version:
         type: string

@@ -16,7 +16,7 @@ on:
       helm-version:
         description: Helm version to use for lint/template/package
         required: false
-        default: "3.2.4"
+        default: "4.2.0"
         type: string
       version-prefix:
         description: Version prefix in major.minor format
@@ -82,7 +82,7 @@ on:
       helm-version:
         description: Helm version to use for lint/template/package
         required: false
-        default: "3.2.4"
+        default: "4.2.0"
         type: string
       version-prefix:
         description: Version prefix in major.minor format
