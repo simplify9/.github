@@ -485,6 +485,60 @@ jobs:
             eval "${DEFAULT_INSTALL_COMMAND}"
           fi
 
+      # ── CocoaPods: Podfile patch ────────────────────────────────────────────────────
+      # When enable-ccache=true, ensures :ccache_enabled => true is active in the
+      # caller's Podfile before pod install runs. Handles four states:
+      #   1. Commented out:   # :ccache_enabled => true (or => Podfile::USE_CCACHE)
+      #   2. Disabled:        :ccache_enabled => false
+      #   3. Already enabled: :ccache_enabled => true  (no-op)
+      #   4. Absent:          key not present — injected into react_native_post_install(...)
+      # Callers do not need to manually edit their Podfiles; the workflow patches at CI time.
+      - name: Configure Podfile for ccache
+        if: ${{ inputs.enable-ccache }}
+        shell: bash
+        env:
+          IOS_DIR: ${{ inputs.ios-dir }}
+        run: |
+          set -euo pipefail
+          PODFILE="${IOS_DIR}/Podfile"
+
+          if [[ ! -f "${PODFILE}" ]]; then
+            echo "ERROR: Podfile not found at '${PODFILE}'. Set ios-dir to the correct directory."
+            exit 1
+          fi
+
+          if grep -qE ':ccache_enabled' "${PODFILE}"; then
+            # Key exists (commented or not) — uncomment then set value to true
+            sed -i '' -E 's/^([[:space:]]*)#([[:space:]]*:ccache_enabled)/\1\2/' "${PODFILE}"
+            sed -i '' -E 's/(:ccache_enabled[[:space:]]*=>[[:space:]]*)[[:alnum:]:_]+/\1true/' "${PODFILE}"
+            echo "→ Patched existing :ccache_enabled in ${PODFILE}"
+          else
+            # Key absent — inject :ccache_enabled => true into react_native_post_install(...)
+            # Uses Ruby (already present for CocoaPods) for reliable multi-line AST-aware patching.
+            # Indentation of the new arg matches the last existing arg in the call.
+            ruby -e '
+          content = File.read(ARGV[0])
+          modified = content.gsub(/(\breact_native_post_install\s*\(.*?)(\n?\s*\))/m) do
+            inner  = $1.rstrip.chomp(",")
+            indent = inner.lines.last.to_s[/^(\s*)/, 1] || "      "
+            "#{inner},\n#{indent}:ccache_enabled => true#{$2}"
+          end
+          abort "ERROR: react_native_post_install not found in #{ARGV[0]}" if modified == content
+          File.write(ARGV[0], modified)
+          ' -- "${PODFILE}"
+            echo "→ Injected :ccache_enabled => true into react_native_post_install in ${PODFILE}"
+          fi
+
+          if grep -qE ':ccache_enabled[[:space:]]*=>[[:space:]]*true' "${PODFILE}"; then
+            echo "✅ :ccache_enabled => true active in ${PODFILE}"
+          else
+            echo "ERROR: Failed to enable :ccache_enabled in ${PODFILE}."
+            exit 1
+          fi
+
+          echo "→ Podfile diff:"
+          git --no-pager diff -- "${PODFILE}" || true
+
       # ── CocoaPods ──────────────────────────────────────────────────────────────────
       # CocoaPods caching — split into two independent cache steps.
       #
