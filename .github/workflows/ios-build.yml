@@ -255,7 +255,7 @@ on:
         description: "Enable ccache for Objective-C/C++ pod compilation (partial speedup; no Swift benefit)."
         required: false
         type: boolean
-        default: false
+        default: true
 
     secrets:
       ios-p12-base64:
