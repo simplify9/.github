@@ -498,7 +498,6 @@ jobs:
           # Translate your previous comma-joined --set into line-based entries
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.app-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}

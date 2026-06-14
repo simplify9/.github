@@ -2,17 +2,9 @@ name: 'Helm Deploy'
 description: 'Deploy a Helm chart to a Kubernetes cluster'
 
 inputs:
-  registry_profile:
-    description: "Profile code for dynamic kubeconfig/registry vars & secrets (e.g., S9, WISEWELL)"
-    required: false
-    default: S9
   app_name:
     description: "Application name (Helm release name)"
     required: true
-  version:
-    description: "Logical version label (may be used in image tag selection)"
-    required: false
-    default: staging
   namespace:
     description: "Kubernetes namespace to deploy into"
     required: true
@@ -177,6 +169,11 @@ runs:
         set -euo pipefail
 
         JOB_NAME="${APP_NAME}-db-migrate-${GITHUB_RUN_NUMBER}"
+
+        # Ensure the target namespace exists before applying the Job. The Helm step uses
+        # --create-namespace, but it runs AFTER this Job, so on a first deploy to a fresh
+        # namespace the Job apply would otherwise fail. Idempotent (no-op if it already exists).
+        kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
         # Coalesce to the historical defaults so callers that don't override keep identical behavior.
         CMD_STR="${INIT_JOB_COMMAND:-dotnet SW.Shanap.Web.dll --migrate}"

@@ -759,7 +759,7 @@ uses: simplify9/.github/.github/actions/<name>@main
 |---|---|---|
 | `helm-deploy` | Profile-based deploy; supports `init_job_image` for pre-deploy DB migration Jobs | `app_name`, `namespace`, `kubeconfig_data` |
 | `helm-deploy-s9generic` | Deploy `s9genericchart` from `https://charts.sf9.io`; handles `set-values` (`--set`) and `set-string-values` (`--set-string`) separately | `chart-name`, `chart-version`, `kubeconfig` |
-| `helm-generic` | Checkout + Helm lint + package + push in a single composite | `app-name`, `version` |
+| `helm-generic` | Deploy a Helm chart (`helm upgrade --install`) with optional pre-deploy DB migration Job. Used by the `generic-chart-helm` and `generic-gateway-helm-template` reusable workflows | `app_name`, `namespace`, `kubeconfig_data` |
 | `helm-package-push` | Package chart and push to OCI registry | `chart-path`, `chart-name`, `chart-version` |
 
 ### .NET

@@ -890,7 +890,6 @@ jobs:
           extra_args: --wait
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name || github.repository }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.app-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}
