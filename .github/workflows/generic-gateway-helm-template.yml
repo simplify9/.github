@@ -717,6 +717,9 @@ jobs:
           fi
 
           KCFG_PATH="$RUNNER_TEMP/kubeconfig"
+          # Remove the decoded kubeconfig when this step exits so the credential does not linger
+          # (matters on self-hosted/reused runners).
+          trap 'rm -f "$KCFG_PATH"' EXIT
           if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
             printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
           else

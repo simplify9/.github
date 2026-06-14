@@ -1,5 +1,6 @@
-name: 'Helm Deploy'
+name: 'Helm Generic Deploy'
 description: 'Deploy a Helm chart to a Kubernetes cluster'
+author: 'Simplify9'
 
 inputs:
   app_name:
@@ -29,19 +30,22 @@ inputs:
     description: "Raw extra args appended to helm upgrade (e.g. --debug)"
     required: false
     default: ''
+  atomic:
+    description: "If 'true', pass --atomic to helm upgrade so a failed deploy is rolled back automatically (implies --wait)."
+    required: false
+    default: 'true'
   kubeconfig_data:
     description: |-
-      Raw kubeconfig YAML or base64-encoded kubeconfig data. This replaces the dynamic secret (<PROFILE>_KUBECONFIG).
-      IMPORTANT: Passing sensitive data as a plain input may expose it in logs. Prefer keeping this workflow reusable only
-      in controlled contexts. Provide either the full YAML (containing apiVersion, clusters, users, etc.) or a base64 string
-      that decodes to the kubeconfig file contents.
+      Kubeconfig used to reach the target cluster, as either raw YAML (containing apiVersion, clusters,
+      users, contexts, ...) or a base64-encoded string of that YAML.
+      Provide it from a secret; do not pass cluster credentials as a plaintext literal.
     required: true
   init_job_image:
     description: |-
-      If set, a Kubernetes Job is created before the Helm deploy that runs this image with the
-      argument '--migrate'. The Job uses the connection string from init_job_secret_name to run
-      EF Core migrations with elevated (doadmin) credentials before the main container starts.
-      Example: registry.digitalocean.com/mealiverycr/mealivery-api:latest
+      If set, a Kubernetes Job runs this image to completion before the Helm deploy (e.g. for database
+      migrations). The command it runs is controlled by init_job_command, and a connection string is
+      injected from init_job_secret_name. Leave empty to skip the pre-deploy Job.
+      Example: registry.digitalocean.com/acme/api:latest
     required: false
     default: ''
   init_job_secret_name:
@@ -88,9 +92,16 @@ runs:
   steps:
     - name: Announce Helm deployment
       shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        CHART: ${{ inputs.chart }}
+        NAMESPACE: ${{ inputs.namespace }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        CHART_REPO: ${{ inputs.chart_repo }}
+        HELM_TIMEOUT: ${{ inputs.helm_timeout }}
       run: |
-        echo "::notice title=☸️ [HELM] Deploy Chart::App: ${{ inputs.app_name }}, chart: ${{ inputs.chart }}, namespace: ${{ inputs.namespace }}, env: ${{ inputs.environment }}"
-        echo "⚙️ [HELM] Chart repo: ${{ inputs.chart_repo != '' && inputs.chart_repo || 'OCI (inline)' }}, timeout: ${{ inputs.helm_timeout }}"
+        echo "::notice title=☸️ [HELM] Deploy Chart::App: ${APP_NAME}, chart: ${CHART}, namespace: ${NAMESPACE}, env: ${ENVIRONMENT}"
+        echo "⚙️ [HELM] Chart repo: ${CHART_REPO:-OCI (inline)}, timeout: ${HELM_TIMEOUT}"
         echo "HELM_GENERIC_KUBECONFIG_STATUS=⏳ Pending" >> "$GITHUB_ENV"
         echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
@@ -117,6 +128,7 @@ runs:
       shell: bash
       env:
         KUBECONFIG_DATA: ${{ inputs.kubeconfig_data }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
         echo "::group::☸️ [CHECKPOINT 1/2] Process Kubeconfig"
         set -euo pipefail
@@ -144,12 +156,14 @@ runs:
         chmod 600 "$KCFG_PATH"
         echo "kubeconfig_path=${KCFG_PATH}" >> "$GITHUB_OUTPUT"
         echo "HELM_GENERIC_KUBECONFIG_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${{ inputs.namespace }}"
+        echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
     - name: Set KUBECONFIG env
       shell: bash
-      run: echo "KUBECONFIG=${{ steps.kube.outputs.kubeconfig_path }}" >> "$GITHUB_ENV"
+      env:
+        KUBECONFIG_PATH: ${{ steps.kube.outputs.kubeconfig_path }}
+      run: echo "KUBECONFIG=${KUBECONFIG_PATH}" >> "$GITHUB_ENV"
 
     - name: Install Helm
       uses: azure/setup-helm@v5
@@ -228,17 +242,24 @@ runs:
         EOF
 
         echo "Waiting for migration Job to complete (timeout 5m)..."
-        kubectl wait job/"${JOB_NAME}" \
-          --for=condition=complete \
-          --namespace="${NAMESPACE}" \
-          --timeout=5m || {
-            echo "Migration Job failed. Fetching logs:"
+        # Poll for Complete or Failed so a failed Job surfaces immediately instead of blocking
+        # the full timeout (kubectl wait --for=condition=complete does not return on failure).
+        DEADLINE=$((SECONDS + 300))
+        while true; do
+          COMPLETE=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+          FAILED=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+          if [ "$COMPLETE" = "True" ]; then
+            echo "Migration Job completed successfully."
+            break
+          fi
+          if [ "$FAILED" = "True" ] || [ "$SECONDS" -ge "$DEADLINE" ]; then
+            echo "Migration Job failed or timed out. Fetching logs:"
             POD=$(kubectl get pods -n "${NAMESPACE}" -l job-name="${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
             [ -n "$POD" ] && kubectl logs -n "${NAMESPACE}" "$POD" || true
             exit 1
-          }
-
-        echo "Migration Job completed successfully."
+          fi
+          sleep 5
+        done
 
     - name: Helm upgrade / install
       shell: bash
@@ -250,6 +271,7 @@ runs:
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
+        ATOMIC: ${{ inputs.atomic }}
         BRANCH: ${{ steps.branch.outputs.name }}
       run: |
         echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
@@ -263,21 +285,30 @@ runs:
           CHART_REF="$CHART"
         fi
 
-        # BASE_SET_ARGS now only covers mandatory intrinsic values; all other chart settings must be passed via
-        # extra_set_values (one per line) or extra_args. See modified input description for guidance.
+        # Intrinsic values the action always sets; all other chart settings come from
+        # extra_set_values (one "key=value" per line) or extra_args.
         BASE_SET_ARGS=(
           --set app.name="${APP_NAME}"
           --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
         )
 
-        EXTRA_SET_ARGS=""
+        # Build "--set key=value" pairs as an array so values containing spaces stay intact
+        # (an unquoted string would word-split them).
+        EXTRA_SET_ARGS=()
         if [ -n "${EXTRA_SET_VALUES// /}" ]; then
           while IFS= read -r line; do
-            [ -z "${line}" ] && continue
             KV=$(echo "$line" | sed 's/^ *//;s/ *$//')
             [ -z "$KV" ] && continue
-            EXTRA_SET_ARGS+=" --set $KV"
+            EXTRA_SET_ARGS+=( --set "$KV" )
           done <<< "$EXTRA_SET_VALUES"
+        fi
+
+        # extra_args is raw CLI text (e.g. "--debug --wait"); split into argv tokens.
+        read -ra EXTRA_ARGS_ARR <<< "${EXTRA_ARGS:-}"
+
+        ATOMIC_ARGS=()
+        if [ "${ATOMIC}" = "true" ]; then
+          ATOMIC_ARGS+=( --atomic )
         fi
 
         echo "Executing Helm upgrade with base settings plus extras..."
@@ -285,9 +316,9 @@ runs:
           --install \
           --namespace "${NAMESPACE}" \
           --create-namespace \
-          "${BASE_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
+          "${BASE_SET_ARGS[@]}" "${EXTRA_SET_ARGS[@]}" \
           --timeout "${HELM_TIMEOUT}" \
-          ${EXTRA_ARGS}
+          "${ATOMIC_ARGS[@]}" "${EXTRA_ARGS_ARR[@]}"
         echo "HELM_GENERIC_DEPLOY_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::notice title=✅ [HELM] Helm deploy complete::App: ${APP_NAME}, namespace: ${NAMESPACE}"
         echo "::endgroup::"
@@ -302,13 +333,23 @@ runs:
         set -euo pipefail
         helm status "$APP_NAME" -n "$NAMESPACE" || true
         echo "---"
-        kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$APP_NAME" || true
+        # Charts in use label pods differently (app.kubernetes.io/instance=<release> on the gateway
+        # chart, app=<app.name> on the ingress chart); show whichever selector matches.
+        SELECTOR="app.kubernetes.io/instance=$APP_NAME"
+        if [ -z "$(kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" --no-headers 2>/dev/null)" ]; then
+          SELECTOR="app=$APP_NAME"
+        fi
+        echo "Pods (selector: ${SELECTOR}):"
+        kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" || true
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [HELM] Deploy failed::App '${APP_NAME}' in namespace '${NAMESPACE}'. Checkpoints — 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached}."
 
     - name: Clean up kubeconfig
       if: always()
