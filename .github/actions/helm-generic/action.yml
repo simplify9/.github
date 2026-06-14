@@ -9,11 +9,11 @@ inputs:
     description: "Kubernetes namespace to deploy into"
     required: true
   chart:
-    description: "Chart name (local or from repo)"
+    description: "Chart name, resolved from chart_repo (this action does not check out the repo, so local chart paths are not supported)"
     required: false
     default: s9genericchart
   chart_repo:
-    description: "Helm repo URL providing the chart (ignored if chart is a path)"
+    description: "Helm repo URL providing the chart"
     required: false
     default: "https://charts.sf9.io"
   helm_timeout:
@@ -86,8 +86,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v6
-
     - name: Announce Helm deployment
       shell: bash
       run: |
@@ -127,13 +125,24 @@ runs:
           echo "kubeconfig_data input is required but empty." >&2
           exit 1
         fi
+        # Write to RUNNER_TEMP (not the workspace) so the credential is not left in the
+        # checked-out tree. Accept raw kubeconfig YAML or base64-encoded data, mirroring the
+        # generic-gateway-helm-template workflow's decoder: prefer raw when it already looks
+        # like a kubeconfig, otherwise base64-decode, falling back to raw.
+        KCFG_PATH="${RUNNER_TEMP}/kubeconfig.yaml"
         if echo "$DATA" | grep -q 'apiVersion:'; then
-          printf "%s" "$DATA" > kubeconfig.yaml
+          printf '%s' "$DATA" > "$KCFG_PATH"
+        elif printf '%s' "$DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
+          : # successfully decoded base64
         else
-          echo "$DATA" | base64 -d > kubeconfig.yaml || { echo "Failed to base64 decode kubeconfig_data input" >&2; exit 1; }
+          printf '%s' "$DATA" > "$KCFG_PATH"
         fi
-        chmod 600 kubeconfig.yaml
-        echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
+        if ! grep -q 'apiVersion:' "$KCFG_PATH"; then
+          echo "kubeconfig_data did not resolve to a valid kubeconfig (no apiVersion found)." >&2
+          exit 1
+        fi
+        chmod 600 "$KCFG_PATH"
+        echo "kubeconfig_path=${KCFG_PATH}" >> "$GITHUB_OUTPUT"
         echo "HELM_GENERIC_KUBECONFIG_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${{ inputs.namespace }}"
         echo "::endgroup::"
@@ -150,7 +159,10 @@ runs:
     - name: Install kubectl
       uses: azure/setup-kubectl@v5
       with:
-        version: 'latest'
+        # Pinned for reproducibility (avoids a new kubectl silently changing CI behavior).
+        # Only basic core-resource ops are used here (apply/wait/get/create), so exact skew
+        # with the cluster is not critical; bump this to track your cluster's minor version.
+        version: 'v1.34.0'
 
     - name: Run DB migration Job (init container equivalent)
       if: ${{ inputs.init_job_image != '' }}
@@ -297,3 +309,13 @@ runs:
       shell: bash
       run: |
         echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached}."
+
+    - name: Clean up kubeconfig
+      if: always()
+      shell: bash
+      env:
+        KCFG_PATH: ${{ steps.kube.outputs.kubeconfig_path }}
+      run: |
+        # Remove the decoded kubeconfig so the credential does not linger (matters on
+        # self-hosted/reused runners). No-op if the step never produced a path.
+        [ -n "${KCFG_PATH:-}" ] && rm -f "$KCFG_PATH" || true
