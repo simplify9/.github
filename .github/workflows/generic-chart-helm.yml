@@ -85,6 +85,11 @@ on:
         required: false
         default: ''
         type: string
+      atomic:
+        description: "If 'true', pass --atomic to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        required: false
+        default: 'true'
+        type: string
       helm-set-values:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
@@ -494,6 +499,7 @@ jobs:
           # Helm timing/flags
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
           extra_args: "--wait"
+          atomic: ${{ inputs.atomic }}
 
           # Translate your previous comma-joined --set into line-based entries
           extra_set_values: |

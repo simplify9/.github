@@ -115,6 +115,11 @@ on:
         required: false
         default: ''
         type: string
+      atomic:
+        description: "If 'true', pass --atomic to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        required: false
+        default: 'true'
+        type: string
       helm-set-values:
         description: Additional Helm set values line or comma separated
         required: false
@@ -891,6 +896,7 @@ jobs:
           chart_repo: ${{ inputs.chart-repo }}
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
           extra_args: --wait
+          atomic: ${{ inputs.atomic }}
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
             app.version=${{ needs.version.outputs.version }}
