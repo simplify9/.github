@@ -272,9 +272,11 @@ jobs:
       - name: Announce ci job
         run: |
           echo "::notice title=🐳 [DOCKER] CI Build — Job Started::Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
 
       - name: Checkout code
         uses: actions/checkout@v6
