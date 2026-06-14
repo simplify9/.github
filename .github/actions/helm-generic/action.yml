@@ -278,8 +278,10 @@ runs:
         set -euo pipefail
 
         if [ -n "$CHART_REPO" ]; then
-          helm repo add s9generic "$CHART_REPO" 2>/dev/null || true
-          helm repo update >/dev/null
+          # --force-update so a stale 's9generic' alias from a prior run (reused/self-hosted runner)
+          # is repointed at the current chart_repo instead of silently keeping the old URL.
+          helm repo add --force-update s9generic "$CHART_REPO" >/dev/null
+          helm repo update s9generic >/dev/null
           CHART_REF="s9generic/$CHART"
         else
           CHART_REF="$CHART"
