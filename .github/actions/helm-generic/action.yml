@@ -1,27 +1,20 @@
-name: 'Helm Deploy'
+name: 'Helm Generic Deploy'
 description: 'Deploy a Helm chart to a Kubernetes cluster'
+author: 'Simplify9'
 
 inputs:
-  registry_profile:
-    description: "Profile code for dynamic kubeconfig/registry vars & secrets (e.g., S9, WISEWELL)"
-    required: false
-    default: S9
   app_name:
     description: "Application name (Helm release name)"
     required: true
-  version:
-    description: "Logical version label (may be used in image tag selection)"
-    required: false
-    default: staging
   namespace:
     description: "Kubernetes namespace to deploy into"
     required: true
   chart:
-    description: "Chart name (local or from repo)"
+    description: "Chart name, resolved from chart_repo (this action does not check out the repo, so local chart paths are not supported)"
     required: false
     default: s9genericchart
   chart_repo:
-    description: "Helm repo URL providing the chart (ignored if chart is a path)"
+    description: "Helm repo URL providing the chart"
     required: false
     default: "https://charts.sf9.io"
   helm_timeout:
@@ -37,35 +30,54 @@ inputs:
     description: "Raw extra args appended to helm upgrade (e.g. --debug)"
     required: false
     default: ''
-  ingress_paths:
-    description: |-
-      YAML list of ingress paths. Provide as a multi-line YAML sequence, e.g.:
-        - /
-        - /api
-        - /docs
-      Defaults to just the root path '/'. Each entry becomes --set ingress.paths[index]=<value>.
+  atomic:
+    description: "If 'true', pass --atomic to helm upgrade so a failed deploy is rolled back automatically (implies --wait)."
     required: false
-    default: |-
-      - /
+    default: 'true'
   kubeconfig_data:
     description: |-
-      Raw kubeconfig YAML or base64-encoded kubeconfig data. This replaces the dynamic secret (<PROFILE>_KUBECONFIG).
-      IMPORTANT: Passing sensitive data as a plain input may expose it in logs. Prefer keeping this workflow reusable only
-      in controlled contexts. Provide either the full YAML (containing apiVersion, clusters, users, etc.) or a base64 string
-      that decodes to the kubeconfig file contents.
+      Kubeconfig used to reach the target cluster, as either raw YAML (containing apiVersion, clusters,
+      users, contexts, ...) or a base64-encoded string of that YAML.
+      Provide it from a secret; do not pass cluster credentials as a plaintext literal.
     required: true
   init_job_image:
     description: |-
-      If set, a Kubernetes Job is created before the Helm deploy that runs this image with the
-      argument '--migrate'. The Job uses the connection string from init_job_secret_name to run
-      EF Core migrations with elevated (doadmin) credentials before the main container starts.
-      Example: registry.digitalocean.com/mealiverycr/mealivery-api:latest
+      If set, a Kubernetes Job runs this image to completion before the Helm deploy (e.g. for database
+      migrations). The command it runs is controlled by init_job_command, and a connection string is
+      injected from init_job_secret_name. Leave empty to skip the pre-deploy Job.
+      Example: registry.digitalocean.com/acme/api:latest
     required: false
     default: ''
   init_job_secret_name:
     description: |-
-      Name of the Kubernetes Secret (in the target namespace) whose 'connection-string' key is
-      injected as ConnectionStrings__ShanapDb into the migration Job. Required when init_job_image is set.
+      Name of the Kubernetes Secret (in the target namespace) whose key (see init_job_secret_key)
+      is injected as the connection-string env var (see init_job_connstring_env) into the migration
+      Job. Required when init_job_image is set.
+    required: false
+    default: ''
+  init_job_command:
+    description: |-
+      Command (and args) the migration Job container runs, as a space-separated string.
+      Converted to a JSON exec array, e.g. "dotnet App.dll --migrate" -> ["dotnet","App.dll","--migrate"].
+      Leave empty to keep the historical default ('dotnet SW.Shanap.Web.dll --migrate').
+    required: false
+    default: ''
+  init_job_secret_key:
+    description: |-
+      Key within init_job_secret_name whose value holds the DB connection string.
+      Leave empty to keep the historical default ('connection-string').
+    required: false
+    default: ''
+  init_job_connstring_env:
+    description: |-
+      Name of the environment variable the connection string is injected into inside the migration Job.
+      Leave empty to keep the historical default ('ConnectionStrings__ShanapDb').
+    required: false
+    default: ''
+  init_job_environment_env:
+    description: |-
+      Name of the environment variable carrying the environment name (the 'environment' input) inside
+      the migration Job. Leave empty to keep the historical default ('ASPNETCORE_ENVIRONMENT').
     required: false
     default: ''
   environment:
@@ -78,15 +90,20 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v6
-
     - name: Announce Helm deployment
       shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        CHART: ${{ inputs.chart }}
+        NAMESPACE: ${{ inputs.namespace }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        CHART_REPO: ${{ inputs.chart_repo }}
+        HELM_TIMEOUT: ${{ inputs.helm_timeout }}
       run: |
-        echo "::notice title=☸️ [HELM] Deploy Chart::App: ${{ inputs.app_name }}, chart: ${{ inputs.chart }}, namespace: ${{ inputs.namespace }}, env: ${{ inputs.environment }}"
-        echo "⚙️ [HELM] Chart repo: ${{ inputs.chart_repo != '' && inputs.chart_repo || 'OCI (inline)' }}, timeout: ${{ inputs.helm_timeout }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "::notice title=☸️ [HELM] Deploy Chart::App: ${APP_NAME}, chart: ${CHART}, namespace: ${NAMESPACE}, env: ${ENVIRONMENT}"
+        echo "⚙️ [HELM] Chart repo: ${CHART_REPO:-OCI (inline)}, timeout: ${HELM_TIMEOUT}"
+        echo "HELM_GENERIC_KUBECONFIG_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     - name: Derive sanitized branch name
       id: branch
@@ -111,6 +128,7 @@ runs:
       shell: bash
       env:
         KUBECONFIG_DATA: ${{ inputs.kubeconfig_data }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
         echo "::group::☸️ [CHECKPOINT 1/2] Process Kubeconfig"
         set -euo pipefail
@@ -119,20 +137,33 @@ runs:
           echo "kubeconfig_data input is required but empty." >&2
           exit 1
         fi
+        # Write to RUNNER_TEMP (not the workspace) so the credential is not left in the
+        # checked-out tree. Accept raw kubeconfig YAML or base64-encoded data, mirroring the
+        # generic-gateway-helm-template workflow's decoder: prefer raw when it already looks
+        # like a kubeconfig, otherwise base64-decode, falling back to raw.
+        KCFG_PATH="${RUNNER_TEMP}/kubeconfig.yaml"
         if echo "$DATA" | grep -q 'apiVersion:'; then
-          printf "%s" "$DATA" > kubeconfig.yaml
+          printf '%s' "$DATA" > "$KCFG_PATH"
+        elif printf '%s' "$DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
+          : # successfully decoded base64
         else
-          echo "$DATA" | base64 -d > kubeconfig.yaml || { echo "Failed to base64 decode kubeconfig_data input" >&2; exit 1; }
+          printf '%s' "$DATA" > "$KCFG_PATH"
         fi
-        chmod 600 kubeconfig.yaml
-        echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${{ inputs.namespace }}"
+        if ! grep -q 'apiVersion:' "$KCFG_PATH"; then
+          echo "kubeconfig_data did not resolve to a valid kubeconfig (no apiVersion found)." >&2
+          exit 1
+        fi
+        chmod 600 "$KCFG_PATH"
+        echo "kubeconfig_path=${KCFG_PATH}" >> "$GITHUB_OUTPUT"
+        echo "HELM_GENERIC_KUBECONFIG_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
     - name: Set KUBECONFIG env
       shell: bash
-      run: echo "KUBECONFIG=${{ steps.kube.outputs.kubeconfig_path }}" >> "$GITHUB_ENV"
+      env:
+        KUBECONFIG_PATH: ${{ steps.kube.outputs.kubeconfig_path }}
+      run: echo "KUBECONFIG=${KUBECONFIG_PATH}" >> "$GITHUB_ENV"
 
     - name: Install Helm
       uses: azure/setup-helm@v5
@@ -142,7 +173,10 @@ runs:
     - name: Install kubectl
       uses: azure/setup-kubectl@v5
       with:
-        version: 'latest'
+        # Pinned for reproducibility (avoids a new kubectl silently changing CI behavior).
+        # Only basic core-resource ops are used here (apply/wait/get/create), so exact skew
+        # with the cluster is not critical; bump this to track your cluster's minor version.
+        version: 'v1.35.0'
 
     - name: Run DB migration Job (init container equivalent)
       if: ${{ inputs.init_job_image != '' }}
@@ -152,12 +186,31 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
         INIT_JOB_IMAGE: ${{ inputs.init_job_image }}
         INIT_JOB_SECRET_NAME: ${{ inputs.init_job_secret_name }}
+        INIT_JOB_COMMAND: ${{ inputs.init_job_command }}
+        INIT_JOB_SECRET_KEY: ${{ inputs.init_job_secret_key }}
+        INIT_JOB_CONNSTRING_ENV: ${{ inputs.init_job_connstring_env }}
+        INIT_JOB_ENVIRONMENT_ENV: ${{ inputs.init_job_environment_env }}
+        ENVIRONMENT: ${{ inputs.environment }}
       run: |
         set -euo pipefail
 
         JOB_NAME="${APP_NAME}-db-migrate-${GITHUB_RUN_NUMBER}"
 
-        echo "Applying migration Job: $JOB_NAME"
+        # Ensure the target namespace exists before applying the Job. The Helm step uses
+        # --create-namespace, but it runs AFTER this Job, so on a first deploy to a fresh
+        # namespace the Job apply would otherwise fail. Idempotent (no-op if it already exists).
+        kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+        # Coalesce to the historical defaults so callers that don't override keep identical behavior.
+        CMD_STR="${INIT_JOB_COMMAND:-dotnet SW.Shanap.Web.dll --migrate}"
+        SECRET_KEY="${INIT_JOB_SECRET_KEY:-connection-string}"
+        CONNSTRING_ENV="${INIT_JOB_CONNSTRING_ENV:-ConnectionStrings__ShanapDb}"
+        ENVIRONMENT_ENV="${INIT_JOB_ENVIRONMENT_ENV:-ASPNETCORE_ENVIRONMENT}"
+
+        # Build a JSON exec array from the space-separated command string.
+        CMD_JSON=$(jq -cn --arg s "$CMD_STR" '$s | split(" ") | map(select(length > 0))')
+
+        echo "Applying migration Job: $JOB_NAME (command: ${CMD_JSON})"
         kubectl apply -f - <<EOF
         apiVersion: batch/v1
         kind: Job
@@ -177,29 +230,36 @@ runs:
                 - name: db-migrate
                   image: "${INIT_JOB_IMAGE}"
                   imagePullPolicy: Always
-                  command: ["dotnet", "SW.Shanap.Web.dll", "--migrate"]
+                  command: ${CMD_JSON}
                   env:
-                    - name: ConnectionStrings__ShanapDb
+                    - name: ${CONNSTRING_ENV}
                       valueFrom:
                         secretKeyRef:
                           name: "${INIT_JOB_SECRET_NAME}"
-                          key: connection-string
-                    - name: ASPNETCORE_ENVIRONMENT
-                      value: "${{ inputs.environment }}"
+                          key: ${SECRET_KEY}
+                    - name: ${ENVIRONMENT_ENV}
+                      value: "${ENVIRONMENT}"
         EOF
 
         echo "Waiting for migration Job to complete (timeout 5m)..."
-        kubectl wait job/"${JOB_NAME}" \
-          --for=condition=complete \
-          --namespace="${NAMESPACE}" \
-          --timeout=5m || {
-            echo "Migration Job failed. Fetching logs:"
+        # Poll for Complete or Failed so a failed Job surfaces immediately instead of blocking
+        # the full timeout (kubectl wait --for=condition=complete does not return on failure).
+        DEADLINE=$((SECONDS + 300))
+        while true; do
+          COMPLETE=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+          FAILED=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+          if [ "$COMPLETE" = "True" ]; then
+            echo "Migration Job completed successfully."
+            break
+          fi
+          if [ "$FAILED" = "True" ] || [ "$SECONDS" -ge "$DEADLINE" ]; then
+            echo "Migration Job failed or timed out. Fetching logs:"
             POD=$(kubectl get pods -n "${NAMESPACE}" -l job-name="${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
             [ -n "$POD" ] && kubectl logs -n "${NAMESPACE}" "$POD" || true
             exit 1
-          }
-
-        echo "Migration Job completed successfully."
+          fi
+          sleep 5
+        done
 
     - name: Helm upgrade / install
       shell: bash
@@ -211,61 +271,59 @@ runs:
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
-        INGRESS_PATHS: ${{ inputs.ingress_paths }}
+        ATOMIC: ${{ inputs.atomic }}
         BRANCH: ${{ steps.branch.outputs.name }}
       run: |
         echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
         set -euo pipefail
 
         if [ -n "$CHART_REPO" ]; then
-          helm repo add s9generic "$CHART_REPO" 2>/dev/null || true
-          helm repo update >/dev/null
+          # --force-update so a stale 's9generic' alias from a prior run (reused/self-hosted runner)
+          # is repointed at the current chart_repo instead of silently keeping the old URL.
+          helm repo add --force-update s9generic "$CHART_REPO" >/dev/null
+          helm repo update s9generic >/dev/null
           CHART_REF="s9generic/$CHART"
         else
           CHART_REF="$CHART"
         fi
 
-        # BASE_SET_ARGS now only covers mandatory intrinsic values; all other chart settings must be passed via
-        # extra_set_values (one per line) or extra_args. See modified input description for guidance.
+        # Intrinsic values the action always sets; all other chart settings come from
+        # extra_set_values (one "key=value" per line) or extra_args.
         BASE_SET_ARGS=(
           --set app.name="${APP_NAME}"
           --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
         )
 
-        PATH_SET_ARGS=()
-        if [ -n "${INGRESS_PATHS// /}" ]; then
-          INDEX=0
-          CLEAN_PATHS="$(printf '%s' "$INGRESS_PATHS" | tr -d '\r')"
-          while IFS= read -r line; do
-            line="$(printf '%s' "$line" | sed -E 's/#.*$//')"
-            line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-            [ -z "$line" ] && continue
-            P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
-            [ -z "$P" ] && continue
-            PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
-            INDEX=$((INDEX+1))
-          done <<< "$CLEAN_PATHS"
-        fi
-
-        EXTRA_SET_ARGS=""
+        # Build "--set key=value" pairs as an array so values containing spaces stay intact
+        # (an unquoted string would word-split them).
+        EXTRA_SET_ARGS=()
         if [ -n "${EXTRA_SET_VALUES// /}" ]; then
           while IFS= read -r line; do
-            [ -z "${line}" ] && continue
             KV=$(echo "$line" | sed 's/^ *//;s/ *$//')
             [ -z "$KV" ] && continue
-            EXTRA_SET_ARGS+=" --set $KV"
+            EXTRA_SET_ARGS+=( --set "$KV" )
           done <<< "$EXTRA_SET_VALUES"
         fi
 
+        # extra_args is raw CLI text (e.g. "--debug --wait"); split into argv tokens.
+        read -ra EXTRA_ARGS_ARR <<< "${EXTRA_ARGS:-}"
+
+        ATOMIC_ARGS=()
+        if [ "${ATOMIC}" = "true" ]; then
+          ATOMIC_ARGS+=( --atomic )
+        fi
+
         echo "Executing Helm upgrade with base settings plus extras..."
+        # The ${arr[@]+"${arr[@]}"} guard expands to nothing when the array is empty, avoiding
+        # an "unbound variable" error under `set -u` on bash < 4.4 (BASE_SET_ARGS is always set).
         helm upgrade "${APP_NAME}" "$CHART_REF" \
           --install \
           --namespace "${NAMESPACE}" \
           --create-namespace \
-          "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
+          "${BASE_SET_ARGS[@]}" ${EXTRA_SET_ARGS[@]+"${EXTRA_SET_ARGS[@]}"} \
           --timeout "${HELM_TIMEOUT}" \
-          ${EXTRA_ARGS}
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          ${ATOMIC_ARGS[@]+"${ATOMIC_ARGS[@]}"} ${EXTRA_ARGS_ARR[@]+"${EXTRA_ARGS_ARR[@]}"}
+        echo "HELM_GENERIC_DEPLOY_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::notice title=✅ [HELM] Helm deploy complete::App: ${APP_NAME}, namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
@@ -279,10 +337,30 @@ runs:
         set -euo pipefail
         helm status "$APP_NAME" -n "$NAMESPACE" || true
         echo "---"
-        kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$APP_NAME" || true
+        # Charts in use label pods differently (app.kubernetes.io/instance=<release> on the gateway
+        # chart, app=<app.name> on the ingress chart); show whichever selector matches.
+        SELECTOR="app.kubernetes.io/instance=$APP_NAME"
+        if [ -z "$(kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" --no-headers 2>/dev/null)" ]; then
+          SELECTOR="app=$APP_NAME"
+        fi
+        echo "Pods (selector: ${SELECTOR}):"
+        kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" || true
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [HELM] Deploy failed::App '${APP_NAME}' in namespace '${NAMESPACE}'. Checkpoints — 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached}."
+
+    - name: Clean up kubeconfig
+      if: always()
+      shell: bash
+      env:
+        KCFG_PATH: ${{ steps.kube.outputs.kubeconfig_path }}
+      run: |
+        # Remove the decoded kubeconfig so the credential does not linger (matters on
+        # self-hosted/reused runners). No-op if the step never produced a path.
+        [ -n "${KCFG_PATH:-}" ] && rm -f "$KCFG_PATH" || true

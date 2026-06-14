@@ -115,6 +115,11 @@ on:
         required: false
         default: ''
         type: string
+      atomic:
+        description: "If 'true', pass --atomic to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        required: false
+        default: 'true'
+        type: string
       helm-set-values:
         description: Additional Helm set values line or comma separated
         required: false
@@ -258,6 +263,28 @@ on:
         type: string
       init-job-secret-name:
         description: Secret containing migration connection string key
+        required: false
+        default: ''
+        type: string
+      init-job-command:
+        description: |-
+          Command (space-separated) the migration Job runs. Leave empty to keep the
+          historical default ('dotnet SW.Shanap.Web.dll --migrate').
+        required: false
+        default: ''
+        type: string
+      init-job-secret-key:
+        description: Key in init-job-secret-name holding the connection string (default 'connection-string').
+        required: false
+        default: ''
+        type: string
+      init-job-connstring-env:
+        description: Env var name the connection string is injected into (default 'ConnectionStrings__ShanapDb').
+        required: false
+        default: ''
+        type: string
+      init-job-environment-env:
+        description: Env var name carrying the environment name in the migration Job (default 'ASPNETCORE_ENVIRONMENT').
         required: false
         default: ''
         type: string
@@ -702,6 +729,9 @@ jobs:
           fi
 
           KCFG_PATH="$RUNNER_TEMP/kubeconfig"
+          # Remove the decoded kubeconfig when this step exits so the credential does not linger
+          # (matters on self-hosted/reused runners).
+          trap 'rm -f "$KCFG_PATH"' EXIT
           if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
             printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
           else
@@ -981,9 +1011,9 @@ jobs:
           chart_repo: ${{ inputs.chart-repo }}
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
           extra_args: --wait
+          atomic: ${{ inputs.atomic }}
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name || github.repository }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.app-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}
@@ -997,6 +1027,10 @@ jobs:
           kubeconfig_data: ${{ secrets.kubeconfig }}
           init_job_image: ${{ inputs.init-job-image }}
           init_job_secret_name: ${{ inputs.init-job-secret-name }}
+          init_job_command: ${{ inputs.init-job-command }}
+          init_job_secret_key: ${{ inputs.init-job-secret-key }}
+          init_job_connstring_env: ${{ inputs.init-job-connstring-env }}
+          init_job_environment_env: ${{ inputs.init-job-environment-env }}
           environment: ${{ inputs.environment }}
 
       - name: Confirm Helm deployed

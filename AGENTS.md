@@ -272,7 +272,7 @@ steps:
 ### Helm
 - `helm-deploy` — Profile-based deploy (`registry_profile` selects dynamic secrets). Supports `init_job_image` for database migration Jobs before deploy.
 - `helm-deploy-s9generic` — Deploy using `s9genericchart` from `https://charts.sf9.io`. Handles `set-values` (`--set`) and `set-string-values` (`--set-string`) separately.
-- `helm-generic` — Checkout + lint + package + push (single composite for chart CI).
+- `helm-generic` — Deploy a Helm chart via `helm upgrade --install`, with an optional pre-deploy DB migration Job (`init_job_image` + `init_job_command`). Internal building block for the `generic-chart-helm` (ingress-nginx) and `generic-gateway-helm-template` (Gateway API) reusable workflows.
 - `helm-package-push` — Package a chart and push to OCI registry.
 
 ### .NET

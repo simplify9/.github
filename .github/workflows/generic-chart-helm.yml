@@ -85,6 +85,11 @@ on:
         required: false
         default: ''
         type: string
+      atomic:
+        description: "If 'true', pass --atomic to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        required: false
+        default: 'true'
+        type: string
       helm-set-values:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
@@ -130,9 +135,31 @@ on:
         type: string
       init-job-secret-name:
         description: |-
-          Name of the Kubernetes Secret (in the target namespace) containing a 'connection-string'
-          key with the doadmin credentials. Required when init-job-image is set.
+          Name of the Kubernetes Secret (in the target namespace) containing the connection-string
+          key (see init-job-secret-key) with the doadmin credentials. Required when init-job-image is set.
           Example: mealivery-db-admin-secret
+        required: false
+        default: ''
+        type: string
+      init-job-command:
+        description: |-
+          Command (space-separated) the migration Job runs, e.g. 'dotnet Mealivery.Api.dll --migrate'.
+          Leave empty to keep the historical default ('dotnet SW.Shanap.Web.dll --migrate').
+        required: false
+        default: ''
+        type: string
+      init-job-secret-key:
+        description: Key in init-job-secret-name holding the connection string (default 'connection-string').
+        required: false
+        default: ''
+        type: string
+      init-job-connstring-env:
+        description: Env var name the connection string is injected into (default 'ConnectionStrings__ShanapDb').
+        required: false
+        default: ''
+        type: string
+      init-job-environment-env:
+        description: Env var name carrying the environment name in the migration Job (default 'ASPNETCORE_ENVIRONMENT').
         required: false
         default: ''
         type: string
@@ -472,11 +499,11 @@ jobs:
           # Helm timing/flags
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
           extra_args: "--wait"
+          atomic: ${{ inputs.atomic }}
 
           # Translate your previous comma-joined --set into line-based entries
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
-            app.name=${{ inputs.app-name }}
             app.version=${{ needs.version.outputs.version }}
             image.overrideName=${{ inputs.app-name }}
             image.overrideVersion=${{ needs.version.outputs.version }}
@@ -492,6 +519,10 @@ jobs:
           kubeconfig_data: ${{ secrets.kubeconfig }}
           init_job_image: ${{ inputs.init-job-image }}
           init_job_secret_name: ${{ inputs.init-job-secret-name }}
+          init_job_command: ${{ inputs.init-job-command }}
+          init_job_secret_key: ${{ inputs.init-job-secret-key }}
+          init_job_connstring_env: ${{ inputs.init-job-connstring-env }}
+          init_job_environment_env: ${{ inputs.init-job-environment-env }}
           environment: ${{ inputs.environment }}
 
       - name: Confirm Helm deployed
