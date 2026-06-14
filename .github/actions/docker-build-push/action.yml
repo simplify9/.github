@@ -1,3 +1,16 @@
+# Usage:
+#   - name: Build and push Docker image
+#     uses: simplify9/.github/.github/actions/docker-build-push@main
+#     with:
+#       registry: registry.digitalocean.com
+#       image-name: my-org/my-app
+#       version: ${{ needs.version.outputs.version }}
+#       username: ${{ secrets.DO_REGISTRY_TOKEN }}
+#       password: ${{ secrets.DO_REGISTRY_TOKEN }}
+#       dockerfile: ./Dockerfile
+#       context: .
+#       platforms: linux/amd64
+
 name: 'Docker Build and Push'
 description: 'Build and push Docker image to container registry'
 author: 'Simplify9'
@@ -27,6 +40,8 @@ inputs:
     description: 'Docker build context'
     required: false
     default: '.'
+  # Note: emulated arm64 builds on x86 runners are slow — this is inherent to QEMU, not this action.
+  # Mitigation (native arm64 runners, remote builders) is infrastructure scope, not template scope.
   platforms:
     description: 'Target platforms for build'
     required: false
@@ -35,6 +50,13 @@ inputs:
     description: 'Push image to registry'
     required: false
     default: 'true'
+  # GHA cache notes:
+  # (1) Legacy GHA cache backend shut down 2025-04-15; only Cache Service API v2 is supported.
+  #     Staying on current action versions handles this automatically — no config change needed.
+  # (2) GHA cache has a ~10 GB/repo limit with LRU + inactivity eviction; can thrash on
+  #     large/multi-arch images (limit became raisable Nov 2025, at storage cost).
+  # (3) Fallback for large/cross-repo caching: type=registry,ref=<image>:buildcache,mode=max
+  #     — not subject to GHA quota, shareable across repos; set cache-from/cache-to manually if needed.
   cache:
     description: 'Enable build cache'
     required: false
@@ -62,15 +84,17 @@ runs:
     - name: Announce Docker build
       shell: bash
       run: |
-        echo "::notice title=🐳 [DOCKER] Docker Build and Push::Building image — ${{ inputs.image-name }}:${{ inputs.version }}, registry: ${{ inputs.registry }}, platforms: ${{ inputs.platforms }}"
-        echo "📋 [DOCKER] Dockerfile: ${{ inputs.dockerfile }}, context: ${{ inputs.context }}, push: ${{ inputs.push }}, cache: ${{ inputs.cache }}"
+        echo "::notice title=🐳 Docker Build::${{ inputs.image-name }}:${{ inputs.version }} → ${{ inputs.registry }} (${{ inputs.platforms }})"
         echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
         echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+    - name: Set up QEMU
+      # Only needed for non-native/multi-arch builds; skip for the single-arch linux/amd64 default to save setup time.
+      if: ${{ inputs.platforms != 'linux/amd64' }}
+      uses: docker/setup-qemu-action@v4
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
-      with:
-        platforms: ${{ inputs.platforms }}
 
     - name: Log in to Container Registry
       uses: docker/login-action@v4
@@ -83,7 +107,7 @@ runs:
       shell: bash
       run: |
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ [CHECKPOINT 1/2] Registry Authentication — PASSED (registry: ${{ inputs.registry }})"
+        echo "✅ [CHECKPOINT 1/2] Registry auth — PASSED (${{ inputs.registry }})"
 
     - name: Extract metadata
       id: meta
@@ -93,7 +117,7 @@ runs:
           ${{ inputs.registry != 'docker.io' && format('{0}/{1}', inputs.registry, inputs.image-name) || inputs.image-name }}
         tags: |
           type=raw,value=${{ inputs.version }}
-          type=raw,value=latest
+          type=raw,value=latest,enable={{is_default_branch}}
         flavor: |
           latest=false
 
@@ -103,12 +127,17 @@ runs:
       with:
         context: ${{ inputs.context }}
         file: ${{ inputs.dockerfile }}
-        push: ${{ inputs.push }}
+        # push and cache are string inputs (composite-action inputs are always strings);
+        # comparing with == 'true' ensures unexpected values (e.g. True, 1) degrade predictably.
+        push: ${{ inputs.push == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         platforms: ${{ inputs.platforms }}
         cache-from: ${{ inputs.cache == 'true' && 'type=gha' || '' }}
         cache-to: ${{ inputs.cache == 'true' && 'type=gha,mode=max' || '' }}
+        # provenance: false — deliberate DOCR compatibility choice. DOCR surfaces attestation manifests as
+        # phantom unknown/unknown platform entries, interfering with the registry UI and GC.
+        # Docker Hub and GHCR support attestations natively; re-enable if targeting those registries.
         provenance: false
         sbom: false
         build-args: ${{ inputs.build-args }}
@@ -118,10 +147,10 @@ runs:
       shell: bash
       run: |
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [DOCKER] Image built and pushed::${{ inputs.image-name }}:${{ inputs.version }} — digest: ${{ steps.build.outputs.digest }}"
+        echo "::notice title=✅ Docker image pushed::${{ inputs.image-name }}:${{ inputs.version }} — digest: ${{ steps.build.outputs.digest }}"
 
     - name: Report failure
       if: failure()
       shell: bash
       run: |
-        echo "::error title=❌ [DOCKER] Build failed::Docker build/push failed for ${{ inputs.image-name }}:${{ inputs.version }} on ${{ inputs.registry }}. Checkpoints — 1) Registry auth: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build+push: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}"
+        echo "::error title=❌ Docker build failed::${{ inputs.image-name }}:${{ inputs.version }} on ${{ inputs.registry }} — CP1: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}"
