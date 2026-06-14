@@ -176,7 +176,7 @@ runs:
         # Pinned for reproducibility (avoids a new kubectl silently changing CI behavior).
         # Only basic core-resource ops are used here (apply/wait/get/create), so exact skew
         # with the cluster is not critical; bump this to track your cluster's minor version.
-        version: 'v1.36.0'
+        version: 'v1.35.0'
 
     - name: Run DB migration Job (init container equivalent)
       if: ${{ inputs.init_job_image != '' }}
