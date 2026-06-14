@@ -37,16 +37,6 @@ inputs:
     description: "Raw extra args appended to helm upgrade (e.g. --debug)"
     required: false
     default: ''
-  ingress_paths:
-    description: |-
-      YAML list of ingress paths. Provide as a multi-line YAML sequence, e.g.:
-        - /
-        - /api
-        - /docs
-      Defaults to just the root path '/'. Each entry becomes --set ingress.paths[index]=<value>.
-    required: false
-    default: |-
-      - /
   kubeconfig_data:
     description: |-
       Raw kubeconfig YAML or base64-encoded kubeconfig data. This replaces the dynamic secret (<PROFILE>_KUBECONFIG).
@@ -64,8 +54,34 @@ inputs:
     default: ''
   init_job_secret_name:
     description: |-
-      Name of the Kubernetes Secret (in the target namespace) whose 'connection-string' key is
-      injected as ConnectionStrings__ShanapDb into the migration Job. Required when init_job_image is set.
+      Name of the Kubernetes Secret (in the target namespace) whose key (see init_job_secret_key)
+      is injected as the connection-string env var (see init_job_connstring_env) into the migration
+      Job. Required when init_job_image is set.
+    required: false
+    default: ''
+  init_job_command:
+    description: |-
+      Command (and args) the migration Job container runs, as a space-separated string.
+      Converted to a JSON exec array, e.g. "dotnet App.dll --migrate" -> ["dotnet","App.dll","--migrate"].
+      Leave empty to keep the historical default ('dotnet SW.Shanap.Web.dll --migrate').
+    required: false
+    default: ''
+  init_job_secret_key:
+    description: |-
+      Key within init_job_secret_name whose value holds the DB connection string.
+      Leave empty to keep the historical default ('connection-string').
+    required: false
+    default: ''
+  init_job_connstring_env:
+    description: |-
+      Name of the environment variable the connection string is injected into inside the migration Job.
+      Leave empty to keep the historical default ('ConnectionStrings__ShanapDb').
+    required: false
+    default: ''
+  init_job_environment_env:
+    description: |-
+      Name of the environment variable carrying the environment name (the 'environment' input) inside
+      the migration Job. Leave empty to keep the historical default ('ASPNETCORE_ENVIRONMENT').
     required: false
     default: ''
   environment:
@@ -85,8 +101,8 @@ runs:
       run: |
         echo "::notice title=☸️ [HELM] Deploy Chart::App: ${{ inputs.app_name }}, chart: ${{ inputs.chart }}, namespace: ${{ inputs.namespace }}, env: ${{ inputs.environment }}"
         echo "⚙️ [HELM] Chart repo: ${{ inputs.chart_repo != '' && inputs.chart_repo || 'OCI (inline)' }}, timeout: ${{ inputs.helm_timeout }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "HELM_GENERIC_KUBECONFIG_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     - name: Derive sanitized branch name
       id: branch
@@ -126,7 +142,7 @@ runs:
         fi
         chmod 600 kubeconfig.yaml
         echo "kubeconfig_path=${{ github.workspace }}/kubeconfig.yaml" >> "$GITHUB_OUTPUT"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "HELM_GENERIC_KUBECONFIG_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${{ inputs.namespace }}"
         echo "::endgroup::"
 
@@ -152,12 +168,26 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
         INIT_JOB_IMAGE: ${{ inputs.init_job_image }}
         INIT_JOB_SECRET_NAME: ${{ inputs.init_job_secret_name }}
+        INIT_JOB_COMMAND: ${{ inputs.init_job_command }}
+        INIT_JOB_SECRET_KEY: ${{ inputs.init_job_secret_key }}
+        INIT_JOB_CONNSTRING_ENV: ${{ inputs.init_job_connstring_env }}
+        INIT_JOB_ENVIRONMENT_ENV: ${{ inputs.init_job_environment_env }}
+        ENVIRONMENT: ${{ inputs.environment }}
       run: |
         set -euo pipefail
 
         JOB_NAME="${APP_NAME}-db-migrate-${GITHUB_RUN_NUMBER}"
 
-        echo "Applying migration Job: $JOB_NAME"
+        # Coalesce to the historical defaults so callers that don't override keep identical behavior.
+        CMD_STR="${INIT_JOB_COMMAND:-dotnet SW.Shanap.Web.dll --migrate}"
+        SECRET_KEY="${INIT_JOB_SECRET_KEY:-connection-string}"
+        CONNSTRING_ENV="${INIT_JOB_CONNSTRING_ENV:-ConnectionStrings__ShanapDb}"
+        ENVIRONMENT_ENV="${INIT_JOB_ENVIRONMENT_ENV:-ASPNETCORE_ENVIRONMENT}"
+
+        # Build a JSON exec array from the space-separated command string.
+        CMD_JSON=$(jq -cn --arg s "$CMD_STR" '$s | split(" ") | map(select(length > 0))')
+
+        echo "Applying migration Job: $JOB_NAME (command: ${CMD_JSON})"
         kubectl apply -f - <<EOF
         apiVersion: batch/v1
         kind: Job
@@ -177,15 +207,15 @@ runs:
                 - name: db-migrate
                   image: "${INIT_JOB_IMAGE}"
                   imagePullPolicy: Always
-                  command: ["dotnet", "SW.Shanap.Web.dll", "--migrate"]
+                  command: ${CMD_JSON}
                   env:
-                    - name: ConnectionStrings__ShanapDb
+                    - name: ${CONNSTRING_ENV}
                       valueFrom:
                         secretKeyRef:
                           name: "${INIT_JOB_SECRET_NAME}"
-                          key: connection-string
-                    - name: ASPNETCORE_ENVIRONMENT
-                      value: "${{ inputs.environment }}"
+                          key: ${SECRET_KEY}
+                    - name: ${ENVIRONMENT_ENV}
+                      value: "${ENVIRONMENT}"
         EOF
 
         echo "Waiting for migration Job to complete (timeout 5m)..."
@@ -211,7 +241,6 @@ runs:
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
-        INGRESS_PATHS: ${{ inputs.ingress_paths }}
         BRANCH: ${{ steps.branch.outputs.name }}
       run: |
         echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
@@ -232,21 +261,6 @@ runs:
           --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
         )
 
-        PATH_SET_ARGS=()
-        if [ -n "${INGRESS_PATHS// /}" ]; then
-          INDEX=0
-          CLEAN_PATHS="$(printf '%s' "$INGRESS_PATHS" | tr -d '\r')"
-          while IFS= read -r line; do
-            line="$(printf '%s' "$line" | sed -E 's/#.*$//')"
-            line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-            [ -z "$line" ] && continue
-            P="$(printf '%s' "$line" | sed -E 's/^-[[:space:]]+//; s/^"//; s/"$//; s/^'\''//; s/'\''$//')"
-            [ -z "$P" ] && continue
-            PATH_SET_ARGS+=( --set "ingress.paths[$INDEX]=$P" )
-            INDEX=$((INDEX+1))
-          done <<< "$CLEAN_PATHS"
-        fi
-
         EXTRA_SET_ARGS=""
         if [ -n "${EXTRA_SET_VALUES// /}" ]; then
           while IFS= read -r line; do
@@ -262,10 +276,10 @@ runs:
           --install \
           --namespace "${NAMESPACE}" \
           --create-namespace \
-          "${BASE_SET_ARGS[@]}" "${PATH_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
+          "${BASE_SET_ARGS[@]}" ${EXTRA_SET_ARGS} \
           --timeout "${HELM_TIMEOUT}" \
           ${EXTRA_ARGS}
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "HELM_GENERIC_DEPLOY_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::notice title=✅ [HELM] Helm deploy complete::App: ${APP_NAME}, namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
@@ -285,4 +299,4 @@ runs:
       if: failure()
       shell: bash
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [HELM] Deploy failed::App '${{ inputs.app_name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached}."
