@@ -5,22 +5,29 @@
 # PURPOSE:
 #   Full CI/CD pipeline for services that ship a Docker image and a Helm chart.
 #   Computes a semantic version, optionally publishes NuGet packages, builds and
-#   pushes a Docker image to a configurable registry, packages and publishes the
-#   Helm chart to GitHub Container Registry (GHCR) as an OCI artifact, and only
-#   then tags the Git origin.  Called by per-service caller workflows via
-#   `workflow_call`.
+#   pushes a Docker image to a configurable registry, packages the Helm chart and
+#   publishes it to one of two targets selected by `chart-publish-method` — either
+#   GitHub Container Registry (GHCR) as an OCI artifact, or a ChartMuseum
+#   repository — and only then tags the Git origin.  The publish method is
+#   mandatory: the pipeline hard-fails if it is undeclared or unrecognised.
+#   Called by per-service caller workflows via `workflow_call`.
 #
 # USAGE:
 #   jobs:
 #     publish:
 #       uses: simplify9/.github/.github/workflows/reusable-build-and-publish-artifacts.yml@main
 #       with:
-#         chart-name: my-service        # required — must match Chart.yaml name:
+#         chart-name: my-service          # required — must match Chart.yaml name:
+#         chart-publish-method: github-oci   # required — 'github-oci' or 'chartmuseum'
 #         major-version: '2'
 #         minor-version: '1'
 #       secrets:
 #         registry-password: ${{ secrets.GITHUB_TOKEN }}
 #         nuget-api-key:     ${{ secrets.NUGET_API_KEY }}   # omit to skip NuGet
+#
+#   For ChartMuseum, set chart-publish-method: chartmuseum and additionally
+#   provide chart-repo-url plus the chartmuseum-username / chartmuseum-password
+#   secrets.
 #
 # INPUTS:
 #   Required:
@@ -28,6 +35,12 @@
 #                                 name: field in Chart.yaml — Helm derives
 #                                 the package filename from Chart.yaml, not
 #                                 this input.
+#     chart-publish-method string Where to publish the chart.  No default —
+#                                 must be 'github-oci' (GHCR OCI) or
+#                                 'chartmuseum'.  Declared as workflow_call
+#                                 required:false but validated as mandatory in
+#                                 checkpoint 1, so an undeclared/unknown value
+#                                 hard-fails with an explicit error.
 #
 #   Optional — versioning:
 #     major-version       string  SemVer major component.         (default: '1')
@@ -50,6 +63,10 @@
 #   Optional — Helm:
 #     chart-path          string  Path to the Helm chart directory.
 #                                                                 (default: './chart')
+#     chart-repo-url      string  ChartMuseum base URL.  Required only when
+#                                 chart-publish-method is 'chartmuseum'
+#                                 (e.g. https://charts.sf9.io).  Ignored for
+#                                 github-oci.
 #
 #   Optional — Registry:
 #     container-registry  string  Registry for the Docker image.  (default: 'ghcr.io')
@@ -62,19 +79,26 @@
 #     nuget-source        NuGet feed URL.  Defaults to nuget.org v3.
 #     registry-username   Username for the Docker image registry.
 #     registry-password   Password/token for the Docker image registry.
+#     chartmuseum-username Username for ChartMuseum.  Required only when
+#                         chart-publish-method is 'chartmuseum'.
+#     chartmuseum-password Password/token for ChartMuseum.  Required only when
+#                         chart-publish-method is 'chartmuseum'.
 #     github-token        PAT for git tagging; falls back to GITHUB_TOKEN.
 #
-#   Note: Helm chart publishing to GHCR always uses github.actor +
+#   Note: Helm chart publishing to GHCR (github-oci) always uses github.actor +
 #   GITHUB_TOKEN and is deliberately decoupled from registry-username /
-#   registry-password, which may target a non-GHCR image registry.
+#   registry-password, which may target a non-GHCR image registry.  ChartMuseum
+#   publishing uses the dedicated chartmuseum-* secrets instead.
 #
 # OUTPUTS:
 #   version       Computed semantic version string, e.g. '1.2.57'.
 #   docker-image  Full Docker image reference(s) including tag.  On the
 #                 default branch this contains TWO newline-separated tags
 #                 (the version and 'latest'); on other refs, just the version.
-#   helm-chart    OCI URL of the published Helm chart, e.g.:
-#                   oci://ghcr.io/<owner>/charts/<chart-name>:<version>
+#   helm-chart    URL of the published Helm chart.  For github-oci, the OCI
+#                 reference, e.g. oci://ghcr.io/<owner>/charts/<chart-name>:<version>.
+#                 For chartmuseum, the served package URL, e.g.
+#                 <chart-repo-url>/charts/<chart-name>-<version>.tgz.
 #
 # PERMISSIONS:
 #   The workflow defaults to `contents: read` and grants each job only what it
@@ -100,13 +124,17 @@
 #   nuget             (skipped when nuget-projects is empty) Restores, builds,
 #                     and packs .NET projects; pushes to the NuGet feed.
 #   ci                Validates chart config, builds and pushes the Docker
-#   │                 image, packages the Helm chart, and pushes the OCI
-#   │                 artifact to GHCR.  Four inline checkpoints:
-#   │   1  Config validated     chart-name non-empty, chart-path exists,
-#   │                           Chart.yaml present, name: matches input.
+#   │                 image, packages the Helm chart, and publishes it to the
+#   │                 target chosen by chart-publish-method.  Four inline
+#   │                 checkpoints:
+#   │   1  Config validated     publish method recognised, chart-name non-empty,
+#   │                           chart-path exists, Chart.yaml present, name:
+#   │                           matches input, method-specific creds present.
 #   │   2  Docker image built   Image pushed to container-registry.
 #   │   3  Helm chart packaged  .tgz written to ./helm-packages/.
-#   └   4  Helm chart pushed    OCI artifact live in GHCR.
+#   └   4  Helm chart pushed    OCI artifact live in GHCR (github-oci) or chart
+#                               uploaded to ChartMuseum (chartmuseum).  Exactly
+#                               one of the two push steps runs.
 #   tag               Creates and pushes the git tag — only after version, ci,
 #                     and (when present) nuget succeed, so tags never point at
 #                     a version that was never published.
@@ -189,6 +217,14 @@ on:
         description: 'Helm chart name'
         required: true
         type: string
+      chart-publish-method:
+        description: "Where to publish the Helm chart. Required — there is no default. Valid values: 'github-oci' (GHCR OCI) or 'chartmuseum'. The pipeline hard-fails if undeclared or unrecognised."
+        required: false
+        type: string
+      chart-repo-url:
+        description: 'ChartMuseum base URL (required when chart-publish-method is chartmuseum, e.g. https://charts.sf9.io)'
+        required: false
+        type: string
 
       # Registry configuration
       container-registry:
@@ -215,6 +251,13 @@ on:
         required: false
       registry-password:
         description: 'Container registry password/token'
+        required: false
+      # ChartMuseum secrets (required when chart-publish-method is chartmuseum)
+      chartmuseum-username:
+        description: 'ChartMuseum username (required when chart-publish-method is chartmuseum)'
+        required: false
+      chartmuseum-password:
+        description: 'ChartMuseum password/token (required when chart-publish-method is chartmuseum)'
         required: false
 
       # GitHub token for tagging
@@ -354,19 +397,29 @@ jobs:
       packages: write
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
-      helm-chart: ${{ steps.helm_oci.outputs.chart-url }}
+      helm-chart: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
     steps:
       - name: Initialize CI run
         env:
           VERSION: ${{ needs.version.outputs.version }}
           REGISTRY: ${{ inputs.container-registry }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
+          # Compute the lowercased owner once here and export it via $GITHUB_ENV;
+          # later steps (validation, OCI push, summary) reuse it instead of each
+          # repeating the same tr pipeline.
+          OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+
           echo "::group::🐳 CI build context"
-          printf '%-12s%s\n' 'Version'  "${VERSION}"
-          printf '%-12s%s\n' 'Registry' "${REGISTRY}"
+          printf '%-14s%s\n' 'Version'  "${VERSION}"
+          printf '%-14s%s\n' 'Registry' "${REGISTRY}"
+          printf '%-14s%s\n' 'Chart method' "${PUBLISH_METHOD}"
+          printf '%-14s%s\n' 'Owner' "${OWNER_LOWER}"
           echo "::endgroup::"
           # Seed checkpoint state; each stage flips its own entry to PASSED.
           {
+            echo "OWNER_LOWER=${OWNER_LOWER}"
             echo "CHECKPOINT_1_STATUS=⏳ Pending"
             echo "CHECKPOINT_2_STATUS=⏳ Pending"
             echo "CHECKPOINT_3_STATUS=⏳ Pending"
@@ -382,9 +435,30 @@ jobs:
         env:
           CHART_PATH: ${{ inputs.chart-path }}
           CHART_NAME: ${{ inputs.chart-name }}
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+          # Presence flags only — never bring the secret values into this step.
+          CM_USER_SET: ${{ secrets.chartmuseum-username != '' }}
+          CM_PASS_SET: ${{ secrets.chartmuseum-password != '' }}
         run: |
+          set -euo pipefail
           echo "::group::🐳 [CHECKPOINT 1/4] Validate chart publish configuration"
+
+          # The publish method is mandatory and has no default. An undeclared or
+          # unrecognised method is a hard failure, so a caller can never silently
+          # publish to the wrong place — or nowhere at all.
+          case "${PUBLISH_METHOD}" in
+            github-oci|chartmuseum)
+              ;;
+            "")
+              echo "Error: chart-publish-method is required. Declare 'github-oci' or 'chartmuseum'."
+              exit 1
+              ;;
+            *)
+              echo "Error: Unsupported chart-publish-method '${PUBLISH_METHOD}'. Use 'github-oci' or 'chartmuseum'."
+              exit 1
+              ;;
+          esac
 
           if [ -z "${CHART_NAME}" ]; then
             echo "Error: chart-name input is required."
@@ -418,11 +492,34 @@ jobs:
             echo "::warning title=Helm values.yaml missing::No values.yaml at '${CHART_PATH}'; image repository/tag will not be updated."
           fi
 
-          OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          # Method-specific requirements and the human-readable publish target.
+          case "${PUBLISH_METHOD}" in
+            github-oci)
+              # OWNER_LOWER is exported by the Initialize CI run step.
+              PUBLISH_TARGET="oci://ghcr.io/${OWNER_LOWER}/charts"
+              ;;
+            chartmuseum)
+              if [ -z "${CHART_REPO_URL}" ]; then
+                echo "Error: chart-repo-url is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              if [ "${CM_USER_SET}" != "true" ]; then
+                echo "Error: chartmuseum-username secret is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              if [ "${CM_PASS_SET}" != "true" ]; then
+                echo "Error: chartmuseum-password secret is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              PUBLISH_TARGET="${CHART_REPO_URL%/}/api/charts"
+              ;;
+          esac
+
           printf '%-16s%s\n' 'Chart path'      "${CHART_PATH}"
           printf '%-16s%s\n' 'Chart name'      "${CHART_NAME}"
           printf '%-16s%s\n' 'Chart.yaml name' "${CHART_YAML_NAME}"
-          printf '%-16s%s\n' 'Publish target'  "oci://ghcr.io/${OWNER_LOWER}/charts"
+          printf '%-16s%s\n' 'Publish method'  "${PUBLISH_METHOD}"
+          printf '%-16s%s\n' 'Publish target'  "${PUBLISH_TARGET}"
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [1/4] Chart configuration validated"
           echo "::endgroup::"
@@ -525,12 +622,12 @@ jobs:
           echo "::endgroup::"
 
       - name: Push Helm chart to GHCR OCI
+        if: inputs.chart-publish-method == 'github-oci'
         id: helm_oci
         shell: bash
         env:
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_PASSWORD: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
           CHART_NAME: ${{ inputs.chart-name }}
           VERSION: ${{ needs.version.outputs.version }}
           PACKAGE_FILE: ${{ steps.helm_package.outputs.package-file }}
@@ -541,7 +638,7 @@ jobs:
 
           echo "::add-mask::${REGISTRY_PASSWORD}"
 
-          OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          # OWNER_LOWER is exported by the Initialize CI run step.
           CHART_REPOSITORY="ghcr.io/${OWNER_LOWER}/charts"
           CHART_PUSH_URL="oci://${CHART_REPOSITORY}"
           CHART_FULL_URL="${CHART_PUSH_URL}/${CHART_NAME}:${VERSION}"
@@ -560,6 +657,84 @@ jobs:
           echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
           echo "✅ [4/4] Helm chart pushed"
+          echo "::endgroup::"
+
+          # The one run-level success annotation: a pointer to the published artifact.
+          echo "::notice title=Published ${CHART_NAME} ${VERSION}::${CHART_FULL_URL}"
+
+      - name: Push Helm chart to ChartMuseum
+        if: inputs.chart-publish-method == 'chartmuseum'
+        id: helm_chartmuseum
+        shell: bash
+        env:
+          CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+          CHARTMUSEUM_USERNAME: ${{ secrets.chartmuseum-username }}
+          CHARTMUSEUM_PASSWORD: ${{ secrets.chartmuseum-password }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PACKAGE_FILE: ${{ steps.helm_package.outputs.package-file }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::☸️ [CHECKPOINT 4/4] Push Helm Chart to ChartMuseum"
+
+          echo "::add-mask::${CHARTMUSEUM_PASSWORD}"
+
+          # Normalise the base URL (strip any trailing slash) and target the
+          # ChartMuseum upload API.
+          CM_BASE="${CHART_REPO_URL%/}"
+          CM_API_URL="${CM_BASE}/api/charts"
+
+          if [ ! -f "${PACKAGE_FILE}" ]; then
+            echo "Error: packaged chart not found: ${PACKAGE_FILE}"
+            exit 1
+          fi
+
+          echo "Uploading ${PACKAGE_FILE} to ${CM_API_URL}"
+
+          # Credentials go through --config on a process-substituted descriptor
+          # rather than --user: printf is a bash builtin, so the user:password
+          # never lands in any process's argv (/proc) the way a command-line flag
+          # would. --retry rides out transient 5xx / connection blips; the HTTP
+          # status is captured and evaluated explicitly below.
+          CURL_EXIT=0
+          HTTP_CODE="$(curl --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-connrefused \
+            --output /tmp/chartmuseum-response.txt \
+            --write-out '%{http_code}' \
+            --config <(printf 'user = "%s:%s"\n' "${CHARTMUSEUM_USERNAME}" "${CHARTMUSEUM_PASSWORD}") \
+            --data-binary "@${PACKAGE_FILE}" \
+            "${CM_API_URL}")" || CURL_EXIT=$?
+
+          if [ "${CURL_EXIT}" -ne 0 ]; then
+            echo "Error: could not reach ChartMuseum (curl exit ${CURL_EXIT})."
+            cat /tmp/chartmuseum-response.txt 2>/dev/null || true
+            exit 1
+          fi
+
+          case "${HTTP_CODE}" in
+            2??)
+              echo "ChartMuseum accepted the upload (HTTP ${HTTP_CODE})."
+              ;;
+            409)
+              # Idempotent re-run: this chart version already exists (ChartMuseum
+              # rejects overwrites unless allow_overwrite is enabled). Re-running a
+              # partially-failed build must not hard-fail here — the artifact is
+              # already published, so treat 409 as success.
+              echo "::notice title=Chart already published::${CHART_NAME} ${VERSION} already exists in ChartMuseum (HTTP 409); treating as success."
+              ;;
+            *)
+              echo "Error: ChartMuseum upload failed with HTTP ${HTTP_CODE}."
+              cat /tmp/chartmuseum-response.txt 2>/dev/null || true
+              exit 1
+              ;;
+          esac
+
+          CHART_FULL_URL="${CM_BASE}/charts/${CHART_NAME}-${VERSION}.tgz"
+          echo "chart-url=${CHART_FULL_URL}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+          echo "✅ [4/4] Helm chart pushed to ChartMuseum"
           echo "::endgroup::"
 
           # The one run-level success annotation: a pointer to the published artifact.
@@ -588,14 +763,20 @@ jobs:
           CHART_NAME: ${{ inputs.chart-name }}
           VERSION: ${{ needs.version.outputs.version }}
           REGISTRY_INPUT: ${{ inputs.container-registry }}
-          CHART_URL: ${{ steps.helm_oci.outputs.chart-url }}
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+          CHART_URL: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
           REF_NAME: ${{ github.ref_name }}
           RUNNER_OS: ${{ runner.os }}
         run: |
           STATUS=$( [ "${JOB_STATUS}" = "success" ] \
             && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          # OWNER_LOWER is exported by the Initialize CI run step.
+          if [ "${PUBLISH_METHOD}" = "chartmuseum" ]; then
+            CHART_REGISTRY="${CHART_REPO_URL%/}"
+          else
+            CHART_REGISTRY="oci://ghcr.io/${OWNER_LOWER}/charts"
+          fi
           {
             echo "## 🐳 CI Build — ${CHART_NAME} — ${STATUS}"
             echo ""
@@ -603,7 +784,8 @@ jobs:
             echo "|-------|-------|"
             echo "| Version | \`${VERSION}\` |"
             echo "| Registry | \`${REGISTRY_INPUT}\` |"
-            echo "| Chart registry | \`oci://ghcr.io/${OWNER_LOWER}/charts\` |"
+            echo "| Chart method | \`${PUBLISH_METHOD}\` |"
+            echo "| Chart registry | \`${CHART_REGISTRY}\` |"
             echo "| Branch | \`${REF_NAME}\` |"
             echo "| Runner | ${RUNNER_OS} |"
             echo ""
@@ -620,10 +802,18 @@ jobs:
               echo "## ☸️ Install"
               echo ""
               echo "\`\`\`bash"
-              echo "helm upgrade --install ${CHART_NAME} oci://ghcr.io/${OWNER_LOWER}/charts/${CHART_NAME} --version ${VERSION}"
+              if [ "${PUBLISH_METHOD}" = "chartmuseum" ]; then
+                echo "helm repo add ${CHART_NAME} ${CHART_REGISTRY}"
+                echo "helm repo update"
+                echo "helm upgrade --install ${CHART_NAME} ${CHART_NAME}/${CHART_NAME} --version ${VERSION}"
+              else
+                echo "helm upgrade --install ${CHART_NAME} oci://ghcr.io/${OWNER_LOWER}/charts/${CHART_NAME} --version ${VERSION}"
+              fi
               echo "\`\`\`"
-              echo ""
-              echo "> **Note:** If this is the first time publishing this package to GHCR, verify the package visibility is set to **Public** in GitHub Packages settings. GHCR packages are not guaranteed to become public automatically on first push."
+              if [ "${PUBLISH_METHOD}" != "chartmuseum" ]; then
+                echo ""
+                echo "> **Note:** If this is the first time publishing this package to GHCR, verify the package visibility is set to **Public** in GitHub Packages settings. GHCR packages are not guaranteed to become public automatically on first push."
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

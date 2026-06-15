@@ -1,0 +1,10 @@
+{
+    "name": "Build and Publish Artifacts CI/CD",
+    "description": "Versions, builds, and publishes a containerized .NET service — Docker image, Helm chart (GHCR OCI or ChartMuseum), and optional NuGet packages — using the Simplify9 reusable workflow.",
+    "iconName": "octicon-package",
+    "categories": [
+        ".NET",
+        "Docker",
+        "Helm"
+    ]
+}
