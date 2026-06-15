@@ -3,12 +3,9 @@ description: 'Reusable action to compute semantic version from major/minor and l
 runs:
   using: "composite"
   steps:
-    - name: Announce version computation
+    - name: Initialize version computation
       shell: bash
-      run: |
-        echo "::notice title=🏷️ [VERSION] Determine Semantic Version::Computing next version — major: ${{ inputs.major }}, minor: ${{ inputs.minor }}, actor: ${{ github.actor }}"
-        echo "📋 [VERSION] Scanning git tags for pattern: ${{ inputs.major }}.${{ inputs.minor }}.*"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+      run: echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     - name: Determine semantic version
       id: semver
@@ -69,10 +66,9 @@ runs:
         fi
         
         version="$major.$minor.$patch"
-        echo "Computed next version: $version"
         echo "version=$version" >> $GITHUB_OUTPUT
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [VERSION] Version computed::Next version: ${version}"
+        echo "✅ Computed version: ${version}"
         echo "::endgroup::"
       shell: bash
 

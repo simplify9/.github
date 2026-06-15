@@ -37,12 +37,12 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Announce wrangler.toml generation
+    - name: Initialize wrangler.toml generation
       shell: bash
       run: |
-        echo "::notice title=⚡ [CF-WORKERS] Generate wrangler.toml::Generating config — project: ${{ inputs.PROJECT_NAME }}, env: ${{ inputs.ENVIRONMENT }}, opennext: ${{ inputs.BUILD_FOR_OPENNEXT }}"
-        echo "📋 [CF-WORKERS] Routes: ${{ inputs.ROUTE }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Generate wrangler.toml
       shell: bash
@@ -123,7 +123,7 @@ runs:
         echo "---------------------------"
         cat wrangler.toml
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [CF-WORKERS] wrangler.toml generated::Project: ${PROJECT_NAME}, env: ${ENVIRONMENT}, routes: ${#ROUTES[@]}"
+        echo "✅ wrangler.toml generated — project: ${PROJECT_NAME}, env: ${ENVIRONMENT}, routes: ${#ROUTES[@]}"
         echo "::endgroup::"
 
     - name: Report failure

@@ -50,19 +50,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Announce Xcode build
+    - name: Initialize Xcode build
       shell: bash
-      env:
-        SCHEME: ${{ inputs.scheme }}
-        CONFIGURATION: ${{ inputs.configuration }}
-        SIGNING_STYLE: ${{ inputs.signingStyle }}
-        WORKSPACE: ${{ inputs.workspace }}
-        ARCHIVE_PATH: ${{ inputs.archivePath }}
       run: |
         set -euo pipefail
-        echo "::notice title=🍎 [IOS] Build and Archive::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}"
-        echo "🔨 [IOS] Workspace: ${WORKSPACE}, archive: ${ARCHIVE_PATH}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Build and archive
       shell: bash
@@ -149,12 +143,12 @@ runs:
           xcodebuild "${ARGS[@]}" | xcpretty --color
           exit "${PIPESTATUS[0]}"
         else
-          echo "WARN: xcpretty not found; falling back to raw xcodebuild output"
+          echo "::warning title=xcpretty missing::xcpretty not found; falling back to raw xcodebuild output"
           xcodebuild "${ARGS[@]}"
         fi
 
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [IOS] Archive created::${ARCHIVE_PATH}"
+        echo "✅ Archive created — ${ARCHIVE_PATH}"
         echo "::endgroup::"
 
     - name: Report failure

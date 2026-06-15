@@ -3,12 +3,13 @@ description: 'Reusable action to pack .NET project(s) and push the resulting NuG
 runs:
   using: "composite"
   steps:
-    - name: Announce NuGet pack and push
+    - name: Initialize NuGet pack and push
       shell: bash
       run: |
-        echo "::notice title=🔷 [DOTNET] Pack and Push NuGet::projects: ${{ inputs.projects }}, version: ${{ inputs.version != '' && inputs.version || 'from project' }}, feed: ${{ inputs.nuget-source }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Pack NuGet packages
       run: |
@@ -49,7 +50,7 @@ runs:
         for project in $project_files; do
           # Skip if project file doesn't exist
           if [ ! -f "$project" ]; then
-            echo "Warning: Project file '$project' not found, skipping..."
+            echo "::warning title=NuGet project not found::Skipping '$project' — file does not exist."
             continue
           fi
           
@@ -84,7 +85,7 @@ runs:
           exit 1
         fi
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [DOTNET] NuGet packages packed::$packed_count package(s) ready"
+        echo "✅ [1/2] Packed $packed_count project(s)"
         echo "::endgroup::"
       shell: bash
     - name: Push NuGet packages
@@ -144,9 +145,8 @@ runs:
           exit 1
         fi
         
-        echo "All packages pushed successfully!"
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [DOTNET] NuGet packages pushed::$pushed_count package(s) → ${{ inputs.nuget-source }}"
+        echo "✅ [2/2] Pushed $pushed_count package(s) → ${{ inputs.nuget-source }}"
         echo "::endgroup::"
       shell: bash
 

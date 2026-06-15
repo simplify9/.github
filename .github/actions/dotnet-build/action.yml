@@ -3,13 +3,14 @@ description: 'Reusable action to restore, build, and optionally test .NET projec
 runs:
   using: "composite"
   steps:
-    - name: Announce .NET build
+    - name: Initialize .NET build
       shell: bash
       run: |
-        echo "::notice title=🔷 [DOTNET] Restore and Build::projects: ${{ inputs.projects }}, config: ${{ inputs.configuration }}, dotnet: ${{ inputs.dotnet-version }}, tests: ${{ inputs.run-tests }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_3_STATUS=⏭️ Skipped" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "CHECKPOINT_3_STATUS=⏭️ Skipped"
+        } >> "$GITHUB_ENV"
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v5

@@ -90,20 +90,13 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Announce Helm deployment
+    - name: Initialize Helm deployment
       shell: bash
-      env:
-        APP_NAME: ${{ inputs.app_name }}
-        CHART: ${{ inputs.chart }}
-        NAMESPACE: ${{ inputs.namespace }}
-        ENVIRONMENT: ${{ inputs.environment }}
-        CHART_REPO: ${{ inputs.chart_repo }}
-        HELM_TIMEOUT: ${{ inputs.helm_timeout }}
       run: |
-        echo "::notice title=☸️ [HELM] Deploy Chart::App: ${APP_NAME}, chart: ${CHART}, namespace: ${NAMESPACE}, env: ${ENVIRONMENT}"
-        echo "⚙️ [HELM] Chart repo: ${CHART_REPO:-OCI (inline)}, timeout: ${HELM_TIMEOUT}"
-        echo "HELM_GENERIC_KUBECONFIG_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "HELM_GENERIC_KUBECONFIG_STATUS=⏳ Pending"
+          echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Derive sanitized branch name
       id: branch
@@ -156,7 +149,7 @@ runs:
         chmod 600 "$KCFG_PATH"
         echo "kubeconfig_path=${KCFG_PATH}" >> "$GITHUB_OUTPUT"
         echo "HELM_GENERIC_KUBECONFIG_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Kubeconfig configured::namespace: ${NAMESPACE}"
+        echo "✅ Kubeconfig configured — namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
     - name: Set KUBECONFIG env
@@ -324,7 +317,7 @@ runs:
           --timeout "${HELM_TIMEOUT}" \
           ${ATOMIC_ARGS[@]+"${ATOMIC_ARGS[@]}"} ${EXTRA_ARGS_ARR[@]+"${EXTRA_ARGS_ARR[@]}"}
         echo "HELM_GENERIC_DEPLOY_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Helm deploy complete::App: ${APP_NAME}, namespace: ${NAMESPACE}"
+        echo "✅ Helm deploy complete — app: ${APP_NAME}, namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
     - name: Show release status

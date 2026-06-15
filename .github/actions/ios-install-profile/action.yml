@@ -7,12 +7,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Announce provisioning profile installation
+    - name: Initialize provisioning profile installation
       shell: bash
       run: |
         set -euo pipefail
-        echo "::notice title=🔏 [SIGN] Install iOS Provisioning Profile::Installing .mobileprovision from base64 input"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Install provisioning profile (manual)
       shell: bash
@@ -49,7 +50,7 @@ runs:
         echo "IOS_PROFILE_UUID=${UUID}" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_NAME=${NAME}" >> "$GITHUB_ENV"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [SIGN] Profile installed::Name: ${NAME}, UUID: ${UUID}"
+        echo "✅ Profile installed — Name: ${NAME}, UUID: ${UUID}"
         echo "::endgroup::"
 
     - name: Report failure

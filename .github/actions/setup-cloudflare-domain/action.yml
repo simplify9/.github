@@ -37,12 +37,13 @@ runs:
         echo "::add-mask::${{ inputs.api-token }}"
         echo "::add-mask::${{ inputs.account-id }}"
 
-    - name: Announce domain setup
+    - name: Initialize domain setup
       shell: bash
       run: |
-        echo "::notice title=🌐 [CF-PAGES] Setup Custom Domain::project: ${{ inputs.project-name }}, domain: ${{ inputs.domain-name }}, fail-on-error: ${{ inputs.fail-on-error }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Install jq for JSON parsing
       shell: bash
@@ -75,7 +76,7 @@ runs:
           fi
         else
           echo "exists=false" >> $GITHUB_OUTPUT
-          echo "⚠️ Could not check existing domains, will attempt to add"
+          echo "::warning title=Domain check failed::Could not check existing domains, will attempt to add"
         fi
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
@@ -122,12 +123,12 @@ runs:
             if [ "${{ inputs.fail-on-error }}" = "true" ]; then
               exit 1
             else
-              echo "⚠️ Continuing despite domain setup failure (fail-on-error=false)"
+              echo "::warning title=Domain setup skipped::Continuing despite domain setup failure (fail-on-error=false)"
             fi
           fi
         fi
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [CF-PAGES] Domain configured::${{ inputs.domain-name }} → ${{ inputs.project-name }}"
+        echo "✅ Domain configured — ${{ inputs.domain-name }} → ${{ inputs.project-name }}"
 
     - name: Domain setup complete
       if: steps.check-domain.outputs.exists == 'true'
