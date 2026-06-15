@@ -7,11 +7,9 @@ runs:
       shell: bash
       run: echo "::add-mask::${{ inputs.github-token }}"
 
-    - name: Announce tag creation
+    - name: Initialize tag creation
       shell: bash
-      run: |
-        echo "::notice title=🏷️ [VERSION] Create Git Tag::Creating tag '${{ inputs.tag }}' on ${{ inputs.repository }} @ ${{ inputs.sha }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+      run: echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     - name: Tag new version on GitHub origin
       run: |
@@ -52,10 +50,8 @@ runs:
         
         # Check if the request was successful
         if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-          echo "✅ Successfully created tag '${{ inputs.tag }}'"
-          echo "Response: $response_body"
+          echo "✅ Created tag '${{ inputs.tag }}' on ${{ inputs.repository }}"
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "::notice title=✅ [VERSION] Tag created::Tag '${{ inputs.tag }}' on ${{ inputs.repository }}"
         else
           echo "❌ Failed to create tag. HTTP Status: $http_code"
           echo "Response: $response_body"

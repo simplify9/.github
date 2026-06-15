@@ -14,17 +14,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Announce IPA export
+    - name: Initialize IPA export
       shell: bash
-      env:
-        ARCHIVE_PATH: ${{ inputs.archivePath }}
-        EXPORT_PLIST: ${{ inputs.exportOptionsPlist }}
-        EXPORT_PATH: ${{ inputs.exportPath }}
       run: |
         set -euo pipefail
-        echo "::notice title=🍎 [IOS] Export IPA::Exporting archive to IPA — archive: ${ARCHIVE_PATH}, output: ${EXPORT_PATH}"
-        echo "📋 [IOS] Export options: ${EXPORT_PLIST}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Export IPA
       shell: bash
@@ -46,7 +42,7 @@ runs:
           -exportOptionsPlist "${EXPORT_PLIST}" \
           -exportPath "${EXPORT_PATH}"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [IOS] IPA exported::Output: ${EXPORT_PATH}"
+        echo "✅ IPA exported — Output: ${EXPORT_PATH}"
         echo "::endgroup::"
 
     - name: Report failure

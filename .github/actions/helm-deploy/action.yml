@@ -99,13 +99,13 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Announce Helm deployment
+    - name: Initialize Helm deployment
       shell: bash
       run: |
-        echo "::notice title=☸️ [HELM] Deploy Chart::Release: ${{ inputs.release-name }}, chart: ${{ inputs.chart-name }}:${{ inputs.chart-version }}, namespace: ${{ inputs.namespace }}, source: ${{ inputs.chart-source-type }}"
-        echo "🌍 [HELM] Target namespace: ${{ inputs.namespace }}, wait: ${{ inputs.wait }}, timeout: ${{ inputs.timeout }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Set up Helm
       uses: azure/setup-helm@v5
@@ -132,7 +132,7 @@ runs:
         echo "Cluster info:"
         kubectl cluster-info
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Kubernetes context configured::namespace: ${{ inputs.namespace }}"
+        echo "✅ Kubernetes context configured — namespace: ${{ inputs.namespace }}"
         echo "::endgroup::"
 
     - name: Create namespace
@@ -307,7 +307,7 @@ runs:
         
         echo "status=deployed" >> $GITHUB_OUTPUT
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Chart deployed::Release: ${{ inputs.release-name }}, namespace: ${{ inputs.namespace }}"
+        echo "✅ Chart deployed — release: ${{ inputs.release-name }}, namespace: ${{ inputs.namespace }}"
 
     - name: Verify deployment
       shell: bash

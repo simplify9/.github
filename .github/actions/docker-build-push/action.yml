@@ -81,12 +81,23 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Announce Docker build
+    - name: Initialize Docker build
       shell: bash
+      env:
+        IMAGE_NAME: ${{ inputs.image-name }}
+        VERSION: ${{ inputs.version }}
+        REGISTRY: ${{ inputs.registry }}
+        PLATFORMS: ${{ inputs.platforms }}
       run: |
-        echo "::notice title=🐳 Docker Build::${{ inputs.image-name }}:${{ inputs.version }} → ${{ inputs.registry }} (${{ inputs.platforms }})"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "::group::🐳 Docker build context"
+        printf '%-12s%s\n' 'Image'     "${IMAGE_NAME}:${VERSION}"
+        printf '%-12s%s\n' 'Registry'  "${REGISTRY}"
+        printf '%-12s%s\n' 'Platforms' "${PLATFORMS}"
+        echo "::endgroup::"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Set up QEMU
       # Only needed for non-native/multi-arch builds; skip for the single-arch linux/amd64 default to save setup time.
@@ -105,9 +116,11 @@ runs:
 
     - name: Confirm registry auth
       shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
       run: |
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ [CHECKPOINT 1/2] Registry auth — PASSED (${{ inputs.registry }})"
+        echo "✅ [1/2] Registry auth — ${REGISTRY}"
 
     - name: Extract metadata
       id: meta
@@ -145,12 +158,20 @@ runs:
 
     - name: Confirm image built and pushed
       shell: bash
+      env:
+        IMAGE_NAME: ${{ inputs.image-name }}
+        VERSION: ${{ inputs.version }}
+        DIGEST: ${{ steps.build.outputs.digest }}
       run: |
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ Docker image pushed::${{ inputs.image-name }}:${{ inputs.version }} — digest: ${{ steps.build.outputs.digest }}"
+        echo "✅ [2/2] Image pushed — ${IMAGE_NAME}:${VERSION} (${DIGEST})"
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        IMAGE_NAME: ${{ inputs.image-name }}
+        VERSION: ${{ inputs.version }}
+        REGISTRY: ${{ inputs.registry }}
       run: |
-        echo "::error title=❌ Docker build failed::${{ inputs.image-name }}:${{ inputs.version }} on ${{ inputs.registry }} — CP1: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}"
+        echo "::error title=Docker build failed for ${IMAGE_NAME}:${VERSION}::Registry ${REGISTRY} — auth: ${CHECKPOINT_1_STATUS:-❌ Not reached} | build/push: ${CHECKPOINT_2_STATUS:-❌ Not reached}"

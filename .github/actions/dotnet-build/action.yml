@@ -3,18 +3,28 @@ description: 'Reusable action to restore, build, and optionally test .NET projec
 runs:
   using: "composite"
   steps:
-    - name: Announce .NET build
+    - name: Initialize .NET build
       shell: bash
       run: |
-        echo "::notice title=🔷 [DOTNET] Restore and Build::projects: ${{ inputs.projects }}, config: ${{ inputs.configuration }}, dotnet: ${{ inputs.dotnet-version }}, tests: ${{ inputs.run-tests }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_3_STATUS=⏭️ Skipped" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "CHECKPOINT_3_STATUS=⏭️ Skipped"
+        } >> "$GITHUB_ENV"
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        # Keyed on project/package manifests so the cache invalidates when
+        # dependencies change; restore-keys give a warm partial hit otherwise.
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json', '**/Directory.Packages.props') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: |
         echo "::group::🔷 [CHECKPOINT 1/3] Restore Dependencies"

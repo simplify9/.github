@@ -46,12 +46,13 @@ runs:
         echo "::add-mask::${{ inputs.api-token }}"
         echo "::add-mask::${{ inputs.account-id }}"
 
-    - name: Announce project setup
+    - name: Initialize project setup
       shell: bash
       run: |
-        echo "::notice title=🌐 [CF-PAGES] Setup Cloudflare Pages Project::project: ${{ inputs.project-name }}, branch: ${{ inputs.production-branch }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Install jq for JSON parsing
       shell: bash
@@ -115,7 +116,7 @@ runs:
           exit 1
         fi
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [CF-PAGES] Project created::${{ inputs.project-name }} → https://${PROJECT_URL}.pages.dev"
+        echo "✅ Project created — ${{ inputs.project-name }} → https://${PROJECT_URL}.pages.dev"
 
     - name: Project setup complete
       if: steps.check-project.outputs.exists == 'true'

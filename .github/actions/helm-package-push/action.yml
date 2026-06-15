@@ -77,13 +77,13 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Announce chart package and push
+    - name: Initialize chart package and push
       shell: bash
       run: |
-        echo "::notice title=☸️ [HELM] Package and Push Chart::chart: ${{ inputs.chart-name }}:${{ inputs.version }}, source: ${{ inputs.chart-path }}, publish: ${{ inputs.publish-method }}"
-        echo "📦 [HELM] Destination: ${{ inputs.package-destination }}, update Chart.yaml: ${{ inputs.update-chart-yaml }}"
-        echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+        } >> "$GITHUB_ENV"
 
     - name: Set up Helm
       uses: azure/setup-helm@v5
@@ -120,7 +120,7 @@ runs:
             # Update existing image.repository with lowercase value
             sed -i "/^image:/,/^[[:space:]]*repository:/ s|repository:.*|repository: ${IMAGE_REPO_LOWER}|" "$VALUES_FILE"
           else
-            echo "Warning: image.repository not found in values.yaml"
+            echo "::warning title=image.repository not updated::image.repository not found in values.yaml"
           fi
         fi
         
@@ -130,7 +130,7 @@ runs:
             # Update existing image.tag
             sed -i "/^image:/,/^[[:space:]]*tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|" "$VALUES_FILE"
           else
-            echo "Warning: image.tag not found in values.yaml"
+            echo "::warning title=image.tag not updated::image.tag not found in values.yaml"
           fi
         fi
         
@@ -158,7 +158,7 @@ runs:
         echo "Packaged chart: ${PACKAGE_FILE}"
         ls -la ${{ inputs.package-destination }}/
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Chart packaged::${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
+        echo "✅ Chart packaged — ${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
         echo "::endgroup::"
 
     - name: Validate publish configuration
@@ -221,7 +221,7 @@ runs:
         
         echo "chart-url=${CHART_URL}/${{ inputs.chart-name }}:${{ inputs.version }}" >> $GITHUB_OUTPUT
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Chart pushed (OCI)::${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.registry }}"
+        echo "✅ Chart pushed (OCI) — ${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.registry }}"
 
     - name: Push Helm chart to ChartMuseum
       if: inputs.publish-method == 'chartmuseum'
@@ -250,7 +250,7 @@ runs:
 
         echo "chart-url=${CHARTMUSEUM_URL%/}" >> $GITHUB_OUTPUT
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::notice title=✅ [HELM] Chart pushed (ChartMuseum)::${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.chartmuseum-url }}"
+        echo "✅ Chart pushed (ChartMuseum) — ${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.chartmuseum-url }}"
 
     - name: Report failure
       if: failure()
