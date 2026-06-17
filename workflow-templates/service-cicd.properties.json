@@ -1,0 +1,10 @@
+{
+    "name": "Service CI/CD Pipeline",
+    "description": "End-to-end CI/CD for a containerized service — versions, builds and pushes a Docker image, publishes the Helm chart (GHCR OCI, ChartMuseum, or both), optionally deploys it to Kubernetes (ingress-nginx or gateway-api), and tags the release — via the Simplify9 reusable workflow.",
+    "iconName": "octicon-package",
+    "categories": [
+        ".NET",
+        "Docker",
+        "Helm"
+    ]
+}

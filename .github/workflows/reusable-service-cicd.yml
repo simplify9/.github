@@ -1,0 +1,1490 @@
+# =============================================================================
+# Reusable Service CI/CD Pipeline
+# =============================================================================
+#
+# PURPOSE:
+#   Full CI/CD pipeline for services that ship a Docker image and a Helm chart.
+#   Computes a semantic version, optionally publishes NuGet packages, builds and
+#   pushes a Docker image to a configurable registry, packages the Helm chart and
+#   publishes it to the target(s) selected by `chart-publish-method` — GitHub
+#   Container Registry (GHCR) as an OCI artifact, a ChartMuseum repository, or
+#   `both` at once (the default) — and only then tags the Git origin.  An
+#   unrecognised (or explicitly empty) publish method hard-fails.
+#   Optionally (deploy: true) it also pulls the published chart from a chosen
+#   source and deploys it to a Kubernetes cluster.
+#   Called by per-service caller workflows via `workflow_call`.
+#
+# USAGE:
+#   jobs:
+#     publish:
+#       uses: simplify9/.github/.github/workflows/reusable-service-cicd.yml@main
+#       with:
+#         chart-name: my-service          # required — must match Chart.yaml name:
+#         # chart-publish-method defaults to 'both' (GHCR OCI + ChartMuseum)
+#         chart-repo-url: https://charts.sf9.io   # required for 'both'/'chartmuseum'
+#         major-version: '2'
+#         minor-version: '1'
+#       secrets:
+#         chartmuseum-username: ${{ secrets.CM_USER }}        # required for 'both'/'chartmuseum'
+#         chartmuseum-password: ${{ secrets.CM_PASSWORD }}    # required for 'both'/'chartmuseum'
+#         nuget-api-key:        ${{ secrets.NUGET_API_KEY }}  # omit to skip NuGet
+#
+#   The default 'both' publishes to GHCR OCI and ChartMuseum, so it needs
+#   chart-repo-url plus the chartmuseum-username / chartmuseum-password secrets
+#   (the GHCR OCI half uses the built-in GITHUB_TOKEN automatically).
+#   Set chart-publish-method: github-oci to publish only to GHCR OCI (no extra
+#   secrets — drop chart-repo-url + the chartmuseum-* secrets), or
+#   chart-publish-method: chartmuseum to publish only to ChartMuseum.
+#
+# INPUTS:
+#   Required:
+#     chart-name          string  Helm chart name.  Must exactly match the
+#                                 name: field in Chart.yaml — Helm derives
+#                                 the package filename from Chart.yaml, not
+#                                 this input.
+#   Optional — versioning:
+#     major-version       string  SemVer major component.         (default: '1')
+#     minor-version       string  SemVer minor component.         (default: '0')
+#
+#   Optional — .NET / NuGet:
+#     dotnet-version      string  .NET SDK version to install.    (default: '8.0.x')
+#     nuget-projects      string  Glob of .csproj files to pack
+#                                 and push.  Leave empty to skip
+#                                 NuGet publishing entirely.      (default: '')
+#     test-projects       string  Glob of test .csproj files.    (default: '**/*UnitTests/*.csproj')
+#     run-tests           string  Set to 'true' to run tests.    (default: 'false')
+#
+#   Optional — Docker:
+#     dockerfile-path     string  Path to the Dockerfile.         (default: './Dockerfile')
+#     docker-context      string  Docker build context directory. (default: '.')
+#     docker-platforms    string  Comma-separated target platform(s).
+#                                                                 (default: 'linux/amd64')
+#
+#   Optional — Helm:
+#     chart-path          string  Path to the Helm chart directory.
+#                                                                 (default: './chart')
+#     chart-publish-method string Where to publish the chart: 'github-oci'
+#                                 (GHCR OCI), 'chartmuseum', or 'both'.
+#                                 (default: 'both')  An unrecognised or
+#                                 explicitly empty value hard-fails in
+#                                 checkpoint 1.
+#     chart-repo-url      string  ChartMuseum base URL.  Required when
+#                                 chart-publish-method is 'chartmuseum' or 'both'
+#                                 (e.g. https://charts.sf9.io).  Ignored for
+#                                 github-oci.
+#
+#   Optional — Deploy (the deploy job runs only when deploy is true):
+#     deploy              boolean Deploy the published chart to a cluster.
+#                                                                 (default: false)
+#     deploy-chart-source string  Source to pull the chart from for deploy:
+#                                 'github-oci' or 'chartmuseum'.  Empty inherits
+#                                 chart-publish-method; when that is 'both' the
+#                                 deploy defaults to pulling from OCI (set this to
+#                                 'chartmuseum' to pull from ChartMuseum instead).
+#                                                                  (default: '')
+#     deploy-namespace    string  Target Kubernetes namespace.    (default: 'playground')
+#     deploy-release-name string  Helm release name; empty uses chart-name. (default: '')
+#     deploy-environment  string  GitHub Environment for the deploy job
+#                                 (approval gates / env secrets). (default: 'Development')
+#     deploy-timeout      string  Helm --timeout for the deploy.  (default: '10m')
+#     helm-set-values     string  Comma-separated key=value pairs for helm --set
+#                                 during deploy (non-secret).      (default: '')
+#
+#   Optional — Routing (consumed by the deploy job):
+#     routing-mode        string  'ingress-nginx' (default) or 'gateway-api'.
+#     gateway-hostnames   string  Hostnames (comma/newline). Required for
+#                                 gateway-api.                     (default: '')
+#     gateway-paths       string  Route paths (comma/newline).    (default: '/')
+#     gateway-path-type   string  Route pathType.                 (default: 'PathPrefix')
+#     gateway-backend-port string Backend service port.           (default: '80')
+#     gateway-backend-service-name string Backend service override. (default: '')
+#     gateway-parent-name string  Parent Gateway name.            (default: 'public-gateway')
+#     gateway-parent-namespace string Parent Gateway namespace.   (default: 's9-dev-edge')
+#     gateway-section-name string  Wildcard listener sectionName; applied only for
+#                                 *.sf9.io hosts.   (default: 'https-wildcard-sf9-io')
+#     gateway-auto-onboarding boolean  For non-*.sf9.io hosts, ensure the parent
+#                                 Gateway/listeners/Certificate exist. (default: true)
+#     gateway-class-name  string  GatewayClass for a new Gateway.  (default: 'cilium')
+#     gateway-cert-issuer-name string cert-manager issuer name.
+#                                                  (default: 'letsencrypt-production-gateway')
+#     gateway-cert-issuer-kind string cert-manager issuer kind.   (default: 'ClusterIssuer')
+#     gateway-cert-wait   boolean Wait for Certificate readiness.  (default: true)
+#     gateway-cert-wait-timeout-seconds string Cert wait timeout.  (default: '600')
+#
+#   Optional — Registry:
+#     container-registry  string  Registry for the Docker image.  (default: 'ghcr.io')
+#     image-name          string  Full Docker image name.
+#                                 Defaults to github.repository.
+#
+# SECRETS:
+#   Optional:
+#     nuget-api-key       API key for NuGet push.
+#     nuget-source        NuGet feed URL.  Defaults to nuget.org v3.
+#     registry-username   Username for the Docker image registry.
+#     registry-password   Password/token for the Docker image registry.
+#     chartmuseum-username Username for ChartMuseum.  Required when
+#                         chart-publish-method is 'chartmuseum' or 'both'.
+#     chartmuseum-password Password/token for ChartMuseum.  Required when
+#                         chart-publish-method is 'chartmuseum' or 'both'.
+#     kubeconfig          Base64-encoded kubeconfig for the target cluster.
+#                         Required when deploy is true and routing-mode is
+#                         ingress-nginx.
+#     kubeconfig-gateway  Base64-encoded kubeconfig used when routing-mode is
+#                         gateway-api.  Required when deploy is true and
+#                         routing-mode is gateway-api.
+#     helm-set-secret-values Comma-separated key=value pairs passed to helm
+#                         --set-string during deploy (masked). Optional.
+#     github-token        PAT for git tagging; falls back to GITHUB_TOKEN.
+#
+#   Note: Helm chart publishing to GHCR (github-oci) always uses github.actor +
+#   GITHUB_TOKEN and is deliberately decoupled from registry-username /
+#   registry-password, which may target a non-GHCR image registry.  ChartMuseum
+#   publishing uses the dedicated chartmuseum-* secrets instead.
+#
+# OUTPUTS:
+#   version       Computed semantic version string, e.g. '1.2.57'.
+#   docker-image  Full Docker image reference(s) including tag.  On the
+#                 default branch this contains TWO newline-separated tags
+#                 (the version and 'latest'); on other refs, just the version.
+#   helm-chart    URL of the published Helm chart.  For github-oci (and for
+#                 'both', which reports its OCI reference), the OCI reference,
+#                 e.g. oci://ghcr.io/<owner>/charts/<chart-name>:<version>.
+#                 For chartmuseum, the served package URL, e.g.
+#                 <chart-repo-url>/charts/<chart-name>-<version>.tgz.
+#
+# PERMISSIONS:
+#   The workflow defaults to `contents: read` and grants each job only what it
+#   needs (least privilege):
+#     version  contents: read                   Reads git tags to compute semver.
+#     nuget    contents: read, packages: write  Optional GitHub Packages feed.
+#     ci       contents: read, packages: write  Pushes image + chart to GHCR.
+#     deploy   contents: read, packages: read   Pulls the chart (GHCR for the
+#                                               github-oci source) and deploys it.
+#     tag      contents: write                  Creates the git tag, only after
+#                                               a successful build.
+#
+#   SECURITY: This template holds `packages: write` and consumes secrets.
+#   Only invoke it from trusted events (push to a protected branch or tag).
+#   Never wire a caller to `pull_request_target` or fork `pull_request`
+#   triggers — doing so would expose write tokens and secrets to untrusted code.
+#
+# CONCURRENCY:
+#   Runs are serialized per ref so concurrent pushes cannot compute the same
+#   patch version and collide when tagging.  In-flight publishes are never
+#   cancelled (cancel-in-progress: false) to avoid interrupting a registry push.
+#
+# JOBS:
+#   version           Computes semver via determine-semver from existing git tags.
+#   nuget             (skipped when nuget-projects is empty) Restores, builds,
+#                     and packs .NET projects; pushes to the NuGet feed.
+#   ci                Validates chart config, builds and pushes the Docker
+#   │                 image, packages the Helm chart, and publishes it to the
+#   │                 target chosen by chart-publish-method.  Four inline
+#   │                 checkpoints:
+#   │   1  Config validated     publish method recognised, chart-name non-empty,
+#   │                           chart-path exists, Chart.yaml present, name:
+#   │                           matches input, method-specific creds present.
+#   │   2  Docker image built   Image pushed to container-registry.
+#   │   3  Helm chart packaged  .tgz written to ./helm-packages/.
+#   └   4  Helm chart pushed    OCI artifact live in GHCR (github-oci) or chart
+#                               uploaded to ChartMuseum (chartmuseum), or both
+#                               ('both').  The two push steps are individually
+#                               gated, so 'both' runs them in sequence.
+#   deploy            (runs only when deploy: true and ci succeeded) Pulls the
+#                     published chart from the effective source (deploy-chart-source,
+#                     or chart-publish-method when empty — 'both' defaults to OCI)
+#                     and runs
+#                     `helm upgrade --install` against the cluster. routing-mode
+#                     selects ingress-nginx (Ingress) or gateway-api (HTTPRoute)
+#                     and the matching kubeconfig. In gateway-api mode, non-*.sf9.io
+#                     hosts are auto-onboarded (Gateway/listeners/Certificate via
+#                     kubectl) before deploy; *.sf9.io hosts attach to the shared
+#                     wildcard listener. Independent of the tag job — a deploy
+#                     failure does not block tagging.
+#   tag               Creates and pushes the git tag — only after version, ci,
+#                     and (when present) nuget succeed, so tags never point at
+#                     a version that was never published.
+#
+# DEPENDENCIES:
+#   Composite actions (simplify9/.github):
+#     determine-semver@main    Computes next SemVer from existing git tags.
+#     tag-github-origin@main   Creates a git tag via the REST API (tag job).
+#     dotnet-build@main        Restores, builds, and optionally tests .NET projects.
+#     dotnet-pack-push@main    Packs and pushes NuGet packages.
+#     docker-build-push@main   Builds multi-platform Docker image and pushes it.
+#     helm-deploy@main         Pulls the chart (OCI or ChartMuseum) and deploys
+#                              it to the cluster (deploy job).
+#   Runner tooling (gateway-api onboarding, deploy job):
+#     kubectl, jq              Pre-installed on ubuntu-latest; used to onboard
+#                              Gateway listeners + cert-manager Certificates.
+#   External actions:
+#     actions/checkout@v6      Standard repository checkout.
+#     azure/setup-helm@v5      Installs the Helm CLI (latest stable).
+# =============================================================================
+
+name: Reusable Service CI/CD Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      # Version configuration
+      major-version:
+        description: 'Major version number'
+        required: false
+        default: '1'
+        type: string
+      minor-version:
+        description: 'Minor version number'
+        required: false
+        default: '0'
+        type: string
+
+      # .NET Build configuration
+      dotnet-version:
+        description: 'Dotnet version to use'
+        required: false
+        default: '8.0.x'
+        type: string
+      nuget-projects:
+        description: 'NuGet projects to pack and push (glob pattern). Leave empty to skip NuGet publishing.'
+        required: false
+        default: ''
+        type: string
+      test-projects:
+        description: 'Test projects to run (glob pattern)'
+        required: false
+        default: '**/*UnitTests/*.csproj'
+        type: string
+      run-tests:
+        description: 'Whether to run tests'
+        required: false
+        default: 'false'
+        type: string
+
+      # Docker configuration
+      dockerfile-path:
+        description: 'Path to Dockerfile'
+        required: false
+        default: './Dockerfile'
+        type: string
+      docker-context:
+        description: 'Docker build context'
+        required: false
+        default: '.'
+        type: string
+      docker-platforms:
+        description: 'Target platforms for Docker build'
+        required: false
+        default: 'linux/amd64'
+        type: string
+
+      # Helm configuration
+      chart-path:
+        description: 'Path to Helm chart directory'
+        required: false
+        default: './chart'
+        type: string
+      chart-name:
+        description: 'Helm chart name'
+        required: true
+        type: string
+      chart-publish-method:
+        description: "Where to publish the Helm chart. Valid values: 'github-oci' (GHCR OCI), 'chartmuseum', or 'both' (publishes to GHCR OCI and ChartMuseum). Defaults to 'both'. An unrecognised (or explicitly empty) value hard-fails."
+        required: false
+        default: 'both'
+        type: string
+      chart-repo-url:
+        description: 'ChartMuseum base URL (required when chart-publish-method is chartmuseum or both, e.g. https://charts.sf9.io)'
+        required: false
+        type: string
+
+      # Registry configuration
+      container-registry:
+        description: 'Container registry (docker.io, ghcr.io, etc.)'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      image-name:
+        description: 'Docker image name (will use repository name if not provided)'
+        required: false
+        type: string
+
+      # Deploy configuration (the deploy job runs only when deploy is true)
+      deploy:
+        description: 'Deploy the published chart to a Kubernetes cluster after publishing.'
+        required: false
+        default: false
+        type: boolean
+      deploy-chart-source:
+        description: "Where to pull the chart from for deployment: 'github-oci' or 'chartmuseum'. Leave empty to inherit chart-publish-method; when that is 'both', the deploy defaults to pulling from OCI (set this to 'chartmuseum' to pull from ChartMuseum instead)."
+        required: false
+        default: ''
+        type: string
+      deploy-namespace:
+        description: 'Kubernetes namespace to deploy into.'
+        required: false
+        default: 'playground'
+        type: string
+      deploy-release-name:
+        description: 'Helm release name. Defaults to chart-name when empty.'
+        required: false
+        default: ''
+        type: string
+      deploy-environment:
+        description: 'GitHub Environment for the deploy job (enables approval gates / environment secrets).'
+        required: false
+        default: 'Development'
+        type: string
+      deploy-timeout:
+        description: 'Helm --timeout for the deployment (e.g. 5m, 10m).'
+        required: false
+        default: '10m'
+        type: string
+      helm-set-values:
+        description: 'Comma-separated key=value pairs passed to helm --set during deploy (non-secret).'
+        required: false
+        default: ''
+        type: string
+
+      # Routing configuration (consumed by the deploy job)
+      routing-mode:
+        description: "North-south routing for the deploy: 'ingress-nginx' (default) or 'gateway-api'."
+        required: false
+        default: 'ingress-nginx'
+        type: string
+      gateway-hostnames:
+        description: 'Gateway-API hostnames (comma or newline separated). Required when routing-mode is gateway-api.'
+        required: false
+        default: ''
+        type: string
+      gateway-paths:
+        description: 'Gateway-API route paths (comma or newline separated).'
+        required: false
+        default: '/'
+        type: string
+      gateway-path-type:
+        description: 'Gateway-API route pathType.'
+        required: false
+        default: 'PathPrefix'
+        type: string
+      gateway-backend-port:
+        description: 'Gateway-API backend service port.'
+        required: false
+        default: '80'
+        type: string
+      gateway-backend-service-name:
+        description: 'Optional Gateway-API backend service name override (defaults to the chart service).'
+        required: false
+        default: ''
+        type: string
+      gateway-parent-name:
+        description: 'Gateway-API parent Gateway name.'
+        required: false
+        default: 'public-gateway'
+        type: string
+      gateway-parent-namespace:
+        description: 'Gateway-API parent Gateway namespace.'
+        required: false
+        default: 's9-dev-edge'
+        type: string
+      gateway-section-name:
+        description: 'Gateway listener sectionName. Applied only for *.sf9.io hosts (attach to the shared wildcard listener; avoids creating per-host listeners).'
+        required: false
+        default: 'https-wildcard-sf9-io'
+        type: string
+      gateway-auto-onboarding:
+        description: 'For non-*.sf9.io hosts, ensure the parent Gateway, listeners, and cert-manager Certificate exist before deploying.'
+        required: false
+        default: true
+        type: boolean
+      gateway-class-name:
+        description: 'GatewayClass used when creating a missing parent Gateway.'
+        required: false
+        default: 'cilium'
+        type: string
+      gateway-cert-issuer-name:
+        description: 'cert-manager issuer name for onboarded gateway domains.'
+        required: false
+        default: 'letsencrypt-production-gateway'
+        type: string
+      gateway-cert-issuer-kind:
+        description: 'cert-manager issuer kind (Issuer or ClusterIssuer).'
+        required: false
+        default: 'ClusterIssuer'
+        type: string
+      gateway-cert-wait:
+        description: 'Wait for the onboarded Certificate to become Ready.'
+        required: false
+        default: true
+        type: boolean
+      gateway-cert-wait-timeout-seconds:
+        description: 'Timeout (seconds) when waiting for Certificate readiness.'
+        required: false
+        default: '600'
+        type: string
+
+    secrets:
+      # NuGet secrets
+      nuget-api-key:
+        description: 'NuGet API key'
+        required: false
+      nuget-source:
+        description: 'NuGet source URL'
+        required: false
+      # Registry secrets
+      registry-username:
+        description: 'Container registry username'
+        required: false
+      registry-password:
+        description: 'Container registry password/token'
+        required: false
+      # ChartMuseum secrets (required when chart-publish-method is chartmuseum or both)
+      chartmuseum-username:
+        description: 'ChartMuseum username (required when chart-publish-method is chartmuseum or both)'
+        required: false
+      chartmuseum-password:
+        description: 'ChartMuseum password/token (required when chart-publish-method is chartmuseum or both)'
+        required: false
+      # Deploy secrets (used when deploy is true)
+      kubeconfig:
+        description: 'Base64-encoded kubeconfig for the target cluster (required when deploy is true and routing-mode is ingress-nginx)'
+        required: false
+      kubeconfig-gateway:
+        description: 'Base64-encoded kubeconfig used when routing-mode is gateway-api (required when deploy is true and routing-mode is gateway-api)'
+        required: false
+      helm-set-secret-values:
+        description: 'Comma-separated key=value pairs passed to helm --set-string during deploy (masked secret values)'
+        required: false
+
+      # GitHub token for tagging
+      github-token:
+        description: 'GitHub token for tagging'
+        required: false
+
+    outputs:
+      version:
+        description: 'Generated semantic version'
+        value: ${{ jobs.version.outputs.version }}
+      docker-image:
+        description: 'Built Docker image with tag'
+        value: ${{ jobs.ci.outputs.docker-image }}
+      helm-chart:
+        description: 'Published Helm chart URL'
+        value: ${{ jobs.ci.outputs.helm-chart }}
+
+# Default to least privilege; each job escalates only what it needs.
+permissions:
+  contents: read
+
+# Serialize runs per ref so concurrent pushes cannot race the tag-based
+# semver computation.  Never cancel an in-flight publish mid-push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Set default registry and image name
+  CONTAINER_REGISTRY: ${{ inputs.container-registry }}
+  IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          # Full history + all tags so determine-semver reads them locally; this
+          # also lets us drop the persisted token (the later git fetch in
+          # determine-semver is unauthenticated but harmless once tags are present).
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: ${{ inputs.major-version }}
+          minor: ${{ inputs.minor-version }}
+
+      - name: Write version job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          SEMVER_VERSION: ${{ steps.semver.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUNNER_OS: ${{ runner.os }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## 🏷️ Version Job — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Computed version | \`${SEMVER_VERSION}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| SHA | \`${COMMIT_SHA}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo "| Triggered by | ${ACTOR} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  nuget:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: version
+    if: ${{ inputs.nuget-projects != '' }}
+    permissions:
+      contents: read
+      packages: write   # in case nuget-source targets a GitHub Packages feed
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Dotnet Restore, Build, and Test
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        with:
+          projects: "**/*.csproj"
+          test-projects: ${{ inputs.test-projects }}
+          configuration: "Release"
+          dotnet-version: ${{ inputs.dotnet-version }}
+          run-tests: ${{ inputs.run-tests }}
+
+      - name: Pack and Push NuGet Package
+        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
+        with:
+          projects: ${{ inputs.nuget-projects }}
+          configuration: "Release"
+          version: ${{ needs.version.outputs.version }}
+          api-key: ${{ secrets.nuget-api-key }}
+          nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
+
+      - name: Write nuget job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.version.outputs.version }}
+          NUGET_PROJECTS: ${{ inputs.nuget-projects }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## 🔷 NuGet Publish Job — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Projects | \`${NUGET_PROJECTS}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: version
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      docker-image: ${{ steps.docker.outputs.image-tags }}
+      helm-chart: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
+    steps:
+      - name: Initialize CI run
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          REGISTRY: ${{ inputs.container-registry }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          # Compute the lowercased owner once here and export it via $GITHUB_ENV;
+          # later steps (validation, OCI push, summary) reuse it instead of each
+          # repeating the same tr pipeline.
+          OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+
+          echo "::group::🐳 CI build context"
+          printf '%-14s%s\n' 'Version'  "${VERSION}"
+          printf '%-14s%s\n' 'Registry' "${REGISTRY}"
+          printf '%-14s%s\n' 'Chart method' "${PUBLISH_METHOD}"
+          printf '%-14s%s\n' 'Owner' "${OWNER_LOWER}"
+          echo "::endgroup::"
+          # Seed checkpoint state; each stage flips its own entry to PASSED.
+          {
+            echo "OWNER_LOWER=${OWNER_LOWER}"
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+            echo "CHECKPOINT_4_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate chart publish configuration
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+          DEPLOY: ${{ inputs.deploy }}
+          DEPLOY_CHART_SOURCE: ${{ inputs.deploy-chart-source }}
+          ROUTING_MODE: ${{ inputs.routing-mode }}
+          GATEWAY_HOSTNAMES: ${{ inputs.gateway-hostnames }}
+          # Presence flags only — never bring the secret values into this step.
+          CM_USER_SET: ${{ secrets.chartmuseum-username != '' }}
+          CM_PASS_SET: ${{ secrets.chartmuseum-password != '' }}
+          KUBECONFIG_SET: ${{ secrets.kubeconfig != '' }}
+          KUBECONFIG_GW_SET: ${{ secrets.kubeconfig-gateway != '' }}
+        run: |
+          set -euo pipefail
+          echo "::group::🐳 [CHECKPOINT 1/4] Validate chart publish configuration"
+
+          # The publish method defaults to 'both'. An explicitly empty or
+          # unrecognised method is a hard failure, so a caller can never silently
+          # publish to the wrong place — or nowhere at all.
+          case "${PUBLISH_METHOD}" in
+            github-oci|chartmuseum|both)
+              ;;
+            "")
+              echo "Error: chart-publish-method was explicitly set to an empty string. Declare 'github-oci', 'chartmuseum', or 'both' (or omit it to use the default 'both')."
+              exit 1
+              ;;
+            *)
+              echo "Error: Unsupported chart-publish-method '${PUBLISH_METHOD}'. Use 'github-oci', 'chartmuseum', or 'both'."
+              exit 1
+              ;;
+          esac
+
+          if [ -z "${CHART_NAME}" ]; then
+            echo "Error: chart-name input is required."
+            exit 1
+          fi
+
+          if [ ! -d "${CHART_PATH}" ]; then
+            echo "Error: chart-path '${CHART_PATH}' does not exist."
+            exit 1
+          fi
+
+          if [ ! -f "${CHART_PATH}/Chart.yaml" ]; then
+            echo "Error: Chart.yaml not found at '${CHART_PATH}/Chart.yaml'."
+            exit 1
+          fi
+
+          CHART_YAML_NAME="$(yq '.name // ""' "${CHART_PATH}/Chart.yaml")"
+
+          if [ -z "${CHART_YAML_NAME}" ]; then
+            echo "Error: Chart.yaml does not contain a top-level name field."
+            exit 1
+          fi
+
+          if [ "${CHART_YAML_NAME}" != "${CHART_NAME}" ]; then
+            echo "Error: chart-name input '${CHART_NAME}' does not match Chart.yaml name '${CHART_YAML_NAME}'."
+            echo "Helm package filenames are derived from Chart.yaml name, so these must match."
+            exit 1
+          fi
+
+          if [ ! -f "${CHART_PATH}/values.yaml" ]; then
+            echo "::warning title=Helm values.yaml missing::No values.yaml at '${CHART_PATH}'; image repository/tag will not be updated."
+          fi
+
+          # Method-specific requirements and the human-readable publish target.
+          case "${PUBLISH_METHOD}" in
+            github-oci)
+              # OWNER_LOWER is exported by the Initialize CI run step.
+              PUBLISH_TARGET="oci://ghcr.io/${OWNER_LOWER}/charts"
+              ;;
+            chartmuseum)
+              if [ -z "${CHART_REPO_URL}" ]; then
+                echo "Error: chart-repo-url is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              if [ "${CM_USER_SET}" != "true" ]; then
+                echo "Error: chartmuseum-username secret is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              if [ "${CM_PASS_SET}" != "true" ]; then
+                echo "Error: chartmuseum-password secret is required when chart-publish-method is chartmuseum."
+                exit 1
+              fi
+              PUBLISH_TARGET="${CHART_REPO_URL%/}/api/charts"
+              ;;
+            both)
+              # 'both' publishes to GHCR OCI (no extra secrets) AND ChartMuseum,
+              # so the ChartMuseum URL + credentials are still mandatory.
+              if [ -z "${CHART_REPO_URL}" ]; then
+                echo "Error: chart-repo-url is required when chart-publish-method is both (the chart is also published to ChartMuseum)."
+                exit 1
+              fi
+              if [ "${CM_USER_SET}" != "true" ]; then
+                echo "Error: chartmuseum-username secret is required when chart-publish-method is both."
+                exit 1
+              fi
+              if [ "${CM_PASS_SET}" != "true" ]; then
+                echo "Error: chartmuseum-password secret is required when chart-publish-method is both."
+                exit 1
+              fi
+              PUBLISH_TARGET="oci://ghcr.io/${OWNER_LOWER}/charts + ${CHART_REPO_URL%/}/api/charts"
+              ;;
+          esac
+
+          # When deploy is enabled, validate its prerequisites here (fail fast,
+          # before the Docker build) using secret-presence flags only.
+          DEPLOY_SOURCE="-"
+          if [ "${DEPLOY}" = "true" ]; then
+            # Effective deploy source: explicit override, else inherit publish
+            # method — except 'both', which publishes to two targets and so has
+            # no single inherited source; it defaults to OCI (the caller can set
+            # deploy-chart-source: chartmuseum to pull from ChartMuseum instead).
+            DEPLOY_SOURCE="${DEPLOY_CHART_SOURCE:-}"
+            if [ -z "${DEPLOY_SOURCE}" ]; then
+              if [ "${PUBLISH_METHOD}" = "both" ]; then
+                DEPLOY_SOURCE="github-oci"
+              else
+                DEPLOY_SOURCE="${PUBLISH_METHOD}"
+              fi
+            fi
+            case "${DEPLOY_SOURCE}" in
+              github-oci|chartmuseum) ;;
+              *)
+                echo "Error: deploy-chart-source '${DEPLOY_SOURCE}' is invalid. Use 'github-oci' or 'chartmuseum' (or leave empty to inherit chart-publish-method)."
+                exit 1
+                ;;
+            esac
+            if [ "${DEPLOY_SOURCE}" = "chartmuseum" ]; then
+              if [ -z "${CHART_REPO_URL}" ]; then
+                echo "Error: chart-repo-url is required to deploy from chartmuseum."
+                exit 1
+              fi
+              if [ "${CM_USER_SET}" != "true" ] || [ "${CM_PASS_SET}" != "true" ]; then
+                echo "Error: chartmuseum-username and chartmuseum-password secrets are required to deploy from chartmuseum."
+                exit 1
+              fi
+            fi
+
+            # Routing mode selects which kubeconfig (and resources) the deploy uses.
+            case "${ROUTING_MODE}" in
+              ingress-nginx)
+                if [ "${KUBECONFIG_SET}" != "true" ]; then
+                  echo "Error: kubeconfig secret is required when deploy is true (routing-mode ingress-nginx)."
+                  exit 1
+                fi
+                ;;
+              gateway-api)
+                if [ "${KUBECONFIG_GW_SET}" != "true" ]; then
+                  echo "Error: kubeconfig-gateway secret is required when deploy is true and routing-mode is gateway-api."
+                  exit 1
+                fi
+                if [ -z "$(printf '%s' "${GATEWAY_HOSTNAMES}" | tr -d '[:space:],')" ]; then
+                  echo "Error: gateway-hostnames is required when routing-mode is gateway-api."
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "Error: routing-mode '${ROUTING_MODE}' is invalid. Use 'ingress-nginx' or 'gateway-api'."
+                exit 1
+                ;;
+            esac
+          fi
+
+          printf '%-16s%s\n' 'Chart path'      "${CHART_PATH}"
+          printf '%-16s%s\n' 'Chart name'      "${CHART_NAME}"
+          printf '%-16s%s\n' 'Chart.yaml name' "${CHART_YAML_NAME}"
+          printf '%-16s%s\n' 'Publish method'  "${PUBLISH_METHOD}"
+          printf '%-16s%s\n' 'Publish target'  "${PUBLISH_TARGET}"
+          printf '%-16s%s\n' 'Deploy'          "${DEPLOY} (source: ${DEPLOY_SOURCE}, routing: ${ROUTING_MODE})"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [1/4] Chart configuration validated"
+          echo "::endgroup::"
+
+      - name: Build and push Docker image
+        id: docker
+        uses: simplify9/.github/.github/actions/docker-build-push@main
+        with:
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          image-name: ${{ env.IMAGE_NAME }}
+          version: ${{ needs.version.outputs.version }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+          dockerfile: ${{ inputs.dockerfile-path }}
+          context: ${{ inputs.docker-context }}
+          platforms: ${{ inputs.docker-platforms }}
+
+      - name: Confirm Docker image built
+        run: |
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [2/4] Docker image built and pushed"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: latest
+
+      - name: Prepare Helm chart metadata
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          VERSION: ${{ needs.version.outputs.version }}
+          CONTAINER_REGISTRY: ${{ env.CONTAINER_REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::☸️ Prepare Helm chart metadata"
+
+          # Lowercase for OCI/registry correctness; export for yq's strenv().
+          IMAGE_REPOSITORY="$(echo "${CONTAINER_REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          export IMAGE_REPOSITORY VERSION
+
+          # yq edits YAML structurally (creating appVersion if absent), which is
+          # far more robust than line-oriented sed against arbitrary formatting.
+          yq -i '.version = strenv(VERSION) | .appVersion = strenv(VERSION)' "${CHART_PATH}/Chart.yaml"
+          printf '%-18s%s\n' 'Chart version' "${VERSION}"
+          printf '%-18s%s\n' 'appVersion'    "${VERSION}"
+
+          VALUES_FILE="${CHART_PATH}/values.yaml"
+          if [ -f "$VALUES_FILE" ]; then
+            if yq -e '.image' "$VALUES_FILE" >/dev/null 2>&1; then
+              yq -i '.image.repository = strenv(IMAGE_REPOSITORY) | .image.tag = strenv(VERSION)' "$VALUES_FILE"
+              printf '%-18s%s\n' 'image.repository' "${IMAGE_REPOSITORY}"
+              printf '%-18s%s\n' 'image.tag'        "${VERSION}"
+            else
+              echo "::warning title=Helm image block missing::No top-level 'image:' in values.yaml; skipping image value update."
+            fi
+          fi
+
+          echo "::endgroup::"
+
+      - name: Package Helm chart
+        id: helm_package
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::☸️ [CHECKPOINT 3/4] Package Helm Chart"
+
+          PACKAGE_DESTINATION="./helm-packages"
+          mkdir -p "$PACKAGE_DESTINATION"
+
+          if grep -q "^dependencies:" "${CHART_PATH}/Chart.yaml"; then
+            helm dependency update "$CHART_PATH"
+          fi
+
+          # Fail fast on a malformed chart before packaging/publishing.
+          helm lint "$CHART_PATH"
+
+          helm package "$CHART_PATH" --destination "$PACKAGE_DESTINATION"
+
+          PACKAGE_FILE="${PACKAGE_DESTINATION}/${CHART_NAME}-${VERSION}.tgz"
+
+          if [ ! -f "$PACKAGE_FILE" ]; then
+            echo "Error: Expected chart package not found: $PACKAGE_FILE"
+            echo "Available packages:"
+            ls -la "$PACKAGE_DESTINATION"
+            exit 1
+          fi
+
+          echo "package-file=${PACKAGE_FILE}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+          echo "✅ [3/4] Helm chart packaged: ${PACKAGE_FILE}"
+          echo "::endgroup::"
+
+      - name: Push Helm chart to GHCR OCI
+        if: ${{ inputs.chart-publish-method == 'github-oci' || inputs.chart-publish-method == 'both' }}
+        id: helm_oci
+        shell: bash
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PACKAGE_FILE: ${{ steps.helm_package.outputs.package-file }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::☸️ [CHECKPOINT 4/4] Push Helm Chart to GHCR OCI"
+
+          echo "::add-mask::${REGISTRY_PASSWORD}"
+
+          # OWNER_LOWER is exported by the Initialize CI run step.
+          CHART_REPOSITORY="ghcr.io/${OWNER_LOWER}/charts"
+          CHART_PUSH_URL="oci://${CHART_REPOSITORY}"
+          CHART_FULL_URL="${CHART_PUSH_URL}/${CHART_NAME}:${VERSION}"
+
+          echo "Authenticating Helm to GHCR..."
+          echo "$REGISTRY_PASSWORD" | helm registry login ghcr.io \
+            --username "$REGISTRY_USERNAME" \
+            --password-stdin
+
+          echo "Pushing chart package: ${PACKAGE_FILE}"
+          echo "Destination: ${CHART_PUSH_URL}"
+
+          helm push "$PACKAGE_FILE" "$CHART_PUSH_URL"
+
+          echo "chart-url=${CHART_FULL_URL}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+          echo "✅ [4/4] Helm chart pushed"
+          echo "::endgroup::"
+
+          # The one run-level success annotation: a pointer to the published artifact.
+          echo "::notice title=Published ${CHART_NAME} ${VERSION}::${CHART_FULL_URL}"
+
+      - name: Push Helm chart to ChartMuseum
+        if: ${{ inputs.chart-publish-method == 'chartmuseum' || inputs.chart-publish-method == 'both' }}
+        id: helm_chartmuseum
+        shell: bash
+        env:
+          CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+          CHARTMUSEUM_USERNAME: ${{ secrets.chartmuseum-username }}
+          CHARTMUSEUM_PASSWORD: ${{ secrets.chartmuseum-password }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PACKAGE_FILE: ${{ steps.helm_package.outputs.package-file }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::☸️ [CHECKPOINT 4/4] Push Helm Chart to ChartMuseum"
+
+          echo "::add-mask::${CHARTMUSEUM_PASSWORD}"
+
+          # Normalise the base URL (strip any trailing slash) and target the
+          # ChartMuseum upload API.
+          CM_BASE="${CHART_REPO_URL%/}"
+          CM_API_URL="${CM_BASE}/api/charts"
+
+          if [ ! -f "${PACKAGE_FILE}" ]; then
+            echo "Error: packaged chart not found: ${PACKAGE_FILE}"
+            exit 1
+          fi
+
+          echo "Uploading ${PACKAGE_FILE} to ${CM_API_URL}"
+
+          # Credentials go through --config on a process-substituted descriptor
+          # rather than --user: printf is a bash builtin, so the user:password
+          # never lands in any process's argv (/proc) the way a command-line flag
+          # would. --retry rides out transient 5xx / connection blips; the HTTP
+          # status is captured and evaluated explicitly below.
+          CURL_EXIT=0
+          HTTP_CODE="$(curl --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-connrefused \
+            --output /tmp/chartmuseum-response.txt \
+            --write-out '%{http_code}' \
+            --config <(printf 'user = "%s:%s"\n' "${CHARTMUSEUM_USERNAME}" "${CHARTMUSEUM_PASSWORD}") \
+            --data-binary "@${PACKAGE_FILE}" \
+            "${CM_API_URL}")" || CURL_EXIT=$?
+
+          if [ "${CURL_EXIT}" -ne 0 ]; then
+            echo "Error: could not reach ChartMuseum (curl exit ${CURL_EXIT})."
+            cat /tmp/chartmuseum-response.txt 2>/dev/null || true
+            exit 1
+          fi
+
+          case "${HTTP_CODE}" in
+            2??)
+              echo "ChartMuseum accepted the upload (HTTP ${HTTP_CODE})."
+              ;;
+            409)
+              # Idempotent re-run: this chart version already exists (ChartMuseum
+              # rejects overwrites unless allow_overwrite is enabled). Re-running a
+              # partially-failed build must not hard-fail here — the artifact is
+              # already published, so treat 409 as success.
+              echo "::notice title=Chart already published::${CHART_NAME} ${VERSION} already exists in ChartMuseum (HTTP 409); treating as success."
+              ;;
+            *)
+              echo "Error: ChartMuseum upload failed with HTTP ${HTTP_CODE}."
+              cat /tmp/chartmuseum-response.txt 2>/dev/null || true
+              exit 1
+              ;;
+          esac
+
+          CHART_FULL_URL="${CM_BASE}/charts/${CHART_NAME}-${VERSION}.tgz"
+          echo "chart-url=${CHART_FULL_URL}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+          echo "✅ [4/4] Helm chart pushed to ChartMuseum"
+          echo "::endgroup::"
+
+          # The one run-level success annotation: a pointer to the published artifact.
+          echo "::notice title=Published ${CHART_NAME} ${VERSION}::${CHART_FULL_URL}"
+
+      - name: Report ci job failure
+        if: failure()
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # Single error annotation surfaces the failure at the top of the run;
+          # the checkpoint breakdown stays in the (collapsible) log for triage.
+          echo "::error title=CI build failed for ${CHART_NAME} ${VERSION}::Failed before completing all 4 checkpoints — see the run log for the first ❌."
+          echo "::group::Checkpoint breakdown"
+          printf '%-26s%s\n' '1 — Config validation'  "${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          printf '%-26s%s\n' '2 — Docker build'        "${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          printf '%-26s%s\n' '3 — Helm chart packaged' "${CHECKPOINT_3_STATUS:-❌ Not reached}"
+          printf '%-26s%s\n' '4 — Helm chart pushed'   "${CHECKPOINT_4_STATUS:-❌ Not reached}"
+          echo "::endgroup::"
+
+      - name: Write ci job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REGISTRY_INPUT: ${{ inputs.container-registry }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+          CHART_URL: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          # OWNER_LOWER is exported by the Initialize CI run step.
+          OCI_REGISTRY="oci://ghcr.io/${OWNER_LOWER}/charts"
+          CM_REGISTRY="${CHART_REPO_URL%/}"
+          case "${PUBLISH_METHOD}" in
+            chartmuseum) CHART_REGISTRY="${CM_REGISTRY}" ;;
+            both)        CHART_REGISTRY="${OCI_REGISTRY} + ${CM_REGISTRY}" ;;
+            *)           CHART_REGISTRY="${OCI_REGISTRY}" ;;
+          esac
+          {
+            echo "## 🐳 CI Build — ${CHART_NAME} — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Registry | \`${REGISTRY_INPUT}\` |"
+            echo "| Chart method | \`${PUBLISH_METHOD}\` |"
+            echo "| Chart registry | \`${CHART_REGISTRY}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+            echo ""
+            echo "## 📋 Checkpoint Summary"
+            echo ""
+            echo "| # | Checkpoint | Status |"
+            echo "|---|------------|--------|"
+            echo "| 1 | Config validated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
+            echo "| 2 | Docker image built | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
+            echo "| 3 | Helm chart packaged | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
+            echo "| 4 | Helm chart pushed | ${CHECKPOINT_4_STATUS:-⏭️ Not reached} |"
+            if [ -n "${CHART_URL}" ]; then
+              echo ""
+              echo "## ☸️ Install"
+              echo ""
+              echo "\`\`\`bash"
+              if [ "${PUBLISH_METHOD}" = "chartmuseum" ]; then
+                echo "helm repo add ${CHART_NAME} ${CM_REGISTRY}"
+                echo "helm repo update"
+                echo "helm upgrade --install ${CHART_NAME} ${CHART_NAME}/${CHART_NAME} --version ${VERSION}"
+              else
+                # github-oci and both default to the OCI reference.
+                echo "helm upgrade --install ${CHART_NAME} oci://ghcr.io/${OWNER_LOWER}/charts/${CHART_NAME} --version ${VERSION}"
+                if [ "${PUBLISH_METHOD}" = "both" ]; then
+                  echo "# Also published to ChartMuseum:"
+                  echo "#   helm repo add ${CHART_NAME} ${CM_REGISTRY} && helm repo update"
+                  echo "#   helm upgrade --install ${CHART_NAME} ${CHART_NAME}/${CHART_NAME} --version ${VERSION}"
+                fi
+              fi
+              echo "\`\`\`"
+              if [ "${PUBLISH_METHOD}" != "chartmuseum" ]; then
+                echo ""
+                echo "> **Note:** If this is the first time publishing this package to GHCR, verify the package visibility is set to **Public** in GitHub Packages settings. GHCR packages are not guaranteed to become public automatically on first push."
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [version, ci]
+    # Deploy only when toggled on and the build/publish succeeded — there is no
+    # point pulling a chart that was never published.
+    if: ${{ inputs.deploy && needs.ci.result == 'success' }}
+    environment: ${{ inputs.deploy-environment }}
+    permissions:
+      contents: read
+      packages: read   # pull the OCI chart from GHCR (github-oci source)
+    steps:
+      - name: Resolve deploy parameters and routing values
+        id: params
+        env:
+          DEPLOY_CHART_SOURCE: ${{ inputs.deploy-chart-source }}
+          PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
+          RELEASE_NAME: ${{ inputs.deploy-release-name }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          CONTAINER_REGISTRY: ${{ env.CONTAINER_REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          ROUTING_MODE: ${{ inputs.routing-mode }}
+          GATEWAY_PARENT_NAME: ${{ inputs.gateway-parent-name }}
+          GATEWAY_PARENT_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+          GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
+          GATEWAY_HOSTNAMES: ${{ inputs.gateway-hostnames }}
+          GATEWAY_PATHS: ${{ inputs.gateway-paths }}
+          GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
+          GATEWAY_BACKEND_PORT: ${{ inputs.gateway-backend-port }}
+          GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name }}
+          HELM_SET_VALUES: ${{ inputs.helm-set-values }}
+        run: |
+          set -euo pipefail
+          echo "::group::☸️ Resolve deploy parameters and routing values"
+
+          # Effective chart source: explicit override, else inherit publish
+          # method. 'both' publishes to two targets, so it has no single inherited
+          # source and defaults to OCI (override with deploy-chart-source).
+          DEPLOY_SOURCE="${DEPLOY_CHART_SOURCE:-}"
+          if [ -z "${DEPLOY_SOURCE}" ]; then
+            if [ "${PUBLISH_METHOD}" = "both" ]; then
+              DEPLOY_SOURCE="github-oci"
+            else
+              DEPLOY_SOURCE="${PUBLISH_METHOD}"
+            fi
+          fi
+
+          # Map the publish-method vocabulary to helm-deploy's chart-source-type
+          # ('github-oci' -> 'oci').
+          case "${DEPLOY_SOURCE}" in
+            github-oci) SOURCE_TYPE="oci" ;;
+            chartmuseum) SOURCE_TYPE="chartmuseum" ;;
+            *)
+              echo "Error: unsupported deploy chart source '${DEPLOY_SOURCE}'."
+              exit 1
+              ;;
+          esac
+
+          RELEASE="${RELEASE_NAME:-}"
+          if [ -z "${RELEASE}" ]; then
+            RELEASE="${CHART_NAME}"
+          fi
+
+          OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          IMAGE_REPOSITORY="$(echo "${CONTAINER_REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+
+          # --- Build the helm --set list for the chosen routing mode. ---
+          SET_VALUES=""
+          ONBOARD_HOSTS=""
+          append() { SET_VALUES="${SET_VALUES:+${SET_VALUES},}$1"; }
+
+          if [ "${ROUTING_MODE}" = "gateway-api" ]; then
+            append "gateway.enabled=true"
+            append "ingress.enabled=false"
+            append "gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}"
+            append "gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}"
+
+            # *.sf9.io hosts attach to the shared wildcard listener via sectionName
+            # (no per-host listener created — preserves the 64-listener budget).
+            FIRST_HOST="$(printf '%s' "${GATEWAY_HOSTNAMES}" | tr ',' '\n' | sed 's/\r//g; /^[[:space:]]*$/d' | head -n1 | xargs || true)"
+            case "${FIRST_HOST}" in
+              *.sf9.io)
+                if [ -n "${GATEWAY_SECTION_NAME}" ]; then
+                  append "gateway.parentRefs[0].sectionName=${GATEWAY_SECTION_NAME}"
+                fi
+                ;;
+            esac
+
+            hidx=0
+            while IFS= read -r host; do
+              host="$(echo "$host" | xargs)"
+              [ -z "$host" ] && continue
+              append "gateway.hostnames[$hidx]=$host"
+              hidx=$((hidx + 1))
+              # Non-*.sf9.io hosts need a dedicated listener + cert (onboarding).
+              case "$host" in
+                *.sf9.io) ;;
+                *) ONBOARD_HOSTS="${ONBOARD_HOSTS}${host}"$'\n' ;;
+              esac
+            done < <(printf '%s\n' "${GATEWAY_HOSTNAMES}" | tr ',' '\n' | sed 's/\r//g')
+
+            pidx=0
+            while IFS= read -r p; do
+              p="$(echo "$p" | xargs)"
+              [ -z "$p" ] && continue
+              append "gateway.routes[$pidx].path=$p"
+              append "gateway.routes[$pidx].pathType=${GATEWAY_PATH_TYPE}"
+              if [ -n "${GATEWAY_BACKEND_SERVICE_NAME}" ]; then
+                append "gateway.routes[$pidx].backendRef.name=${GATEWAY_BACKEND_SERVICE_NAME}"
+              fi
+              append "gateway.routes[$pidx].backendRef.port=${GATEWAY_BACKEND_PORT}"
+              pidx=$((pidx + 1))
+            done < <(printf '%s\n' "${GATEWAY_PATHS}" | tr ',' '\n' | sed 's/\r//g')
+          else
+            # ingress-nginx (default): Ingress on, Gateway off. ingress.host /
+            # tlsSecret / annotations are supplied via helm-set-values (caller).
+            append "gateway.enabled=false"
+            append "ingress.enabled=true"
+          fi
+
+          # Merge caller-provided non-secret values (newline or comma separated).
+          if [ -n "${HELM_SET_VALUES}" ]; then
+            EXTRA="$(printf '%s' "${HELM_SET_VALUES}" | tr '\n' ',' | sed 's/,\{2,\}/,/g; s/^,//; s/,$//')"
+            [ -n "${EXTRA}" ] && append "${EXTRA}"
+          fi
+
+          {
+            echo "source-type=${SOURCE_TYPE}"
+            echo "release-name=${RELEASE}"
+            echo "owner-lower=${OWNER_LOWER}"
+            echo "image-repository=${IMAGE_REPOSITORY}"
+            echo "set-values=${SET_VALUES}"
+            echo "onboard-hosts<<__ONBOARD_EOF__"
+            printf '%s' "${ONBOARD_HOSTS}"
+            echo
+            echo "__ONBOARD_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          printf '%-18s%s\n' 'Routing mode'  "${ROUTING_MODE}"
+          printf '%-18s%s\n' 'Deploy source' "${DEPLOY_SOURCE} (${SOURCE_TYPE})"
+          printf '%-18s%s\n' 'Release name'  "${RELEASE}"
+          printf '%-18s%s\n' 'Image'         "${IMAGE_REPOSITORY}:${VERSION}"
+          printf '%-18s%s\n' 'Set values'    "${SET_VALUES}"
+          echo "::endgroup::"
+
+      - name: Onboard gateway hostnames
+        if: ${{ inputs.routing-mode == 'gateway-api' && inputs.gateway-auto-onboarding }}
+        shell: bash
+        env:
+          KUBECONFIG_DATA: ${{ secrets.kubeconfig-gateway }}
+          DEPLOY_NAMESPACE: ${{ inputs.deploy-namespace }}
+          GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
+          GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+          GATEWAY_CLASS_NAME: ${{ inputs.gateway-class-name }}
+          GATEWAY_CERT_ISSUER_NAME: ${{ inputs.gateway-cert-issuer-name }}
+          GATEWAY_CERT_ISSUER_KIND: ${{ inputs.gateway-cert-issuer-kind }}
+          GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
+          GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
+          HOST_LIST: ${{ steps.params.outputs.onboard-hosts }}
+        run: |
+          set -euo pipefail
+          echo "::group::☸️ Onboard gateway hostnames"
+
+          # *.sf9.io hosts are served by the shared wildcard listener and were
+          # excluded from the onboarding list — nothing to do if that's all of them.
+          if [ -z "$(printf '%s' "${HOST_LIST}" | tr -d '[:space:]')" ]; then
+            echo "No non-*.sf9.io hosts to onboard (wildcard listener covers the rest)."
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          if [ -z "${KUBECONFIG_DATA}" ]; then
+            echo "Error: kubeconfig-gateway is required for gateway onboarding."
+            exit 1
+          fi
+
+          KCFG_PATH="$RUNNER_TEMP/kubeconfig-gw"
+          # Remove the decoded kubeconfig on exit so the credential never lingers.
+          trap 'rm -f "$KCFG_PATH"' EXIT
+          if printf '%s' "${KUBECONFIG_DATA}" | grep -q 'apiVersion:'; then
+            printf '%s' "${KUBECONFIG_DATA}" > "$KCFG_PATH"
+          else
+            printf '%s' "${KUBECONFIG_DATA}" | base64 -d > "$KCFG_PATH" 2>/dev/null \
+              || printf '%s' "${KUBECONFIG_DATA}" > "$KCFG_PATH"
+          fi
+          chmod 600 "$KCFG_PATH"
+          export KUBECONFIG="$KCFG_PATH"
+
+          kubectl create namespace "$GATEWAY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace "$DEPLOY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+          to_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//'; }
+          trim63()  { echo "$1" | cut -c1-63 | sed 's/-$//'; }
+
+          ensure_gateway_exists() {
+            local host="$1" slug http_listener https_listener secret_name
+            slug=$(to_slug "$host")
+            http_listener=$(trim63 "http-${slug}")
+            https_listener=$(trim63 "https-${slug}")
+            secret_name="$slug"
+            if kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" >/dev/null 2>&1; then
+              return 0
+            fi
+            kubectl apply -f <(printf '%s\n' \
+              "apiVersion: gateway.networking.k8s.io/v1" \
+              "kind: Gateway" \
+              "metadata:" \
+              "  name: ${GATEWAY_NAME}" \
+              "  namespace: ${GATEWAY_NAMESPACE}" \
+              "spec:" \
+              "  gatewayClassName: ${GATEWAY_CLASS_NAME}" \
+              "  listeners:" \
+              "    - name: ${http_listener}" \
+              "      protocol: HTTP" \
+              "      port: 80" \
+              "      hostname: ${host}" \
+              "      allowedRoutes:" \
+              "        namespaces:" \
+              "          from: All" \
+              "    - name: ${https_listener}" \
+              "      protocol: HTTPS" \
+              "      port: 443" \
+              "      hostname: ${host}" \
+              "      tls:" \
+              "        mode: Terminate" \
+              "        certificateRefs:" \
+              "          - kind: Secret" \
+              "            name: ${secret_name}" \
+              "      allowedRoutes:" \
+              "        namespaces:" \
+              "          from: All")
+          }
+
+          add_listener_if_missing() {
+            local listener_name="$1" listener_protocol="$2" listener_host="$3" listener_secret="$4" listener_port existing conflict
+            if [ "$listener_protocol" = "HTTP" ]; then listener_port=80; else listener_port=443; fi
+            # Guard 1: a listener with this exact name is already registered.
+            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
+            if echo "$existing" | grep -Fxq "$listener_name"; then
+              echo "Listener '${listener_name}' already exists by name; skipping."
+              return 0
+            fi
+            # Guard 2: the hostname+port+protocol triplet is already served
+            # (Gateway API uniqueness — different name, same triplet still conflicts).
+            conflict=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" -o json \
+              | jq -r --arg host "$listener_host" --arg proto "$listener_protocol" --argjson port "$listener_port" \
+                '.spec.listeners[] | select(.hostname == $host and .protocol == $proto and .port == $port) | .name' 2>/dev/null || true)
+            if [ -n "$conflict" ]; then
+              echo "A ${listener_protocol} listener for '${listener_host}:${listener_port}' already exists (name: '${conflict}'); skipping."
+              return 0
+            fi
+            if [ "$listener_protocol" = "HTTP" ]; then
+              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[{\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{\"name\":\"${listener_name}\",\"protocol\":\"HTTP\",\"port\":80,\"hostname\":\"${listener_host}\",\"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}}}]"
+            else
+              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[{\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{\"name\":\"${listener_name}\",\"protocol\":\"HTTPS\",\"port\":443,\"hostname\":\"${listener_host}\",\"tls\":{\"mode\":\"Terminate\",\"certificateRefs\":[{\"kind\":\"Secret\",\"name\":\"${listener_secret}\"}]},\"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}}}]"
+            fi
+          }
+
+          while IFS= read -r host; do
+            host=$(echo "$host" | xargs)
+            [ -z "$host" ] && continue
+            slug=$(to_slug "$host")
+            cert_name="$slug"
+            secret_name="$slug"
+            http_listener=$(trim63 "http-${slug}")
+            https_listener=$(trim63 "https-${slug}")
+            echo "Onboarding host: ${host}"
+            ensure_gateway_exists "$host"
+            kubectl apply -f <(printf '%s\n' \
+              "apiVersion: cert-manager.io/v1" \
+              "kind: Certificate" \
+              "metadata:" \
+              "  name: ${cert_name}" \
+              "  namespace: ${GATEWAY_NAMESPACE}" \
+              "spec:" \
+              "  secretName: ${secret_name}" \
+              "  issuerRef:" \
+              "    name: ${GATEWAY_CERT_ISSUER_NAME}" \
+              "    kind: ${GATEWAY_CERT_ISSUER_KIND}" \
+              "  dnsNames:" \
+              "    - ${host}")
+            add_listener_if_missing "$http_listener" "HTTP" "$host" "$secret_name"
+            add_listener_if_missing "$https_listener" "HTTPS" "$host" "$secret_name"
+            if [ "${GATEWAY_CERT_WAIT}" = "true" ]; then
+              kubectl wait --for=condition=Ready=True "certificate/${cert_name}" \
+                -n "$GATEWAY_NAMESPACE" --timeout="${GATEWAY_CERT_WAIT_TIMEOUT}s"
+            fi
+          done < <(printf '%s\n' "${HOST_LIST}")
+
+          echo "✅ Gateway hostnames onboarded"
+          echo "::endgroup::"
+
+      - name: Deploy Helm chart to cluster
+        uses: simplify9/.github/.github/actions/helm-deploy@main
+        env:
+          # The composite reads secret --set-string values from this env var.
+          SECRET_VALUES: ${{ secrets.helm-set-secret-values }}
+        with:
+          chart-name: ${{ inputs.chart-name }}
+          chart-version: ${{ needs.version.outputs.version }}
+          chart-source-type: ${{ steps.params.outputs.source-type }}
+          # OCI source (github-oci): the chart lives at ghcr.io/<owner>/charts,
+          # independent of container-registry (which governs the Docker image).
+          registry: ghcr.io
+          repository: ${{ steps.params.outputs.owner-lower }}/charts
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          # ChartMuseum source:
+          chart-repo-url: ${{ inputs.chart-repo-url }}
+          chart-repo-username: ${{ secrets.chartmuseum-username }}
+          chart-repo-password: ${{ secrets.chartmuseum-password }}
+          # Cluster + release: routing-mode selects which kubeconfig is used.
+          kubeconfig: ${{ inputs.routing-mode == 'gateway-api' && secrets.kubeconfig-gateway || secrets.kubeconfig }}
+          release-name: ${{ steps.params.outputs.release-name }}
+          namespace: ${{ inputs.deploy-namespace }}
+          timeout: ${{ inputs.deploy-timeout }}
+          # Keep the deployed image aligned with what we just built/published.
+          image-repository: ${{ steps.params.outputs.image-repository }}
+          image-tag: ${{ needs.version.outputs.version }}
+          # Routing values (gateway.* or ingress flags) + caller helm-set-values,
+          # assembled by the resolve step above.
+          set-values: ${{ steps.params.outputs.set-values }}
+
+      - name: Write deploy job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          NAMESPACE: ${{ inputs.deploy-namespace }}
+          RELEASE_NAME: ${{ steps.params.outputs.release-name }}
+          DEPLOY_SOURCE: ${{ steps.params.outputs.source-type }}
+          ROUTING_MODE: ${{ inputs.routing-mode }}
+          ENVIRONMENT: ${{ inputs.deploy-environment }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## ☸️ Deploy — ${CHART_NAME} — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Release | \`${RELEASE_NAME}\` |"
+            echo "| Namespace | \`${NAMESPACE}\` |"
+            echo "| Environment | \`${ENVIRONMENT}\` |"
+            echo "| Routing mode | \`${ROUTING_MODE}\` |"
+            echo "| Chart source | \`${DEPLOY_SOURCE}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [version, nuget, ci]
+    # Tag only after a successful build so tags never reference an unshipped
+    # version.  A skipped nuget job (no nuget-projects) must not block tagging.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.ci.result == 'success'
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.version }}
+          sha: ${{ github.sha }}
