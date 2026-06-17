@@ -1,5 +1,5 @@
 # =============================================================================
-# Build and Publish Artifacts CI/CD Caller — Template for service repositories
+# Service CI/CD Pipeline — Caller template for service repositories
 # =============================================================================
 #
 # USAGE:
@@ -16,21 +16,32 @@
 # WHAT IT DOES:
 #   Computes a semantic version from git tags, optionally publishes NuGet
 #   packages, builds and pushes a Docker image, packages the Helm chart and
-#   publishes it, then tags the commit — all via the Simplify9 reusable workflow.
+#   publishes it, optionally deploys it to a Kubernetes cluster, then tags the
+#   commit — all via the Simplify9 reusable workflow.
 #
-# CHART PUBLISH METHOD (required — there is no default):
-#   github-oci  → publishes the chart to GHCR as an OCI artifact
+# CHART PUBLISH METHOD (optional — defaults to 'both'):
+#   both        → publishes to GHCR OCI AND ChartMuseum (the default, used below).
+#                 Requires chart-repo-url + the chartmuseum-username /
+#                 chartmuseum-password secrets. When deploying, the chart is
+#                 pulled from OCI by default (set deploy-chart-source: chartmuseum
+#                 to override).
+#   github-oci  → publishes the chart to GHCR as an OCI artifact only
 #                 (oci://ghcr.io/<owner>/charts/<chart-name>). No extra secrets
-#                 needed; uses the built-in GITHUB_TOKEN.
-#   chartmuseum → publishes the chart to a ChartMuseum repository. Requires
-#                 chart-repo-url + the chartmuseum-username / chartmuseum-password
-#                 secrets (see the commented block below).
+#                 needed; uses the built-in GITHUB_TOKEN. Drop the chart-repo-url
+#                 input and the chartmuseum-* secrets if you switch to this.
+#   chartmuseum → publishes to a ChartMuseum repository only. Requires
+#                 chart-repo-url + the chartmuseum-* secrets.
+#
+# DEPLOY (optional — off by default):
+#   Set deploy: true to roll the published chart onto a cluster. Pick the
+#   routing-mode: 'ingress-nginx' (default) or 'gateway-api'. See the commented
+#   "Deploy" block below — provide the matching kubeconfig secret.
 #
 # INPUTS (only the commonly-overridden values are declared here — see the
 #   reusable workflow for the full, documented input reference):
-#   https://github.com/simplify9/.github/blob/main/.github/workflows/reusable-build-and-publish-artifacts.yml
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/reusable-service-cicd.yml
 # =============================================================================
-name: Build and Publish Artifacts            # REPLACE: e.g. "My Service CI/CD"
+name: Service CI/CD                          # REPLACE: e.g. "My Service CI/CD"
 run-name: build-${{ github.ref_name }}-${{ github.run_number }}
 
 on:
@@ -51,15 +62,13 @@ concurrency:
 
 jobs:
   publish:
-    uses: simplify9/.github/.github/workflows/reusable-build-and-publish-artifacts.yml@main
+    uses: simplify9/.github/.github/workflows/reusable-service-cicd.yml@main
     with:
       # ── Helm chart ──────────────────────────────────────────────────────────
       chart-name: my-service                 # REPLACE: must match Chart.yaml name:
-      chart-publish-method: github-oci       # REPLACE if needed: 'github-oci' or 'chartmuseum'
+      chart-publish-method: both             # 'both' (default) | 'github-oci' | 'chartmuseum'
+      chart-repo-url: https://charts.sf9.io  # REPLACE: ChartMuseum base URL (needed for 'both'/'chartmuseum')
       # chart-path: ./chart                  # uncomment to override (default: ./chart)
-
-      # ── For ChartMuseum, switch the method above and uncomment this: ─────────
-      # chart-repo-url: https://charts.sf9.io   # REPLACE: your ChartMuseum base URL
 
       # ── Versioning ──────────────────────────────────────────────────────────
       major-version: '1'                     # REPLACE: SemVer major
@@ -72,22 +81,51 @@ jobs:
       # container-registry: ghcr.io          # e.g. docker.io, registry.digitalocean.com
       # image-name: my-org/my-service        # defaults to the GitHub repository name
 
+      # ── Deploy (uncomment to roll the chart onto a cluster) ──────────────────
+      # deploy: true
+      # deploy-chart-source: github-oci      # 'github-oci' | 'chartmuseum'; empty inherits the publish method ('both' -> OCI)
+      # deploy-namespace: playground         # default: playground
+      # deploy-environment: Development       # GitHub Environment (approval gates / env secrets)
+      # deploy-timeout: 10m                  # helm --timeout
+      # helm-set-values: 'replicaCount=2'    # comma-separated key=value (non-secret)
+      #
+      #   ── ingress-nginx mode (default): supply host/tls via helm-set-values ──
+      # routing-mode: ingress-nginx
+      #
+      #   ── gateway-api mode: route via a parent Gateway + HTTPRoute ───────────
+      # routing-mode: gateway-api
+      # gateway-hostnames: app-dev.example.com   # comma/newline separated (required for gateway-api)
+      # gateway-paths: '/'                       # comma/newline separated
+      # gateway-backend-port: '80'
+      #   Standard Simplify9 dev defaults (override only if they differ):
+      # gateway-parent-name: public-gateway
+      # gateway-parent-namespace: s9-dev-edge
+      # gateway-class-name: cilium
+      # gateway-cert-issuer-name: letsencrypt-production-gateway
+      #   *.sf9.io hosts attach to the shared wildcard listener; others are
+      #   auto-onboarded (dedicated listener + cert-manager Certificate).
+
       # ── NuGet (omit/leave commented to skip NuGet publishing entirely) ───────
       # dotnet-version: '8.0.x'
       # nuget-projects: 'src/**/*.csproj'    # glob of projects to pack and push
       # run-tests: 'true'
       # test-projects: '**/*UnitTests/*.csproj'
     secrets:
-      # github-oci + GHCR works out of the box with the built-in token below.
+      # GHCR chart push/pull and git tagging use the built-in token below.
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Push the Docker image to a NON-GHCR registry? Provide these: ─────────
-      # registry-username: ${{ secrets.REGISTRY_USERNAME }}
-      # registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+      # ── Required for 'both' and 'chartmuseum' publish methods: ───────────────
+      chartmuseum-username: ${{ secrets.CM_USER }}
+      chartmuseum-password: ${{ secrets.CM_PASSWORD }}
 
-      # ── Required only when chart-publish-method is 'chartmuseum': ────────────
-      # chartmuseum-username: ${{ secrets.CHARTMUSEUM_USERNAME }}
-      # chartmuseum-password: ${{ secrets.CHARTMUSEUM_PASSWORD }}
+      # ── Push the Docker image to a NON-GHCR registry? Provide these: ─────────
+      # registry-username: ${{ secrets.DOCKERHUB_USERNAME }}
+      # registry-password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── Required only when deploy: true — pick the one for your routing-mode: ─
+      # kubeconfig: ${{ secrets.S9DEV_KUBECONFIG }}                 # ingress-nginx mode
+      # kubeconfig-gateway: ${{ secrets.S9DEV_KUBECONFIG_V2 }} # gateway-api mode
+      # helm-set-secret-values: ${{ secrets.HELM_SET_SECRET_VALUES }}  # masked --set-string pairs
 
       # ── Required only when publishing NuGet packages: ────────────────────────
       # nuget-api-key: ${{ secrets.NUGET_API_KEY }}
