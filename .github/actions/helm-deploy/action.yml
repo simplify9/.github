@@ -23,7 +23,7 @@ inputs:
     description: 'Registry password or token for authentication'
     required: true
   kubeconfig:
-    description: 'Base64 encoded kubeconfig for cluster access'
+    description: 'Kubeconfig for cluster access. Accepts either a base64-encoded kubeconfig or raw YAML (auto-detected).'
     required: true
   release-name:
     description: 'Helm release name'
@@ -119,16 +119,30 @@ runs:
 
     - name: Configure Kubernetes context
       shell: bash
+      env:
+        # Pass the kubeconfig via env (not inline ${{ }}) so its contents never
+        # render into the script; printf '%s' keeps the bytes exact.
+        KUBECONFIG_DATA: ${{ inputs.kubeconfig }}
       run: |
         echo "::group::☸️ [CHECKPOINT 1/2] Configure Kubernetes Context"
         echo "Configuring Kubernetes context..."
         mkdir -p ~/.kube
-        echo "${{ inputs.kubeconfig }}" | base64 -d > ~/.kube/config
+
+        # Accept the kubeconfig as raw YAML or base64-encoded (auto-detected,
+        # mirroring the reusable workflow's gateway-onboarding step). A raw
+        # kubeconfig is written through as-is; otherwise we base64-decode, falling
+        # back to raw if the value turns out not to be valid base64.
+        if printf '%s' "${KUBECONFIG_DATA}" | grep -q 'apiVersion:'; then
+          printf '%s' "${KUBECONFIG_DATA}" > ~/.kube/config
+        else
+          printf '%s' "${KUBECONFIG_DATA}" | base64 -d > ~/.kube/config 2>/dev/null \
+            || printf '%s' "${KUBECONFIG_DATA}" > ~/.kube/config
+        fi
         chmod 600 ~/.kube/config
-        
+
         echo "Current context:"
         kubectl config current-context
-        
+
         echo "Cluster info:"
         kubectl cluster-info
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
