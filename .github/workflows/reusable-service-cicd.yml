@@ -1423,8 +1423,12 @@ jobs:
           # independent of container-registry (which governs the Docker image).
           registry: ghcr.io
           repository: ${{ steps.params.outputs.owner-lower }}/charts
+          # Pull the OCI chart with the built-in GITHUB_TOKEN (this job has
+          # packages: read, and the chart package is in the same org / linked to
+          # this repo). Not github-token: that secret is the git-tagging PAT,
+          # which may lack read:packages.
           registry-username: ${{ github.actor }}
-          registry-password: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
           # ChartMuseum source:
           chart-repo-url: ${{ inputs.chart-repo-url }}
           chart-repo-username: ${{ secrets.chartmuseum-username }}
