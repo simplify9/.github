@@ -912,7 +912,12 @@ jobs:
         shell: bash
         env:
           REGISTRY_USERNAME: ${{ github.actor }}
-          REGISTRY_PASSWORD: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          # The GHCR chart push always uses the built-in GITHUB_TOKEN paired with
+          # github.actor — the chart repo is ghcr.io/<owner>/charts (same org as
+          # this run), which the workflow's packages: write grant covers. It is
+          # deliberately NOT the github-token secret: that secret is for git
+          # tagging, where callers often supply a PAT that lacks write:packages.
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           CHART_NAME: ${{ inputs.chart-name }}
           VERSION: ${{ needs.version.outputs.version }}
           PACKAGE_FILE: ${{ steps.helm_package.outputs.package-file }}
