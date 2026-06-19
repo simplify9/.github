@@ -12,18 +12,19 @@
 #                              archives via xcodebuild, exports IPA, and
 #                              uploads the artifact for the release job.
 #   release_with_environment — Downloads the IPA artifact and uploads to
-#                              TestFlight. Gated on a named GitHub
+#                              TestFlight via the App Store Connect REST API.
+#                              Runs on ubuntu-latest — the REST API needs no
+#                              macOS tooling, so this avoids the ~10x cost of
+#                              a macOS runner. Gated on a named GitHub
 #                              Environment (approval gates, environment
-#                              secrets). Always runs via this path.
+#                              secrets).
 #
-# UPLOAD TOOLS (`upload-tool` input):
-#   appstoreapi (default) — App Store Connect REST API via
+# UPLOAD TOOL:
+#   appstoreapi (only)    — App Store Connect REST API via
 #                           apple-actions/upload-testflight-build@v5.
-#                           Requires no local Apple tooling. Recommended
-#                           for all projects on Xcode 26+.
-#   altool                — Deprecated xcrun altool --upload-app. Retained
-#                           as a fallback. iTMSTransporter (transporter) was
-#                           removed from Xcode 26 and is no longer supported.
+#                           Requires no local Apple tooling. altool (xcrun)
+#                           and iTMSTransporter were removed — both required
+#                           a macOS runner and are no longer supported.
 #
 # SIGNING:
 #   Manual signing only. Certificate (.p12) and provisioning profile are
@@ -202,20 +203,16 @@ on:
         default: ipa
 
       # ── Upload ────────────────────────────────────────────────────────────────
-      # appstoreapi (default): App Store Connect REST API. No local tooling
-      # required. Recommended for Xcode 26+.
-      # altool: deprecated xcrun altool --upload-app. Fallback only.
-      # transporter: REMOVED. iTMSTransporter was removed from Xcode 26.
+      # appstoreapi is the only supported tool: App Store Connect REST API,
+      # no local tooling required, so the release job runs on ubuntu-latest.
+      # altool and transporter were removed (both required a macOS runner).
+      # The input is retained for caller compatibility; any other value is
+      # rejected at runtime with a migration message.
       upload-tool:
-        description: "TestFlight upload tool: appstoreapi or altool. (transporter removed — iTMSTransporter was removed from Xcode 26)"
+        description: "TestFlight upload tool. Only 'appstoreapi' is supported (altool and transporter were removed)."
         required: false
         type: string
         default: appstoreapi
-      appstore-key-format:
-        description: "API key secret format for altool path only: raw or base64. Not used by appstoreapi."
-        required: false
-        type: string
-        default: raw
 
       # ── Release Gating ───────────────────────────────────────────────────────
       # Set release-environment to route through release_with_environment job,
@@ -278,7 +275,7 @@ on:
         description: App Store Connect issuer id
         required: false
       appstore-api-private-key-base64:
-        description: Base64 API private key for altool/base64 mode
+        description: Base64-encoded App Store Connect API private key (.p8) for the appstoreapi upload
         required: false
 
     outputs:
@@ -1008,7 +1005,10 @@ jobs:
           fi
   release_with_environment:
     name: Release
-    runs-on: ${{ inputs.macos-runner }}
+    # Upload is a pure App Store Connect REST API call (apple-actions with
+    # backend: AppStoreAPI), so no macOS tooling is needed. ubuntu-latest is
+    # ~10x cheaper than a macOS runner.
+    runs-on: ubuntu-latest
     needs: build
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
@@ -1026,13 +1026,6 @@ jobs:
           set -euo pipefail
           echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Env: ${RELEASE_ENV} | Upload tool: ${UPLOAD_TOOL} | Triggered by: ${ACTOR}"
           echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
-      # ── Environment Setup ────────────────────────────────────────────────────────────
-      - name: Select Xcode
-        if: ${{ inputs.xcode-version != '' }}
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ inputs.xcode-version }}
 
       # ── IPA Retrieval ──────────────────────────────────────────────────────────────
       - name: Download artifact
@@ -1068,21 +1061,28 @@ jobs:
           echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
 
       # ── Credentials ─────────────────────────────────────────────────────────────────
-      # App Store Connect API key is decoded from base64 into two locations:
-      #   1. $HOME/.appstoreconnect/private_keys/ — for altool path
-      #   2. $RUNNER_TEMP/appstoreapi_keys/       — for appstoreapi path,
-      #      written to GITHUB_ENV as APPSTOREAPI_KEY_CONTENT
-      # Each line of the decoded PEM is masked to prevent it appearing
-      # in the action input block printed before apple-actions runs.
-      # Note: GitHub only auto-masks declared secrets, not derived env vars,
-      # so the per-line masking is required.
+      # App Store Connect API key is decoded from base64 into
+      # $RUNNER_TEMP/appstoreapi_keys/ and written to GITHUB_ENV as
+      # APPSTOREAPI_KEY_CONTENT. Each line of the decoded PEM is masked to
+      # prevent it appearing in the action input block printed before
+      # apple-actions runs. Note: GitHub only auto-masks declared secrets,
+      # not derived env vars, so the per-line masking is required.
       - name: Validate credentials
         shell: bash
         env:
+          UPLOAD_TOOL: ${{ inputs.upload-tool }}
           APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
           APPSTORE_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
         run: |
           set -euo pipefail
+
+          if [ "${UPLOAD_TOOL}" != "appstoreapi" ]; then
+            echo "ERROR: upload-tool='${UPLOAD_TOOL}' is no longer supported."
+            echo "altool and transporter were removed (both required a macOS runner)."
+            echo "The release job now runs on ubuntu-latest and uploads via the"
+            echo "App Store Connect REST API only. Set upload-tool=appstoreapi (the default)."
+            exit 1
+          fi
 
           if [ -z "${APPSTORE_API_KEY_ID:-}" ]; then
             echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
@@ -1096,30 +1096,7 @@ jobs:
             exit 1
           fi
 
-      - name: Install API key
-        if: ${{ inputs.appstore-key-format == 'base64' }}
-        shell: bash
-        env:
-          KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
-          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
-        run: |
-          set -euo pipefail
-          umask 077
-
-          if [[ -z "${KEY_B64}" ]]; then
-            echo "ERROR: appstore-key-format=base64 requires secret appstore-api-private-key-base64"
-            exit 1
-          fi
-
-          PRIVATE_KEYS_DIR="$HOME/.appstoreconnect/private_keys"
-          mkdir -p "$PRIVATE_KEYS_DIR"
-
-          KEY_PATH="$PRIVATE_KEYS_DIR/AuthKey_${API_KEY_ID}.p8"
-          printf '%s' "${KEY_B64}" | base64 -D > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
       - name: Decode API key
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         env:
           KEY_B64: ${{ secrets.appstore-api-private-key-base64 }}
@@ -1128,7 +1105,7 @@ jobs:
           umask 077
           PRIVATE_KEYS_DIR="$RUNNER_TEMP/appstoreapi_keys"
           mkdir -p "${PRIVATE_KEYS_DIR}"
-          printf '%s' "${KEY_B64}" | base64 -D > "${PRIVATE_KEYS_DIR}/AuthKey.p8"
+          printf '%s' "${KEY_B64}" | base64 -d > "${PRIVATE_KEYS_DIR}/AuthKey.p8"
           if [[ ! -s "${PRIVATE_KEYS_DIR}/AuthKey.p8" ]]; then
             echo "ERROR: base64 decoding produced an empty key file. Check that appstore-api-private-key-base64 is valid."
             exit 1
@@ -1147,14 +1124,13 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Prepare upload
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         env:
           IPA_PATH: ${{ steps.ipa.outputs.path }}
         run: |
           set -euo pipefail
           IPA="${IPA_PATH}"
-          IPA_BYTES=$(stat -f%z "${IPA}")
+          IPA_BYTES=$(stat -c%s "${IPA}")
           IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
           IPA_NAME="$(basename "${IPA}")"
           echo "::notice title=🍎 [IOS] TestFlight Upload Starting::File: ${IPA_NAME} | Size: ${IPA_SIZE_MB} MB | Backend: AppStoreConnectAPI | Started: $(date -u +'%H:%M:%S UTC')"
@@ -1169,17 +1145,14 @@ jobs:
           echo "APPSTOREAPI_IPA_NAME=${IPA_NAME}" >> "$GITHUB_ENV"
 
       # ── Upload ───────────────────────────────────────────────────────────────────
-      # appstoreapi path: uses App Store Connect REST API. No local tooling.
-      # Uploads chunks then polls for Apple processing confirmation.
+      # Uses the App Store Connect REST API (backend: AppStoreAPI) — no local
+      # Apple tooling, so this runs on ubuntu-latest. Uploads chunks then polls
+      # for Apple processing confirmation.
       # KNOWN LIMITATION: App Store Connect JWT tokens expire after 20 minutes.
       # If Apple processing takes longer, the poll returns 401 NOT_AUTHORIZED.
       # The IPA was still delivered. Check TestFlight directly if this occurs.
       # Set wait-for-processing: false to skip polling (fire-and-forget).
-      #
-      # altool path: deprecated xcrun altool --upload-app. Fire-and-forget.
-      # No processing confirmation. Retained for backwards compatibility.
       - name: Upload
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
         uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: ${{ steps.ipa.outputs.path }}
@@ -1190,7 +1163,6 @@ jobs:
           wait-for-processing: 'true'
 
       - name: Confirm upload
-        if: ${{ inputs.upload-tool == 'appstoreapi' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1202,47 +1174,6 @@ jobs:
           echo "::endgroup::"
           echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
-
-      - name: Upload (altool)
-        if: ${{ inputs.upload-tool == 'altool' }}
-        shell: bash
-        env:
-          IPA_PATH: ${{ steps.ipa.outputs.path }}
-          API_KEY_ID: ${{ secrets.appstore-api-key-id }}
-          API_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
-        run: |
-          set -euo pipefail
-
-          IPA="${IPA_PATH}"
-          OUTPUT_FILE="$(mktemp)"
-
-          set +e
-          xcrun altool --upload-app \
-            -f "${IPA}" \
-            -t ios \
-            --apiKey "${API_KEY_ID}" \
-            --apiIssuer "${API_ISSUER_ID}" \
-            --output-format xml 2>&1 | tee "${OUTPUT_FILE}"
-          ALTOOL_EXIT=${PIPESTATUS[0]}
-          set -e
-
-          if [[ ${ALTOOL_EXIT} -ne 0 ]]; then
-            echo "ERROR: altool upload failed with exit code ${ALTOOL_EXIT}"
-            exit ${ALTOOL_EXIT}
-          fi
-
-          if grep -qiE "NOT_AUTHORIZED|failed to authenticate|Authentication credentials are missing or invalid|received status code 401|Unable to authenticate|auth issue" "${OUTPUT_FILE}"; then
-            echo "ERROR: App Store authentication error detected in altool output. Failing workflow by policy."
-            exit 1
-          fi
-
-          if grep -qiE "Validation failed|STATE_ERROR\.VALIDATION_ERROR|Invalid Version|CFBundleShortVersionString" "${OUTPUT_FILE}"; then
-            echo "ERROR: App Store validation error detected in altool output. Failing workflow by policy."
-            exit 1
-          fi
-
-          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED (altool)"
 
       - name: Release failure
         if: failure()
