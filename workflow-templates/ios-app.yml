@@ -61,7 +61,6 @@ jobs:
       # ── Export & Upload ───────────────────────────────────────────────────
       generate-export-options: true
       ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
-      upload-tool: appstoreapi
       release-environment: ios-staging          # REPLACE if env name differs
       disable-release: ${{ inputs.disable_release }}
     secrets:
@@ -98,7 +97,6 @@ jobs:
       # ── Export & Upload ───────────────────────────────────────────────────
       generate-export-options: true
       ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
-      upload-tool: appstoreapi
       release-environment: ios-production       # REPLACE if env name differs
       disable-release: ${{ inputs.disable_release }}
     secrets:
