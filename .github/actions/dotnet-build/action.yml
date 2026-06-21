@@ -1,128 +1,42 @@
+# =============================================================================
+# Dotnet Restore and Build
+# =============================================================================
+# Restores, builds, and optionally tests .NET projects on a composite runner.
+# Auto-detects a solution file (*.sln); otherwise operates on the project glob.
+#
+# Behaviour:
+#   - Solution-aware — if a *.sln is present it is restored/built directly,
+#     otherwise the `projects` glob is expanded (find for wildcards).
+#   - Tests are opt-in via `run-tests` and run with --no-build against the
+#     `test-projects` glob.
+#   - Checkpoint statuses are surfaced in the failure annotation for triage.
+#
+# Inputs:
+#   projects        (required) Project(s) to restore/build (wildcards allowed).
+#   test-projects   (optional) Test project(s) to run (wildcards allowed).
+#   configuration   (optional) Build configuration (default: Release).
+#   dotnet-version  (optional) .NET SDK version (default: 8.0.x).
+#   run-tests       (optional) Whether to run tests after building (default: true).
+#
+# Outputs: none.
+#
+# Usage:
+#   jobs:
+#     build:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v4
+#         - name: Restore and build
+#           uses: simplify9/.github/.github/actions/dotnet-build@main
+#           with:
+#             projects: '**/*.csproj'
+#             configuration: Release
+#             run-tests: 'true'
+# =============================================================================
 name: 'Dotnet Restore and Build'
+author: 'Simplify9'
 description: 'Reusable action to restore, build, and optionally test .NET projects'
-runs:
-  using: "composite"
-  steps:
-    - name: Initialize .NET build
-      shell: bash
-      run: |
-        {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending"
-          echo "CHECKPOINT_3_STATUS=⏭️ Skipped"
-        } >> "$GITHUB_ENV"
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: ${{ inputs.dotnet-version }}
-    - name: Cache NuGet packages
-      uses: actions/cache@v5
-      with:
-        path: ~/.nuget/packages
-        # Keyed on project/package manifests so the cache invalidates when
-        # dependencies change; restore-keys give a warm partial hit otherwise.
-        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json', '**/Directory.Packages.props') }}
-        restore-keys: |
-          ${{ runner.os }}-nuget-
-    - name: Restore dependencies
-      run: |
-        echo "::group::🔷 [CHECKPOINT 1/3] Restore Dependencies"
-        # Check if there's a solution file first
-        if ls *.sln 1> /dev/null 2>&1; then
-          echo "Found solution file(s), restoring solution..."
-          dotnet restore *.sln
-        else
-          echo "No solution file found, restoring individual projects..."
-          # If projects input contains wildcards, restore without arguments to restore all
-          if [[ "${{ inputs.projects }}" == *"*"* ]]; then
-            dotnet restore
-          else
-            dotnet restore ${{ inputs.projects }}
-          fi
-        fi
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::endgroup::"
-      shell: bash
-    - name: Build
-      run: |
-        echo "::group::🔷 [CHECKPOINT 2/3] Build"
-        # Check if there's a solution file first
-        if ls *.sln 1> /dev/null 2>&1; then
-          echo "Found solution file(s), building solution..."
-          dotnet build *.sln --configuration ${{ inputs.configuration }} --no-restore
-        else
-          echo "No solution file found, building projects..."
-          # If projects input contains wildcards, find and build each project
-          if [[ "${{ inputs.projects }}" == *"*"* ]]; then
-            # Use find to locate projects matching the pattern
-            projects_pattern="${{ inputs.projects }}"
-            echo "Looking for projects matching: $projects_pattern"
-            
-            if [[ "$projects_pattern" == "**/*.csproj" ]]; then
-              # Handle the common case of **/*.csproj
-              find . -name "*.csproj" -type f | while read -r project; do
-                echo "Building $project..."
-                dotnet build "$project" --configuration ${{ inputs.configuration }} --no-restore
-              done
-            else
-              # Handle other patterns
-              for project in $(find . -name "*.csproj" -type f); do
-                echo "Building $project..."
-                dotnet build "$project" --configuration ${{ inputs.configuration }} --no-restore
-              done
-            fi
-          else
-            # Single project or space-separated list
-            dotnet build ${{ inputs.projects }} --configuration ${{ inputs.configuration }} --no-restore
-          fi
-        fi
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::endgroup::"
-      shell: bash
-    - name: Test
-      if: ${{ inputs.run-tests == 'true' }}
-      run: |
-        echo "::group::🔷 [CHECKPOINT 3/3] Run Tests"
-        # Handle wildcards in test projects
-        if [[ "${{ inputs.test-projects }}" == *"*"* ]]; then
-          test_pattern="${{ inputs.test-projects }}"
-          echo "Looking for test projects matching: $test_pattern"
-          
-          if [[ "$test_pattern" == "**/*UnitTests/*.csproj" ]] || [[ "$test_pattern" == "**/*Tests/*.csproj" ]] || [[ "$test_pattern" == "**/*Test*.csproj" ]]; then
-            # Handle common test patterns
-            found_tests=false
-            for test_project in $(find . -name "*Test*.csproj" -o -name "*Tests.csproj" -type f); do
-              echo "Testing $test_project..."
-              dotnet test "$test_project" --no-build --verbosity normal --configuration ${{ inputs.configuration }}
-              found_tests=true
-            done
-            
-            if [ "$found_tests" = false ]; then
-              echo "No test projects found matching pattern: $test_pattern"
-              echo "Skipping tests..."
-            fi
-          else
-            # Handle other wildcard patterns
-            for test_project in $(find . -name "*.csproj" -type f | grep -i test); do
-              echo "Testing $test_project..."
-              dotnet test "$test_project" --no-build --verbosity normal --configuration ${{ inputs.configuration }}
-            done
-          fi
-        else
-          # Single test project or space-separated list
-          echo "Running tests for: ${{ inputs.test-projects }}"
-          dotnet test ${{ inputs.test-projects }} --no-build --verbosity normal --configuration ${{ inputs.configuration }}
-        fi
-        echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "::endgroup::"
-      shell: bash
-
-    - name: Report failure
-      if: failure()
-      shell: bash
-      run: |
-        echo "::error title=❌ [DOTNET] Build failed::projects: ${{ inputs.projects }}, config: ${{ inputs.configuration }}. Checkpoints — 1) Restore: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build: ${CHECKPOINT_2_STATUS:-⏭️ Not reached} | 3) Tests: ${CHECKPOINT_3_STATUS:-⏭️ Not reached}."
 inputs:
   projects:
     description: 'Project(s) to restore and build (wildcards allowed)'
@@ -144,3 +58,146 @@ inputs:
     description: 'Whether to run tests after building'
     required: false
     default: 'true'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Initialize .NET build
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "CHECKPOINT_3_STATUS=⏭️ Skipped"
+        } >> "$GITHUB_ENV"
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        # Keyed on project/package manifests so the cache invalidates when
+        # dependencies change; restore-keys give a warm partial hit otherwise.
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json', '**/Directory.Packages.props') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Restore dependencies
+      shell: bash
+      env:
+        PROJECTS: ${{ inputs.projects }}
+      run: |
+        set -euo pipefail
+        echo "::group::🔷 [CHECKPOINT 1/3] Restore Dependencies"
+        # Check if there's a solution file first
+        if ls *.sln 1> /dev/null 2>&1; then
+          echo "Found solution file(s), restoring solution..."
+          dotnet restore *.sln
+        else
+          echo "No solution file found, restoring individual projects..."
+          # If projects input contains wildcards, restore without arguments to restore all
+          if [[ "$PROJECTS" == *"*"* ]]; then
+            dotnet restore
+          else
+            dotnet restore $PROJECTS
+          fi
+        fi
+        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
+    - name: Build
+      shell: bash
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        set -euo pipefail
+        echo "::group::🔷 [CHECKPOINT 2/3] Build"
+        # Check if there's a solution file first
+        if ls *.sln 1> /dev/null 2>&1; then
+          echo "Found solution file(s), building solution..."
+          dotnet build *.sln --configuration "$CONFIGURATION" --no-restore
+        else
+          echo "No solution file found, building projects..."
+          # If projects input contains wildcards, find and build each project
+          if [[ "$PROJECTS" == *"*"* ]]; then
+            # Use find to locate projects matching the pattern
+            projects_pattern="$PROJECTS"
+            echo "Looking for projects matching: $projects_pattern"
+
+            if [[ "$projects_pattern" == "**/*.csproj" ]]; then
+              # Handle the common case of **/*.csproj
+              find . -name "*.csproj" -type f | while read -r project; do
+                echo "Building $project..."
+                dotnet build "$project" --configuration "$CONFIGURATION" --no-restore
+              done
+            else
+              # Handle other patterns
+              for project in $(find . -name "*.csproj" -type f); do
+                echo "Building $project..."
+                dotnet build "$project" --configuration "$CONFIGURATION" --no-restore
+              done
+            fi
+          else
+            # Single project or space-separated list
+            dotnet build $PROJECTS --configuration "$CONFIGURATION" --no-restore
+          fi
+        fi
+        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
+    - name: Test
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      env:
+        TEST_PROJECTS: ${{ inputs.test-projects }}
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        set -euo pipefail
+        echo "::group::🔷 [CHECKPOINT 3/3] Run Tests"
+        # Handle wildcards in test projects
+        if [[ "$TEST_PROJECTS" == *"*"* ]]; then
+          test_pattern="$TEST_PROJECTS"
+          echo "Looking for test projects matching: $test_pattern"
+
+          if [[ "$test_pattern" == "**/*UnitTests/*.csproj" ]] || [[ "$test_pattern" == "**/*Tests/*.csproj" ]] || [[ "$test_pattern" == "**/*Test*.csproj" ]]; then
+            # Handle common test patterns
+            found_tests=false
+            for test_project in $(find . -name "*Test*.csproj" -o -name "*Tests.csproj" -type f); do
+              echo "Testing $test_project..."
+              dotnet test "$test_project" --no-build --verbosity normal --configuration "$CONFIGURATION"
+              found_tests=true
+            done
+
+            if [ "$found_tests" = false ]; then
+              echo "No test projects found matching pattern: $test_pattern"
+              echo "Skipping tests..."
+            fi
+          else
+            # Handle other wildcard patterns
+            for test_project in $(find . -name "*.csproj" -type f | grep -i test); do
+              echo "Testing $test_project..."
+              dotnet test "$test_project" --no-build --verbosity normal --configuration "$CONFIGURATION"
+            done
+          fi
+        else
+          # Single test project or space-separated list
+          echo "Running tests for: $TEST_PROJECTS"
+          dotnet test $TEST_PROJECTS --no-build --verbosity normal --configuration "$CONFIGURATION"
+        fi
+        echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        echo "::error title=❌ [DOTNET] Build failed::projects: $PROJECTS, config: $CONFIGURATION. Checkpoints — 1) Restore: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build: ${CHECKPOINT_2_STATUS:-⏭️ Not reached} | 3) Tests: ${CHECKPOINT_3_STATUS:-⏭️ Not reached}."
+
+branding:
+  icon: 'package'
+  color: 'blue'

@@ -1,5 +1,58 @@
+# =============================================================================
+# Determine Semantic Version
+# =============================================================================
+# Computes the next semantic version (major.minor.patch) from fixed major/minor
+# inputs and the highest existing Git tag matching that major.minor prefix.
+#
+# Behaviour:
+#   - Reads tags locally (git tag --list); attempts a tag fetch first to cover
+#     shallow checkouts. Callers should checkout with full history + tags.
+#   - If no tag matches "<major>.<minor>.*", the patch starts at 0.
+#   - Otherwise the highest matching tag's patch component is incremented.
+#   - Unauthenticated — operates purely on local Git refs, no network/API calls.
+#
+# Inputs:
+#   major  (required)  Major version number (integer, e.g. 1).
+#   minor  (required)  Minor version number (integer, e.g. 2).
+#
+# Outputs (set only on success — on hard failure the step exits non-zero and you
+# should gate on steps.<id>.outcome, not on an output):
+#   version   The computed semantic version (e.g. 1.2.3).
+#
+# Usage:
+#   jobs:
+#     version:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v4
+#           with:
+#             fetch-depth: 0          # full history + tags for accurate detection
+#         - name: Determine version
+#           id: semver
+#           uses: simplify9/.github/.github/actions/determine-semver@main
+#           with:
+#             major: 1
+#             minor: 2
+#         - name: Use it
+#           run: echo "version=${{ steps.semver.outputs.version }}"
+# =============================================================================
 name: 'Determine Semantic Version'
+author: 'Simplify9'
 description: 'Reusable action to compute semantic version from major/minor and latest tag.'
+
+inputs:
+  major:
+    description: 'Major version number'
+    required: true
+  minor:
+    description: 'Minor version number'
+    required: true
+
+outputs:
+  version:
+    description: 'Computed semantic version'
+    value: ${{ steps.semver.outputs.version }}
+
 runs:
   using: "composite"
   steps:
@@ -9,33 +62,38 @@ runs:
 
     - name: Determine semantic version
       id: semver
+      shell: bash
+      env:
+        MAJOR: ${{ inputs.major }}
+        MINOR: ${{ inputs.minor }}
       run: |
+        set -euo pipefail
         echo "::group::🔍 [CHECKPOINT 1/1] Compute Semantic Version"
-        # Validate inputs
-        major=${{ inputs.major }}
-        minor=${{ inputs.minor }}
-        
+        # Validate inputs (values come from env, never interpolated into the script).
+        major="$MAJOR"
+        minor="$MINOR"
+
         if ! [[ "$major" =~ ^[0-9]+$ ]]; then
           echo "Error: Major version must be a number, got: $major"
           exit 1
         fi
-        
+
         if ! [[ "$minor" =~ ^[0-9]+$ ]]; then
           echo "Error: Minor version must be a number, got: $minor"
           exit 1
         fi
-        
+
         echo "Looking for existing tags with prefix: $major.$minor.*"
         prefix="$major.$minor."
-        
+
         # Ensure we have all tags (in case of shallow checkout)
         echo "Fetching all tags from remote..."
         git fetch --tags --unshallow 2>/dev/null || git fetch --tags 2>/dev/null || echo "Could not fetch tags"
-        
+
         # List all tags for debugging
         echo "All available tags:"
         git tag --list | sort -V || echo "No tags found"
-        
+
         # Get latest tag matching the pattern
         echo "Searching for tags matching pattern: $prefix*"
         matching_tags=$(git tag --list "$prefix*" | sort -V)
@@ -45,9 +103,9 @@ runs:
         else
           echo "No tags found matching pattern: $prefix*"
         fi
-        
+
         latest_tag=$(echo "$matching_tags" | tail -n1)
-        
+
         if [[ -z "$latest_tag" ]]; then
           patch=0
           echo "No existing tags found for $major.$minor.*, starting with patch version 0"
@@ -64,28 +122,23 @@ runs:
             echo "Incremented patch version: $patch"
           fi
         fi
-        
+
         version="$major.$minor.$patch"
-        echo "version=$version" >> $GITHUB_OUTPUT
+        echo "version=$version" >> "$GITHUB_OUTPUT"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Computed version: ${version}"
         echo "::endgroup::"
-      shell: bash
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        MAJOR: ${{ inputs.major }}
+        MINOR: ${{ inputs.minor }}
       run: |
-        echo "::error title=❌ [VERSION] Semantic version computation failed::Version computation failed for ${{ inputs.major }}.${{ inputs.minor }}.x. Check that major/minor are valid integers and git tags are accessible."
+        echo "::error title=❌ [VERSION] Semantic version computation failed::Version computation failed for $MAJOR.$MINOR.x. Check that major/minor are valid integers and git tags are accessible."
         echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
-inputs:
-  major:
-    description: 'Major version number'
-    required: true
-  minor:
-    description: 'Minor version number'
-    required: true
-outputs:
-  version:
-    description: 'Computed semantic version'
-    value: ${{ steps.semver.outputs.version }}
+
+branding:
+  icon: 'tag'
+  color: 'blue'

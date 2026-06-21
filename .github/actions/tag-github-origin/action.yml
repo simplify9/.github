@@ -1,81 +1,160 @@
+# =============================================================================
+# Tag Commit on GitHub Origin
+# =============================================================================
+# Creates a LIGHTWEIGHT Git tag ref on the GitHub origin via the REST API
+# (POST /repos/{owner}/{repo}/git/refs), without needing a checkout.
+#
+# Lightweight, not annotated: this creates a plain ref pointing at a commit. It
+# does NOT produce a tag object, message, or tagger. For an annotated tag,
+# create the tag object first (POST .../git/tags) and point the ref at it.
+#
+# Behaviour:
+#   - Idempotent — if the tag already exists the API returns 422 and this action
+#     treats it as success (created=false) rather than failing. Safe for re-runs.
+#   - Resilient — the API call retries transient network/5xx errors with a timeout.
+#   - Secret-safe — the token is passed via an env var (never the command line)
+#     and re-masked in logs.
+#
+# Inputs:
+#   github-token  (required)  Token with contents:write on the target repo.
+#   repository    (required)  Target repo in owner/repo format (e.g. simplify9/myrepo).
+#   tag           (required)  Tag name, without the refs/tags/ prefix (e.g. v1.2.3).
+#   sha           (required)  Full commit SHA the tag should point at.
+#
+# Outputs (only set on success — on hard failure the step exits non-zero and
+# you should gate on steps.<id>.outcome, not on an output):
+#   created   'true' if a new tag was created, 'false' if it already existed.
+#   ref       The fully-qualified ref (refs/tags/<tag>).
+#
+# Usage:
+#   jobs:
+#     tag:
+#       runs-on: ubuntu-latest
+#       permissions:
+#         contents: write          # required so the token can create the ref
+#       steps:
+#         - name: Tag new version on GitHub origin
+#           id: tag
+#           uses: simplify9/.github/.github/actions/tag-github-origin@main
+#           with:
+#             github-token: ${{ secrets.GITHUB_TOKEN }}
+#             repository: ${{ github.repository }}
+#             tag: ${{ needs.version.outputs.version }}
+#             sha: ${{ github.sha }}
+#         - name: React to result
+#           run: echo "created=${{ steps.tag.outputs.created }} ref=${{ steps.tag.outputs.ref }}"
+# =============================================================================
 name: 'Tag Commit on GitHub Origin'
-description: 'Reusable action to create a tag on the GitHub origin using the REST API.'
+author: 'Simplify9'
+description: >-
+  Creates a lightweight Git tag ref on the GitHub origin via the REST API
+  (POST /repos/{owner}/{repo}/git/refs). Idempotent: an already-existing tag is
+  treated as success, not failure. Note this creates a *lightweight* ref only —
+  no tag object, message, or tagger is produced.
+
+inputs:
+  github-token:
+    description: 'GitHub token with contents:write permission on the target repository.'
+    required: true
+  repository:
+    description: 'Target repository in owner/repo format (e.g. simplify9/myrepo).'
+    required: true
+  tag:
+    description: 'Tag name to create, without the refs/tags/ prefix (e.g. v1.2.3).'
+    required: true
+  sha:
+    description: 'Full commit SHA the tag should point at.'
+    required: true
+
+outputs:
+  created:
+    description: "'true' if a new tag was created, 'false' if it already existed."
+    value: ${{ steps.tag.outputs.created }}
+  ref:
+    description: 'The fully-qualified ref that was created/verified (refs/tags/<tag>). Set only on success.'
+    value: ${{ steps.tag.outputs.ref }}
+
 runs:
   using: "composite"
   steps:
-    - name: Mask sensitive inputs
-      shell: bash
-      run: echo "::add-mask::${{ inputs.github-token }}"
-
-    - name: Initialize tag creation
-      shell: bash
-      run: echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
     - name: Tag new version on GitHub origin
+      id: tag
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPOSITORY: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+        SHA: ${{ inputs.sha }}
       run: |
+        set -euo pipefail
+        echo "::add-mask::$GITHUB_TOKEN"
         echo "::group::🏷️ [CHECKPOINT 1/1] Create Git Tag"
-        # Validate inputs
-        if [ -z "${{ inputs.github-token }}" ]; then
-          echo "Error: GitHub token is required"
-          exit 1
-        fi
-        
-        if [ -z "${{ inputs.repository }}" ]; then
-          echo "Error: Repository is required"
-          exit 1
-        fi
-        
-        if [ -z "${{ inputs.tag }}" ]; then
-          echo "Error: Tag name is required"
-          exit 1
-        fi
-        
-        if [ -z "${{ inputs.sha }}" ]; then
-          echo "Error: SHA is required"
-          exit 1
-        fi
-        
-        echo "Creating tag '${{ inputs.tag }}' for commit ${{ inputs.sha }} in repository ${{ inputs.repository }}"
-        
-        # Create the tag via GitHub API
-        response=$(curl -s -w "%{http_code}" -X POST \
-          -H "Authorization: token ${{ inputs.github-token }}" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ inputs.repository }}/git/refs \
-          -d "{\"ref\": \"refs/tags/${{ inputs.tag }}\", \"sha\": \"${{ inputs.sha }}\"}")
-        
-        # Extract HTTP status code (last 3 characters)
-        http_code="${response: -3}"
-        response_body="${response%???}"
-        
-        # Check if the request was successful
+
+        # Validate inputs (values come from env, never interpolated into the script).
+        for var in GITHUB_TOKEN REPOSITORY TAG SHA; do
+          if [ -z "${!var}" ]; then
+            echo "::error title=❌ [VERSION] Missing input::$var is required"
+            exit 1
+          fi
+        done
+
+        echo "Creating tag '$TAG' for commit $SHA in repository $REPOSITORY"
+
+        # Build the JSON body with jq so values are escaped correctly.
+        payload="$(jq -nc --arg ref "refs/tags/$TAG" --arg sha "$SHA" \
+          '{ref: $ref, sha: $sha}')"
+
+        # POST the new ref. Body goes to a temp file; only the HTTP status is
+        # captured via -w, so parsing is unambiguous. Retries cover transient
+        # network/5xx failures.
+        response_file="$(mktemp)"
+        http_code="$(curl -sS \
+          --max-time 30 \
+          --retry 3 \
+          --retry-connrefused \
+          -o "$response_file" \
+          -w '%{http_code}' \
+          -X POST \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "https://api.github.com/repos/$REPOSITORY/git/refs" \
+          --data "$payload")"
+        response_body="$(cat "$response_file")"
+        rm -f "$response_file"
+
+        # Outputs are written only on the success paths, so a consumer never sees
+        # a 'ref' for a tag that was not actually created/verified.
         if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-          echo "✅ Created tag '${{ inputs.tag }}' on ${{ inputs.repository }}"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ Created tag '$TAG' on $REPOSITORY"
+          {
+            echo "created=true"
+            echo "ref=refs/tags/$TAG"
+          } >> "$GITHUB_OUTPUT"
+        elif [ "$http_code" = "422" ] && \
+             printf '%s' "$response_body" | grep -q "already exists"; then
+          # Idempotent: re-runs / retried jobs land here. Not an error.
+          echo "ℹ️ Tag '$TAG' already exists on $REPOSITORY — nothing to do"
+          {
+            echo "created=false"
+            echo "ref=refs/tags/$TAG"
+          } >> "$GITHUB_OUTPUT"
         else
           echo "❌ Failed to create tag. HTTP Status: $http_code"
           echo "Response: $response_body"
-          echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
           exit 1
         fi
         echo "::endgroup::"
-      shell: bash
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        REPOSITORY: ${{ inputs.repository }}
       run: |
-        echo "::error title=❌ [VERSION] Git tag creation failed::Failed to create tag '${{ inputs.tag }}' on ${{ inputs.repository }}. Check the GitHub token has repo write permissions and the SHA is valid. HTTP status is logged above."
-inputs:
-  github-token:
-    description: 'GitHub token for authentication'
-    required: true
-  repository:
-    description: 'GitHub repository in owner/repo format'
-    required: true
-  tag:
-    description: 'Tag name to create'
-    required: true
-  sha:
-    description: 'Commit SHA to tag'
-    required: true
+        echo "::error title=❌ [VERSION] Git tag creation failed::Failed to create tag '$TAG' on $REPOSITORY. Check the GitHub token has contents:write permission and the SHA is valid. HTTP status is logged above."
+
+branding:
+  icon: 'tag'
+  color: 'blue'

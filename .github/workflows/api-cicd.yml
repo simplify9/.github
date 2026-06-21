@@ -168,9 +168,17 @@ env:
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.image-name || github.repository }}
 
+# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
@@ -187,14 +195,6 @@ jobs:
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
- 
-      - name: Tag new version on GitHub origin
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.semver.outputs.version }}
-          sha: ${{ github.sha }}
 
       - name: Write version job summary
         if: always()
@@ -220,6 +220,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: version
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
@@ -277,13 +278,16 @@ jobs:
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Docker image built and pushed — PASSED"
 
+      - name: Set up Helm
+        if: steps.detect-chart.outputs.chart-source == 'external'
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.2.0
+
       - name: Pull and repackage external chart
         if: steps.detect-chart.outputs.chart-source == 'external'
         shell: bash
         run: |
-          echo "🔧 Installing Helm..."
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          
           echo "📦 Processing external chart..."
           CHART_URL="${{ inputs.chart-path }}"
           SOURCE_CHART_NAME="${{ inputs.source-chart-name }}"
@@ -416,8 +420,9 @@ jobs:
 
   deploy-development:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, build]
-    if: inputs.deploy-to-development && github.ref_name == 'development'
+    if: ${{ inputs.deploy-to-development }}
     environment: development  # linter: ignore (scalar form is valid for GitHub Actions)
     steps:
       - name: Announce deploy-development job
@@ -475,8 +480,9 @@ jobs:
 
   deploy-staging:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, build]
-    if: inputs.deploy-to-staging && github.ref_name == 'staging'
+    if: ${{ inputs.deploy-to-staging }}
     environment: staging  # linter: ignore (scalar form is valid for GitHub Actions)
     steps:
       - name: Announce deploy-staging job
@@ -534,8 +540,9 @@ jobs:
 
   deploy-production:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, build]
-    if: inputs.deploy-to-production && (github.ref_name == 'main' || github.ref_name == 'master')
+    if: ${{ inputs.deploy-to-production }}
     environment: production  # linter: ignore (scalar form is valid for GitHub Actions)
     steps:
       - name: Announce deploy-production job
@@ -587,6 +594,47 @@ jobs:
             echo "| Chart | \`${CHART_NAME}\` |"
             echo "| Version | \`${VERSION}\` |"
             echo "| Namespace | \`${PROD_NAMESPACE}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [version, build]
+    # Tag only after a successful build so tags never reference an unshipped
+    # version.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.build.result == 'success' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.version }}
+          sha: ${{ github.sha }}
+
+      - name: Write tag job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## 🏷️ Tag Job — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Tagged version | \`${VERSION}\` |"
             echo "| Branch | \`${REF_NAME}\` |"
             echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"

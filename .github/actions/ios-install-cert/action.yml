@@ -1,5 +1,34 @@
+# =============================================================================
+# Install iOS Signing Certificate
+# =============================================================================
+# Imports a base64-encoded Apple signing certificate (.p12) into a temporary
+# macOS keychain so that codesign/xcodebuild can sign builds non-interactively.
+#
+# Behaviour:
+#   - Creates a dedicated build keychain (default $RUNNER_TEMP/build.keychain-db),
+#     makes it the default + searchable, and imports the cert + private key.
+#   - Grants codesign/security access to the private key via
+#     set-key-partition-list so signing runs without an interactive prompt.
+#   - Secret-safe — the .p12 base64 and password are passed via env vars (never
+#     the command line) and the password is masked in logs.
+#
+# Inputs:
+#   p12Base64     (required)  Base64-encoded .p12 certificate.
+#   p12Password   (required)  Password for the .p12 certificate.
+#   keychainPath  (optional)  Path for the temp keychain.
+#                             Defaults to $RUNNER_TEMP/build.keychain-db.
+#
+# Usage:
+#   - name: Install iOS signing certificate
+#     uses: simplify9/.github/.github/actions/ios-install-cert@main
+#     with:
+#       p12Base64: ${{ secrets.IOS_P12_BASE64 }}
+#       p12Password: ${{ secrets.IOS_P12_PASSWORD }}
+# =============================================================================
 name: Install iOS Signing Certificate
+author: 'Simplify9'
 description: Installs an iOS signing certificate (.p12) into a temporary keychain for code signing
+
 inputs:
   p12Base64:
     description: Base64-encoded .p12 certificate
@@ -11,6 +40,7 @@ inputs:
     description: Path for the temporary keychain. Defaults to $RUNNER_TEMP/build.keychain-db.
     required: false
     default: ""
+
 runs:
   using: composite
   steps:
@@ -31,12 +61,12 @@ runs:
       run: |
         set -euo pipefail
         echo "::group::🔏 [CHECKPOINT 1/1] Install Signing Certificate"
-        echo "::add-mask::${IOS_P12_PASSWORD}"
+        echo "::add-mask::$IOS_P12_PASSWORD"
 
         KEYCHAIN_PATH="${KEYCHAIN_PATH_INPUT:-"$RUNNER_TEMP/build.keychain-db"}"
         KEYCHAIN_PASS="ci-pass"
 
-        printf '%s' "${IOS_P12_BASE64}" | base64 -D > "$RUNNER_TEMP/cert.p12"
+        printf '%s' "$IOS_P12_BASE64" | base64 -D > "$RUNNER_TEMP/cert.p12"
 
         if [[ ! -s "$RUNNER_TEMP/cert.p12" ]]; then
           echo "ERROR: base64 decoding produced an empty file. Check that p12Base64 is a valid base64-encoded .p12 file."
@@ -64,9 +94,9 @@ runs:
         echo "=== Available code signing identities ==="
         security find-identity -v -p codesigning
 
-        echo "KEYCHAIN_PATH=${KEYCHAIN_PATH}" >> "$GITHUB_ENV"
+        echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Certificate installed — keychain at ${KEYCHAIN_PATH}"
+        echo "✅ Certificate installed — keychain at $KEYCHAIN_PATH"
         echo "::endgroup::"
 
     - name: Report failure
@@ -75,3 +105,7 @@ runs:
       run: |
         set -euo pipefail
         echo "::error title=❌ [SIGN] Certificate installation failed::Failed to import .p12 into keychain. Check that p12Base64 is valid base64 and p12Password is correct."
+
+branding:
+  icon: 'lock'
+  color: 'blue'

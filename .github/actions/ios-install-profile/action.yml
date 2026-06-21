@@ -1,9 +1,34 @@
+# =============================================================================
+# Install iOS Provisioning Profile
+# =============================================================================
+# Decodes a base64-encoded provisioning profile, extracts its UUID/Name, and
+# installs it into ~/Library/MobileDevice/Provisioning Profiles so that
+# xcodebuild can locate it by UUID during signing.
+#
+# Behaviour:
+#   - Decodes the profile, reads UUID + Name from its plist via PlistBuddy.
+#   - Copies the profile into the standard provisioning profiles directory,
+#     named <UUID>.mobileprovision.
+#   - Exports IOS_PROFILE_UUID / IOS_PROFILE_NAME to $GITHUB_ENV for later steps.
+#
+# Inputs:
+#   profileBase64  (required)  Base64-encoded .mobileprovision profile.
+#
+# Usage:
+#   - name: Install iOS provisioning profile
+#     uses: simplify9/.github/.github/actions/ios-install-profile@main
+#     with:
+#       profileBase64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+# =============================================================================
 name: Install iOS Provisioning Profile
+author: 'Simplify9'
 description: Installs an iOS provisioning profile from a base64-encoded string
+
 inputs:
   profileBase64:
     description: Base64-encoded provisioning profile
     required: true
+
 runs:
   using: composite
   steps:
@@ -24,7 +49,7 @@ runs:
         echo "::group::🔏 [CHECKPOINT 1/1] Install Provisioning Profile"
         mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
-        printf '%s' "${IOS_MOBILEPROVISION_BASE64}" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
+        printf '%s' "$IOS_MOBILEPROVISION_BASE64" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
 
         if [[ ! -s "$RUNNER_TEMP/profile.mobileprovision" ]]; then
           echo "ERROR: base64 decoding produced an empty file. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
@@ -36,21 +61,21 @@ runs:
         UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
         NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")
 
-        if [[ -z "${UUID}" ]]; then
+        if [[ -z "$UUID" ]]; then
           echo "ERROR: Could not extract UUID from provisioning profile. The profile may be malformed."
           exit 1
         fi
 
-        echo "Profile UUID: ${UUID}"
-        echo "Profile Name: ${NAME}"
+        echo "Profile UUID: $UUID"
+        echo "Profile Name: $NAME"
 
         cp "$RUNNER_TEMP/profile.mobileprovision" \
-          "$HOME/Library/MobileDevice/Provisioning Profiles/${UUID}.mobileprovision"
+          "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
 
-        echo "IOS_PROFILE_UUID=${UUID}" >> "$GITHUB_ENV"
-        echo "IOS_PROFILE_NAME=${NAME}" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Profile installed — Name: ${NAME}, UUID: ${UUID}"
+        echo "✅ Profile installed — Name: $NAME, UUID: $UUID"
         echo "::endgroup::"
 
     - name: Report failure
@@ -59,3 +84,7 @@ runs:
       run: |
         set -euo pipefail
         echo "::error title=❌ [SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
+
+branding:
+  icon: 'lock'
+  color: 'blue'

@@ -323,6 +323,11 @@ on:
         description: Generated NuGet package version
         value: ${{ jobs.nuget.outputs.version }}
 
+# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.app-name || github.repository }}
@@ -330,6 +335,9 @@ env:
 jobs:
   version:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
@@ -346,14 +354,6 @@ jobs:
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
-
-      - name: Tag new version on GitHub origin
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.semver.outputs.version }}
-          sha: ${{ github.sha }}
 
       - name: Write version job summary
         if: always()
@@ -379,6 +379,8 @@ jobs:
 
   nuget:
     runs-on: ubuntu-latest
+    if: ${{ inputs.package-nuget }}
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
     env:
@@ -436,19 +438,6 @@ jobs:
           api-key: ${{ secrets.nuget-api-key }}
           nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
 
-      - name: Tag NuGet version on GitHub origin
-        if: ${{ inputs.package-nuget }}
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.nuget-semver.outputs.version }}
-          sha: ${{ github.sha }}
-
-      - name: Skip NuGet packaging
-        if: ${{ !inputs.package-nuget }}
-        run: echo 'NuGet packaging disabled; skipping NuGet job but keeping dependency chain.'
-
       - name: Write nuget job summary
         if: always()
         env:
@@ -473,7 +462,12 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, nuget]
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
@@ -526,6 +520,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, build]
     outputs:
       helm-chart: ${{ steps.chartmeta.outputs.helm-chart }}
@@ -973,3 +968,35 @@ jobs:
             echo "| 1 | Routing values generated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
             echo "| 2 | Helm deployment | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [version, nuget, build]
+    # Tag only after a successful build so tags never reference an unshipped
+    # version. A disabled nuget job (result: success with skipped steps) must
+    # not block tagging.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.build.result == 'success'
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.version }}
+          sha: ${{ github.sha }}
+
+      - name: Tag NuGet version on GitHub origin
+        if: ${{ inputs.package-nuget }}
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.nuget.outputs.version }}
+          sha: ${{ github.sha }}

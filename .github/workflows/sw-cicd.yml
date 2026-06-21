@@ -158,9 +158,17 @@ env:
   CHART_PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
   CHART_REPO_URL: ${{ inputs.chart-repo-url }}
 
+# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
@@ -177,14 +185,6 @@ jobs:
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
- 
-      - name: Tag new version on GitHub origin
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.semver.outputs.version }}
-          sha: ${{ github.sha }}
 
       - name: Write version job summary
         if: always()
@@ -212,6 +212,7 @@ jobs:
 
   nuget:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: version
     if: ${{ inputs.nuget-projects != '' }}
     steps:
@@ -264,6 +265,7 @@ jobs:
 
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: version
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
@@ -416,6 +418,7 @@ jobs:
 
   deploy-development:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, ci]
     if: ${{ inputs.deploy-to-development }}
     environment: development  # linter: ignore (scalar form is valid for GitHub Actions)
@@ -499,4 +502,46 @@ jobs:
             echo "| Branch | \`${REF_NAME}\` |"
             echo "| Runner | ${RUNNER_OS} |"
             echo "| Triggered by | ${ACTOR} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [version, nuget, ci]
+    # Tag only after a successful build so tags never reference an unshipped
+    # version. A skipped nuget job (no nuget-projects) must not block tagging.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.ci.result == 'success'
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.version }}
+          sha: ${{ github.sha }}
+
+      - name: Write tag job summary
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
+            && echo "✅ SUCCESS" || echo "❌ FAILED" )
+          {
+            echo "## 🏷️ Tag Job — ${STATUS}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Tagged version | \`${VERSION}\` |"
+            echo "| Branch | \`${REF_NAME}\` |"
+            echo "| Runner | ${RUNNER_OS} |"
           } >> "$GITHUB_STEP_SUMMARY"

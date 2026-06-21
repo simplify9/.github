@@ -1,6 +1,70 @@
+# =============================================================================
+# Helm Deploy to Kubernetes (s9 generic)
+# =============================================================================
+# Deploys a Helm chart to a Kubernetes cluster, either from an OCI registry or
+# from a local chart directory (artifact-based deployment). Wraps
+# `helm upgrade --install`, so it is naturally idempotent and safe for re-runs.
+#
+# Behaviour:
+#   - Two modes — if `chart-path` is provided the chart is deployed from that
+#     local directory; otherwise it is pulled from the configured OCI registry
+#     (registry/repository/chart-name:chart-version).
+#   - Idempotent — `helm upgrade --install` creates or updates the release.
+#   - Secret-safe — kubeconfig and registry credentials are passed via env vars
+#     (never on the command line) and the registry password is masked in logs.
+#   - Resilient — OCI charts are preflight-pulled to surface access errors early,
+#     and on failure cluster diagnostics (pods & events) are dumped.
+#
+# Inputs:
+#   chart-name          (required) Name of the Helm chart.
+#   chart-version       (required) Version of the chart to deploy.
+#   chart-path          (optional) Local chart dir; if set, deploys locally.
+#   registry            (optional) OCI registry URL (default docker.io).
+#   repository          (optional) Repository path in the registry.
+#   registry-username   (optional) Registry username (OCI mode).
+#   registry-password   (optional) Registry password/token (OCI mode).
+#   kubeconfig          (required) Base64-encoded kubeconfig for cluster access.
+#   release-name        (optional) Helm release name (default 'app').
+#   namespace           (optional) Target namespace (default 'default').
+#   image-repository    (optional) --set image.repository.
+#   image-tag           (optional) --set image.tag.
+#   values-file         (optional) Path to a values file (relative to chart).
+#   values              (optional) Additional Helm values as a YAML string.
+#   set-values          (optional) Additional --set values (comma-separated).
+#   set-string-values   (optional) Additional --set-string values (comma-separated).
+#   timeout             (optional) Helm timeout (default 10m).
+#   wait                (optional) Wait for resources to be Ready (default true).
+#   create-namespace    (optional) Create namespace if missing (default true).
+#   helm-version        (optional) Helm version to install (default latest).
+#   kubectl-version     (optional) kubectl version to install (default latest).
+#   debug               (optional) Enable --debug and extra tracing (default false).
+#
+# Outputs (set on the success path):
+#   chart-url        Full chart source URL (OCI URL or local:<path>).
+#   deployed-image   Best-effort container image reference actually applied.
+#
+# Usage:
+#   jobs:
+#     deploy:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - name: Deploy Helm chart
+#           id: deploy
+#           uses: simplify9/.github/.github/actions/helm-deploy-s9generic@main
+#           with:
+#             chart-name: my-chart
+#             chart-version: 1.2.3
+#             registry: docker.io
+#             repository: myorg
+#             registry-username: ${{ secrets.REGISTRY_USERNAME }}
+#             registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+#             kubeconfig: ${{ secrets.KUBECONFIG_B64 }}
+#             release-name: my-app
+#             namespace: production
+# =============================================================================
 name: 'Helm Deploy to Kubernetes'
-description: 'Deploy Helm chart from OCI registry to Kubernetes cluster'
 author: 'Simplify9'
+description: 'Deploy Helm chart from OCI registry to Kubernetes cluster'
 
 inputs:
   chart-name:
@@ -80,17 +144,11 @@ inputs:
     default: 'false'
 
 outputs:
-  release-status:
-    description: 'Status of the Helm release'
-    value: ${{ steps.deploy.outputs.status }}
   chart-url:
-    description: 'Full OCI URL of the deployed chart'
+    description: 'Full OCI URL (or local path) of the deployed chart. Set only on success.'
     value: ${{ steps.deploy.outputs.chart-url }}
-  namespace:
-    description: 'Namespace where the release was deployed'
-    value: ${{ inputs.namespace }}
   deployed-image:
-    description: 'Container image reference (best-effort repo/name:tag) actually applied'
+    description: 'Container image reference (best-effort repo/name:tag) actually applied. Set only on success.'
     value: ${{ steps.deploy.outputs.deployed-image }}
 
 runs:
@@ -99,6 +157,7 @@ runs:
     - name: Initialize Helm deployment
       shell: bash
       run: |
+        set -euo pipefail
         {
           echo "CHECKPOINT_1_STATUS=⏳ Pending"
           echo "CHECKPOINT_2_STATUS=⏳ Pending"
@@ -106,24 +165,30 @@ runs:
 
     - name: Validate inputs
       shell: bash
+      env:
+        CHART_PATH: ${{ inputs.chart-path }}
+        REPOSITORY: ${{ inputs.repository }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_PASSWORD: ${{ inputs.registry-password }}
       run: |
-        if [ -z "${{ inputs.chart-path }}" ]; then
+        set -euo pipefail
+        if [ -z "$CHART_PATH" ]; then
           # OCI registry deployment - validate required inputs
-          if [ -z "${{ inputs.repository }}" ]; then
+          if [ -z "$REPOSITORY" ]; then
             echo "Error: 'repository' is required when deploying from OCI registry (chart-path not provided)"
             exit 1
           fi
-          if [ -z "${{ inputs.registry-username }}" ]; then
+          if [ -z "$REGISTRY_USERNAME" ]; then
             echo "Error: 'registry-username' is required when deploying from OCI registry (chart-path not provided)"
             exit 1
           fi
-          if [ -z "${{ inputs.registry-password }}" ]; then
+          if [ -z "$REGISTRY_PASSWORD" ]; then
             echo "Error: 'registry-password' is required when deploying from OCI registry (chart-path not provided)"
             exit 1
           fi
           echo "[helm-deploy] Validation passed: MODE=OCI (chart-path NOT provided)"
         else
-          echo "[helm-deploy] Validation passed: MODE=LOCAL (chart-path='${{ inputs.chart-path }}')"
+          echo "[helm-deploy] Validation passed: MODE=LOCAL (chart-path='$CHART_PATH')"
         fi
 
     - name: Set up Helm
@@ -138,156 +203,188 @@ runs:
 
     - name: Configure Kubernetes context
       shell: bash
+      env:
+        KUBECONFIG_B64: ${{ inputs.kubeconfig }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
+        set -euo pipefail
         echo "::group::☸️ [CHECKPOINT 1/2] Configure Kubernetes Context"
         echo "Configuring Kubernetes context..."
         mkdir -p ~/.kube
-        echo "${{ inputs.kubeconfig }}" | base64 -d > ~/.kube/config
+        printf '%s' "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
         chmod 600 ~/.kube/config
-        
+
         echo "Current context:"
         kubectl config current-context
-        
+
         echo "Cluster info:"
         kubectl cluster-info
         echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Kubernetes context configured — namespace: ${{ inputs.namespace }}"
+        echo "✅ Kubernetes context configured — namespace: $NAMESPACE"
         echo "::endgroup::"
 
     - name: Create namespace
       if: inputs.create-namespace == 'true'
       shell: bash
+      env:
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "Creating namespace: ${{ inputs.namespace }}"
-        kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+        set -euo pipefail
+        echo "Creating namespace: $NAMESPACE"
+        kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Configure Helm registry authentication
       if: inputs.chart-path == ''
       shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        REPOSITORY: ${{ inputs.repository }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_PASSWORD: ${{ inputs.registry-password }}
       run: |
-        echo "::add-mask::${{ inputs.registry-password }}"
-        echo "Configuring Helm registry authentication for ${{ inputs.registry }}"
-        registry_host="${{ inputs.registry }}"
+        set -euo pipefail
+        echo "::add-mask::$REGISTRY_PASSWORD"
+        echo "Configuring Helm registry authentication for $REGISTRY"
+        registry_host="$REGISTRY"
         if [ "$registry_host" = "docker.io" ]; then
           # Docker Hub's Helm/OCI endpoint requires this hostname for registry login.
           registry_host="registry-1.docker.io"
         fi
-        helm registry login "$registry_host" -u ${{ inputs.registry-username }} -p ${{ inputs.registry-password }}
-        echo "[helm-deploy] Registry authentication succeeded for ${{ inputs.registry }} (repository='${{ inputs.repository }}')"
+        printf '%s' "$REGISTRY_PASSWORD" | helm registry login "$registry_host" -u "$REGISTRY_USERNAME" --password-stdin
+        echo "[helm-deploy] Registry authentication succeeded for $REGISTRY (repository='$REPOSITORY')"
 
     - name: Prepare values file
       if: inputs.values != ''
       shell: bash
+      env:
+        VALUES: ${{ inputs.values }}
       run: |
+        set -euo pipefail
         echo "Creating temporary values file..."
-        cat > /tmp/custom-values.yaml << 'EOF'
-        ${{ inputs.values }}
-        EOF
+        printf '%s\n' "$VALUES" > /tmp/custom-values.yaml
         echo "Custom values file created."
 
     - name: Deploy Helm chart
       id: deploy
       shell: bash
+      env:
+        CHART_PATH: ${{ inputs.chart-path }}
+        REGISTRY: ${{ inputs.registry }}
+        REPOSITORY: ${{ inputs.repository }}
+        CHART_NAME: ${{ inputs.chart-name }}
+        CHART_VERSION: ${{ inputs.chart-version }}
+        RELEASE_NAME: ${{ inputs.release-name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        DEBUG: ${{ inputs.debug }}
+        WAIT: ${{ inputs.wait }}
+        TIMEOUT: ${{ inputs.timeout }}
+        IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        VALUES_FILE: ${{ inputs.values-file }}
+        VALUES: ${{ inputs.values }}
+        SET_VALUES: ${{ inputs.set-values }}
+        SET_STRING_VALUES: ${{ inputs.set-string-values }}
       run: |
+        set -euo pipefail
         # Determine chart source and construct deployment command
-        if [ -n "${{ inputs.chart-path }}" ]; then
+        if [ -n "$CHART_PATH" ]; then
           # Deploy from local chart path (artifact-based deployment)
-          CHART_SOURCE="${{ inputs.chart-path }}"
+          CHART_SOURCE="$CHART_PATH"
           echo "Deploying from local chart: ${CHART_SOURCE}"
           echo "[helm-deploy] Decision: using LOCAL chart directory '${CHART_SOURCE}'"
-          
+
           # Verify chart exists
           if [ ! -d "${CHART_SOURCE}" ]; then
             echo "Error: Chart directory not found: ${CHART_SOURCE}"
             ls -la .
             exit 1
           fi
-          
+
           if [ ! -f "${CHART_SOURCE}/Chart.yaml" ]; then
             echo "Error: Chart.yaml not found in: ${CHART_SOURCE}"
             ls -la "${CHART_SOURCE}"
             exit 1
           fi
-          
-          echo "chart-url=local:${CHART_SOURCE}" >> $GITHUB_OUTPUT
+
+          echo "chart-url=local:${CHART_SOURCE}" >> "$GITHUB_OUTPUT"
         else
           # Deploy from OCI registry (original behavior)
-          if [ "${{ inputs.registry }}" != "docker.io" ]; then
-            CHART_SOURCE="oci://${{ inputs.registry }}/${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+          if [ "$REGISTRY" != "docker.io" ]; then
+            CHART_SOURCE="oci://$REGISTRY/$REPOSITORY/$CHART_NAME:$CHART_VERSION"
           else
-            CHART_SOURCE="oci://${{ inputs.repository }}/${{ inputs.chart-name }}:${{ inputs.chart-version }}"
+            CHART_SOURCE="oci://$REPOSITORY/$CHART_NAME:$CHART_VERSION"
           fi
-          
+
           echo "Deploying from OCI registry: ${CHART_SOURCE}"
-          echo "chart-url=${CHART_SOURCE}" >> $GITHUB_OUTPUT
+          echo "chart-url=${CHART_SOURCE}" >> "$GITHUB_OUTPUT"
           echo "[helm-deploy] Decision: using OCI chart '${CHART_SOURCE}'"
         fi
-        
+
         echo "Deploying Helm chart..."
         echo "Chart Source: ${CHART_SOURCE}"
-        echo "Release name: ${{ inputs.release-name }}"
-        echo "Namespace: ${{ inputs.namespace }}"
-        
+        echo "Release name: $RELEASE_NAME"
+        echo "Namespace: $NAMESPACE"
+
         # Build helm command as array to properly handle arguments with spaces and special characters
-        HELM_ARGS=("helm" "upgrade" "--install" "${{ inputs.release-name }}" "${CHART_SOURCE}" "--namespace" "${{ inputs.namespace }}")
-        if [ "${{ inputs.debug }}" = "true" ]; then
+        HELM_ARGS=("helm" "upgrade" "--install" "$RELEASE_NAME" "${CHART_SOURCE}" "--namespace" "$NAMESPACE")
+        if [ "$DEBUG" = "true" ]; then
           HELM_ARGS+=("--debug")
           echo "[helm-deploy] Debug mode enabled (--debug)."
         fi
-        
+
         # Add timeout and wait options
-        if [ "${{ inputs.wait }}" == "true" ]; then
+        if [ "$WAIT" == "true" ]; then
           HELM_ARGS+=("--wait")
           echo "[helm-deploy] Wait enabled: Helm will wait for resources to become Ready"
         else
           echo "[helm-deploy] Wait disabled: Helm will return after install/upgrade is submitted"
         fi
-        echo "[helm-deploy] Requested timeout: ${{ inputs.timeout }}"
-        if [[ ! "${{ inputs.timeout }}" =~ ^[0-9]+[smh]$ ]]; then
-          echo "[helm-deploy] WARNING: Timeout format '${{ inputs.timeout }}' may be invalid (expected e.g. 60s, 3m, 1h)"
+        echo "[helm-deploy] Requested timeout: $TIMEOUT"
+        if [[ ! "$TIMEOUT" =~ ^[0-9]+[smh]$ ]]; then
+          echo "[helm-deploy] WARNING: Timeout format '$TIMEOUT' may be invalid (expected e.g. 60s, 3m, 1h)"
         fi
-        HELM_ARGS+=("--timeout" "${{ inputs.timeout }}")
-        
+        HELM_ARGS+=("--timeout" "$TIMEOUT")
+
         # Add image repository and tag if provided
-        if [ -n "${{ inputs.image-repository }}" ]; then
-          HELM_ARGS+=("--set" "image.repository=${{ inputs.image-repository }}")
+        if [ -n "$IMAGE_REPOSITORY" ]; then
+          HELM_ARGS+=("--set" "image.repository=$IMAGE_REPOSITORY")
         fi
-        if [ -n "${{ inputs.image-tag }}" ]; then
-          HELM_ARGS+=("--set" "image.tag=${{ inputs.image-tag }}")
+        if [ -n "$IMAGE_TAG" ]; then
+          HELM_ARGS+=("--set" "image.tag=$IMAGE_TAG")
         fi
-        
+
         # Add values file if provided
-        if [ -n "${{ inputs.values-file }}" ]; then
-          HELM_ARGS+=("--values" "${{ inputs.values-file }}")
+        if [ -n "$VALUES_FILE" ]; then
+          HELM_ARGS+=("--values" "$VALUES_FILE")
         fi
-        if [ "${{ inputs.values }}" != "" ]; then
+        if [ "$VALUES" != "" ]; then
           HELM_ARGS+=("--values" "/tmp/custom-values.yaml")
         fi
-        
+
         # Add custom set values (regular values)
-        if [ -n "${{ inputs.set-values }}" ]; then
-          IFS=',' read -ra VALUES <<< "${{ inputs.set-values }}"
-          echo "[helm-deploy] Processing regular --set values (count=${#VALUES[@]})"
-          for value in "${VALUES[@]}"; do
+        if [ -n "$SET_VALUES" ]; then
+          IFS=',' read -ra VALUES_ARR <<< "$SET_VALUES"
+          echo "[helm-deploy] Processing regular --set values (count=${#VALUES_ARR[@]})"
+          for value in "${VALUES_ARR[@]}"; do
             trimmed="$(echo "$value" | xargs)"
             if [ -n "$trimmed" ]; then
               HELM_ARGS+=("--set" "$trimmed")
             fi
           done
         fi
-        
+
         # Add custom set-string values (secret values)
         # First try the environment variable (preferred), then fall back to input parameter
         secret_values=""
-        if [ -n "$SECRET_VALUES" ]; then
+        if [ -n "${SECRET_VALUES:-}" ]; then
           secret_values="$SECRET_VALUES"
-        elif [ -n "${{ inputs.set-string-values }}" ]; then
-          secret_values="${{ inputs.set-string-values }}"
+        elif [ -n "$SET_STRING_VALUES" ]; then
+          secret_values="$SET_STRING_VALUES"
         fi
-        
+
         if [ -n "$secret_values" ]; then
           echo "Processing secret values..."
-          
+
           # Only process if we have actual content (not just whitespace)
           if [ -n "$(echo "$secret_values" | tr -d '[:space:]')" ]; then
             while [[ "$secret_values" == *","* ]]; do
@@ -306,20 +403,20 @@ runs:
         else
           echo "No secret values provided"
         fi
-        
+
         echo "[helm-deploy] Final Helm argument count: ${#HELM_ARGS[@]}"
-        if [ "${{ inputs.debug }}" = "true" ]; then
+        if [ "$DEBUG" = "true" ]; then
           echo "[helm-deploy] Printing environment variables relevant to Helm (sanitized):"
           env | grep -E 'HELM_|KUBECONFIG' || true
         fi
 
         # Extra debug & output: attempt to reconstruct image reference from inputs or provided set-values
         DEPLOY_IMAGE=""
-        if [ -n "${{ inputs.image-repository }}" ] && [ -n "${{ inputs.image-tag }}" ]; then
-          DEPLOY_IMAGE="${{ inputs.image-repository }}:${{ inputs.image-tag }}"
+        if [ -n "$IMAGE_REPOSITORY" ] && [ -n "$IMAGE_TAG" ]; then
+          DEPLOY_IMAGE="$IMAGE_REPOSITORY:$IMAGE_TAG"
           echo "Resolved image from explicit inputs: $DEPLOY_IMAGE"
         else
-          RECON_SET_VALUES="${{ inputs.set-values }}"
+          RECON_SET_VALUES="$SET_VALUES"
           PARSED=$(echo "$RECON_SET_VALUES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           get_val() { echo "$PARSED" | grep -E "^$1=" | head -1 | cut -d'=' -f2-; }
           IMG_REPO=$(get_val "image.repo")
@@ -338,14 +435,14 @@ runs:
         fi
 
         if [ -n "$DEPLOY_IMAGE" ]; then
-          echo "deployed-image=$DEPLOY_IMAGE" >> $GITHUB_OUTPUT
+          echo "deployed-image=$DEPLOY_IMAGE" >> "$GITHUB_OUTPUT"
         fi
 
         # Preflight: attempt helm pull for OCI charts to surface clearer errors early
         if [[ "${CHART_SOURCE}" == oci://* ]]; then
           echo "[helm-deploy] Preflight: pulling chart ${CHART_SOURCE} to verify accessibility..."
           set +e
-          helm pull "${CHART_SOURCE%:*}" --version "${{ inputs.chart-version }}" --untar --untardir /tmp/preflight-chart 2>&1 | tee /tmp/helm_preflight.log
+          helm pull "${CHART_SOURCE%:*}" --version "$CHART_VERSION" --untar --untardir /tmp/preflight-chart 2>&1 | tee /tmp/helm_preflight.log
           PREFLIGHT_CODE=${PIPESTATUS[0]}
           if [ $PREFLIGHT_CODE -ne 0 ]; then
             echo "[helm-deploy] Preflight chart pull FAILED (exit $PREFLIGHT_CODE). Raw output:" >&2
@@ -368,33 +465,43 @@ runs:
           echo "[helm-deploy] Helm upgrade failed. Showing last 60 lines of output:" >&2
           tail -60 /tmp/helm_upgrade.log >&2 || true
           echo "[helm-deploy] Attempting to gather cluster diagnostics (pods & events)" >&2
-          kubectl get pods -n "${{ inputs.namespace }}" || true
-          kubectl get events -n "${{ inputs.namespace }}" --sort-by=.lastTimestamp | tail -30 || true
+          kubectl get pods -n "$NAMESPACE" || true
+          kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp | tail -30 || true
           exit ${HELM_CODE}
         fi
 
-        echo "status=deployed" >> $GITHUB_OUTPUT
         echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart deployed — release: ${{ inputs.release-name }}, namespace: ${{ inputs.namespace }}"
+        echo "✅ Chart deployed — release: $RELEASE_NAME, namespace: $NAMESPACE"
 
     - name: Verify deployment
       shell: bash
+      env:
+        RELEASE_NAME: ${{ inputs.release-name }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
+        set -euo pipefail
         echo "Verifying deployment..."
-        
+
         echo "Helm release status:"
-        helm status ${{ inputs.release-name }} --namespace ${{ inputs.namespace }}
-        
-        echo "Checking pods in namespace ${{ inputs.namespace }}:"
-        kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/instance=${{ inputs.release-name }}
-        
+        helm status "$RELEASE_NAME" --namespace "$NAMESPACE"
+
+        echo "Checking pods in namespace $NAMESPACE:"
+        kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME"
+
         echo "Checking services:"
-        kubectl get services -n ${{ inputs.namespace }} -l app.kubernetes.io/instance=${{ inputs.release-name }}
-        
+        kubectl get services -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME"
+
         echo "Deployment verification completed!"
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        RELEASE_NAME: ${{ inputs.release-name }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::Release '${{ inputs.release-name }}' in namespace '${{ inputs.namespace }}'. Checkpoints — 1) K8s context: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart source, image tag, and resource quotas."
+        echo "::error title=❌ [HELM] Deploy failed::Release '$RELEASE_NAME' in namespace '$NAMESPACE'. Checkpoints — 1) K8s context: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart source, image tag, and resource quotas."
+
+branding:
+  icon: 'anchor'
+  color: 'blue'

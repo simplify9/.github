@@ -1,6 +1,42 @@
+# =============================================================================
+# Helm Generic Deploy
+# =============================================================================
+# Deploys a Helm chart (by default the shared 's9genericchart' from charts.sf9.io)
+# to a Kubernetes cluster, with an optional pre-deploy database-migration Job.
+#
+# Behaviour:
+#   - Idempotent — uses `helm upgrade --install`, so re-runs converge the release.
+#     The optional migration Job is named per run and applied idempotently.
+#   - Secret-safe — the kubeconfig is passed via env, written to RUNNER_TEMP (not
+#     the workspace), chmod 600, and removed on completion. No credentials are
+#     interpolated into any script.
+#   - Resilient — when atomic is enabled, a failed deploy is rolled back; the
+#     migration Job is polled for Complete/Failed so failures surface promptly.
+#
+# Inputs (see the `inputs:` block below for the full list and defaults). Key ones:
+#   app_name        (required)  Helm release name.
+#   namespace       (required)  Target Kubernetes namespace.
+#   kubeconfig_data (required)  Raw YAML or base64-encoded kubeconfig (from a secret).
+#   chart / chart_repo          Chart and repo URL (default s9genericchart @ charts.sf9.io).
+#   init_job_*                  Optional pre-deploy migration Job configuration.
+#
+# Outputs: none (gate on the step outcome / job status).
+#
+# Usage:
+#   jobs:
+#     deploy:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - name: Helm generic deploy
+#           uses: simplify9/.github/.github/actions/helm-generic@main
+#           with:
+#             app_name: myapp
+#             namespace: production
+#             kubeconfig_data: ${{ secrets.KUBECONFIG }}
+# =============================================================================
 name: 'Helm Generic Deploy'
-description: 'Deploy a Helm chart to a Kubernetes cluster'
 author: 'Simplify9'
+description: 'Deploy a Helm chart to a Kubernetes cluster'
 
 inputs:
   app_name:
@@ -354,6 +390,11 @@ runs:
       env:
         KCFG_PATH: ${{ steps.kube.outputs.kubeconfig_path }}
       run: |
+        set -euo pipefail
         # Remove the decoded kubeconfig so the credential does not linger (matters on
         # self-hosted/reused runners). No-op if the step never produced a path.
         [ -n "${KCFG_PATH:-}" ] && rm -f "$KCFG_PATH" || true
+
+branding:
+  icon: 'anchor'
+  color: 'blue'
