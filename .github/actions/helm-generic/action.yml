@@ -31,7 +31,7 @@ inputs:
     required: false
     default: ''
   atomic:
-    description: "If 'true', pass --atomic to helm upgrade so a failed deploy is rolled back automatically (implies --wait)."
+    description: "If 'true', pass --rollback-on-failure to helm upgrade so a failed deploy is rolled back automatically (implies --wait)."
     required: false
     default: 'true'
   kubeconfig_data:
@@ -303,7 +303,7 @@ runs:
 
         ATOMIC_ARGS=()
         if [ "${ATOMIC}" = "true" ]; then
-          ATOMIC_ARGS+=( --atomic )
+          ATOMIC_ARGS+=( --rollback-on-failure )
         fi
 
         echo "Executing Helm upgrade with base settings plus extras..."

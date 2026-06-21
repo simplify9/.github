@@ -188,7 +188,7 @@ jobs:
             ARGS+=(--create-namespace)
           fi
           if [ "${ATOMIC}" = "true" ]; then
-            ARGS+=(--atomic)
+            ARGS+=(--rollback-on-failure)
           fi
           if [ "${WAIT}" = "true" ]; then
             ARGS+=(--wait)

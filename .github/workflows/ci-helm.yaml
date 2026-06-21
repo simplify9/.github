@@ -318,7 +318,7 @@ jobs:
 
       - name: Notes
         run: |
-          echo "Override defaults by passing inputs to the workflow_call. Provide extra --set pairs via 'extra_set_values' (newline separated). Raw flags (e.g. --atomic) via 'extra_args'."
+          echo "Override defaults by passing inputs to the workflow_call. Provide extra --set pairs via 'extra_set_values' (newline separated). Raw flags (e.g. --rollback-on-failure) via 'extra_args'."
 
       - name: Write job summary
         if: always()

@@ -86,7 +86,7 @@ on:
         default: ''
         type: string
       atomic:
-        description: "If 'true', pass --atomic to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        description: "If 'true', pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
         required: false
         default: 'true'
         type: string
