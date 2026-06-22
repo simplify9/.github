@@ -900,6 +900,8 @@ jobs:
           chart: ${{ inputs.chart-name }}
           chart_repo: ${{ inputs.chart-repo }}
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
+          # --wait (Helm 4 kstatus watcher): safe here because s9genericchart-v2 defines a
+          # startupProbe, so it is not subject to the liveness-without-startup hang (helm/helm#31526).
           extra_args: --wait
           atomic: ${{ inputs.atomic }}
           extra_set_values: |
@@ -913,7 +915,8 @@ jobs:
             service.port=${{ inputs.service-port }}
             ${{ steps.routing.outputs.routing-values }}
             ${{ inputs.helm-set-values }}
-            ${{ secrets.helm-set-secret-values }}
+          # Sensitive values: applied as masked --set-string (no type coercion), not --set.
+          secret_set_values: ${{ secrets.helm-set-secret-values }}
           kubeconfig_data: ${{ secrets.kubeconfig }}
           init_job_image: ${{ inputs.init-job-image }}
           init_job_secret_name: ${{ inputs.init-job-secret-name }}

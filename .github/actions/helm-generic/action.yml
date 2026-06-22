@@ -4,23 +4,39 @@
 # Deploys a Helm chart (by default the shared 's9genericchart' from charts.sf9.io)
 # to a Kubernetes cluster, with an optional pre-deploy database-migration Job.
 #
+# REQUIRES HELM 4. This action pins Helm 4 (azure/setup-helm) and always passes
+# the Helm 4 rollback flag (--rollback-on-failure) when atomic is enabled — it
+# does NOT run on Helm 3 (where the flag is spelled --atomic). This is a
+# deliberate coupling; the sibling helm-deploy / helm-deploy-s9generic actions
+# detect the major version instead if you need Helm 3 support.
+#
 # Behaviour:
 #   - Idempotent — uses `helm upgrade --install`, so re-runs converge the release.
-#     The optional migration Job is named per run and applied idempotently.
+#     The optional migration Job is deleted-then-applied each run, so re-running a
+#     workflow (which reuses the run number) never collides with an existing,
+#     immutable Job left behind by the previous attempt.
 #   - Secret-safe — the kubeconfig is passed via env, written to RUNNER_TEMP (not
 #     the workspace), chmod 600, and removed on completion. No credentials are
-#     interpolated into any script.
+#     interpolated into any script. Sensitive Helm values supplied via
+#     secret_set_values are masked in logs and applied with --set-string (no type
+#     coercion), mirroring the sibling actions.
 #   - Resilient — when atomic is enabled, a failed deploy is rolled back; the
-#     migration Job is polled for Complete/Failed so failures surface promptly.
+#     migration Job is polled for Complete/Failed (timeout configurable via
+#     init_job_timeout) and also carries activeDeadlineSeconds so the cluster
+#     terminates a runaway migration even if the workflow is cancelled.
 #
 # Inputs (see the `inputs:` block below for the full list and defaults). Key ones:
 #   app_name        (required)  Helm release name.
 #   namespace       (required)  Target Kubernetes namespace.
 #   kubeconfig_data (required)  Raw YAML or base64-encoded kubeconfig (from a secret).
 #   chart / chart_repo          Chart and repo URL (default s9genericchart @ charts.sf9.io).
+#   extra_set_values            Non-secret --set pairs (one key=value per line).
+#   secret_set_values           Secret --set-string pairs (masked; one per line).
 #   init_job_*                  Optional pre-deploy migration Job configuration.
 #
-# Outputs: none (gate on the step outcome / job status).
+# Outputs:
+#   chart-ref   The resolved chart reference passed to `helm upgrade`
+#               (e.g. "s9generic/s9genericchart" or a bare chart name).
 #
 # Usage:
 #   jobs:
@@ -60,6 +76,16 @@ inputs:
   extra_set_values:
     description: |-
       Optional multi-line string of additional Helm --set key=value pairs (one per line).
+      Lines that are blank, or whose value is empty (e.g. "service.targetPort="), are skipped
+      so an unset caller input never blanks a chart default. Use for NON-secret values.
+    required: false
+    default: ''
+  secret_set_values:
+    description: |-
+      Optional multi-line string of SECRET Helm key=value pairs (one per line). Each value is
+      masked in the logs (::add-mask::) and applied with --set-string, so values that look numeric
+      or boolean, or contain commas/braces, are passed verbatim without Helm type coercion.
+      Applied after extra_set_values, so secrets take precedence over same-keyed non-secret values.
     required: false
     default: ''
   extra_args:
@@ -89,6 +115,9 @@ inputs:
       Name of the Kubernetes Secret (in the target namespace) whose key (see init_job_secret_key)
       is injected as the connection-string env var (see init_job_connstring_env) into the migration
       Job. Required when init_job_image is set.
+      NOTE: this Secret must already exist in the namespace BEFORE this action runs — the migration
+      Job runs before the Helm release, so a secret that the chart itself would create is not yet
+      available on a first deploy to a fresh namespace. Provision it as an external/pre-created secret.
     required: false
     default: ''
   init_job_command:
@@ -116,12 +145,31 @@ inputs:
       the migration Job. Leave empty to keep the historical default ('ASPNETCORE_ENVIRONMENT').
     required: false
     default: ''
+  init_job_image_pull_secret:
+    description: |-
+      Name of an imagePullSecret (in the target namespace) attached to the migration Job's pod so it
+      can pull init_job_image from a private registry. Defaults to 'sf9cr' to match the chart's
+      image.pullSecret. Set to an empty string to attach no pull secret (e.g. for a public image).
+    required: false
+    default: 'sf9cr'
+  init_job_timeout:
+    description: |-
+      Maximum time, in seconds, to wait for the pre-deploy migration Job to complete before failing.
+      Also used as the Job's activeDeadlineSeconds so the cluster terminates a runaway migration.
+      Defaults to 300 (5 minutes). Set higher for long-running migrations.
+    required: false
+    default: '300'
   environment:
     description: |-
       ASP.NET Core environment name injected into the migration Job (e.g. Production, Staging).
       Defaults to 'Production' if not set.
     required: false
     default: 'Production'
+
+outputs:
+  chart-ref:
+    description: 'Resolved chart reference passed to `helm upgrade` (e.g. "s9generic/s9genericchart").'
+    value: ${{ steps.helm.outputs.chart-ref }}
 
 runs:
   using: 'composite'
@@ -134,24 +182,6 @@ runs:
           echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
-    - name: Derive sanitized branch name
-      id: branch
-      shell: bash
-      env:
-        GITHUB_REF_NAME: ${{ github.ref_name }}
-        GITHUB_REF: ${{ github.ref }}
-      run: |
-        set -euo pipefail
-        RAW_NAME="${GITHUB_REF_NAME:-}"
-        if [ -z "$RAW_NAME" ]; then
-          RAW_NAME="${GITHUB_REF##*/}" || RAW_NAME="detached"
-        fi
-        SANITIZED=$(echo "$RAW_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/-{2,}/-/g; s/^-+//; s/-+$//')
-        [ -z "$SANITIZED" ] && SANITIZED="detached"
-        SANITIZED=${SANITIZED:0:40}
-        echo "name=$SANITIZED" >> "$GITHUB_OUTPUT"
-        echo "BRANCH_SANITIZED=$SANITIZED" >> "$GITHUB_ENV"
-
     - name: Process kubeconfig input
       id: kube
       shell: bash
@@ -159,8 +189,8 @@ runs:
         KUBECONFIG_DATA: ${{ inputs.kubeconfig_data }}
         NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::group::☸️ [CHECKPOINT 1/2] Process Kubeconfig"
         set -euo pipefail
+        echo "::group::☸️ [CHECKPOINT 1/2] Process Kubeconfig"
         DATA="${KUBECONFIG_DATA:-}"
         if [ -z "$DATA" ]; then
           echo "kubeconfig_data input is required but empty." >&2
@@ -197,7 +227,10 @@ runs:
     - name: Install Helm
       uses: azure/setup-helm@v5
       with:
-        version: v4.2.0
+        # Helm 4 line. v4.2.2 carries the --atomic install back-compat fix (v4.2.1) and
+        # WaitForDelete race fixes that directly affect --wait reliability. This action is
+        # Helm-4-only by design (it always emits the Helm 4 --rollback-on-failure flag).
+        version: v4.2.2
 
     - name: Install kubectl
       uses: azure/setup-kubectl@v5
@@ -219,11 +252,17 @@ runs:
         INIT_JOB_SECRET_KEY: ${{ inputs.init_job_secret_key }}
         INIT_JOB_CONNSTRING_ENV: ${{ inputs.init_job_connstring_env }}
         INIT_JOB_ENVIRONMENT_ENV: ${{ inputs.init_job_environment_env }}
+        INIT_JOB_IMAGE_PULL_SECRET: ${{ inputs.init_job_image_pull_secret }}
+        INIT_JOB_TIMEOUT: ${{ inputs.init_job_timeout }}
         ENVIRONMENT: ${{ inputs.environment }}
       run: |
         set -euo pipefail
 
         JOB_NAME="${APP_NAME}-db-migrate-${GITHUB_RUN_NUMBER}"
+
+        # Validate / default the poll timeout (seconds). Non-numeric input falls back to 300.
+        TIMEOUT_SECONDS="${INIT_JOB_TIMEOUT:-300}"
+        case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=300 ;; esac
 
         # Ensure the target namespace exists before applying the Job. The Helm step uses
         # --create-namespace, but it runs AFTER this Job, so on a first deploy to a fresh
@@ -239,6 +278,21 @@ runs:
         # Build a JSON exec array from the space-separated command string.
         CMD_JSON=$(jq -cn --arg s "$CMD_STR" '$s | split(" ") | map(select(length > 0))')
 
+        # Render imagePullSecrets as an inline JSON (YAML flow) value so the manifest stays a
+        # single line: [] when none is configured, [{"name":"sf9cr"}] otherwise. Without this the
+        # migration pod can't pull a private init_job_image and stalls in ImagePullBackOff.
+        if [ -n "${INIT_JOB_IMAGE_PULL_SECRET:-}" ]; then
+          IMAGE_PULL_SECRETS_JSON=$(jq -cn --arg n "$INIT_JOB_IMAGE_PULL_SECRET" '[{name:$n}]')
+        else
+          IMAGE_PULL_SECRETS_JSON='[]'
+        fi
+
+        # Delete any Job left from a previous attempt before re-applying. A Job's spec is immutable,
+        # and GitHub's "Re-run failed jobs" reuses GITHUB_RUN_NUMBER, so re-running within the
+        # ttlSecondsAfterFinished window would otherwise hit an immutable-field apply error that has
+        # nothing to do with the migration. --ignore-not-found makes the first run a clean no-op.
+        kubectl delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found --wait=true
+
         echo "Applying migration Job: $JOB_NAME (command: ${CMD_JSON})"
         kubectl apply -f - <<EOF
         apiVersion: batch/v1
@@ -252,9 +306,11 @@ runs:
         spec:
           ttlSecondsAfterFinished: 300
           backoffLimit: 2
+          activeDeadlineSeconds: ${TIMEOUT_SECONDS}
           template:
             spec:
               restartPolicy: Never
+              imagePullSecrets: ${IMAGE_PULL_SECRETS_JSON}
               containers:
                 - name: db-migrate
                   image: "${INIT_JOB_IMAGE}"
@@ -270,10 +326,10 @@ runs:
                       value: "${ENVIRONMENT}"
         EOF
 
-        echo "Waiting for migration Job to complete (timeout 5m)..."
+        echo "Waiting for migration Job to complete (timeout ${TIMEOUT_SECONDS}s)..."
         # Poll for Complete or Failed so a failed Job surfaces immediately instead of blocking
         # the full timeout (kubectl wait --for=condition=complete does not return on failure).
-        DEADLINE=$((SECONDS + 300))
+        DEADLINE=$((SECONDS + TIMEOUT_SECONDS))
         while true; do
           COMPLETE=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
           FAILED=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
@@ -291,6 +347,7 @@ runs:
         done
 
     - name: Helm upgrade / install
+      id: helm
       shell: bash
       env:
         APP_NAME: ${{ inputs.app_name }}
@@ -299,12 +356,12 @@ runs:
         CHART_REPO: ${{ inputs.chart_repo }}
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
+        SECRET_SET_VALUES: ${{ inputs.secret_set_values }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
         ATOMIC: ${{ inputs.atomic }}
-        BRANCH: ${{ steps.branch.outputs.name }}
       run: |
-        echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
         set -euo pipefail
+        echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
 
         if [ -n "$CHART_REPO" ]; then
           # --force-update so a stale 's9generic' alias from a prior run (reused/self-hosted runner)
@@ -315,26 +372,54 @@ runs:
         else
           CHART_REF="$CHART"
         fi
+        echo "chart-ref=${CHART_REF}" >> "$GITHUB_OUTPUT"
 
         # Intrinsic values the action always sets; all other chart settings come from
-        # extra_set_values (one "key=value" per line) or extra_args.
+        # extra_set_values / secret_set_values (one "key=value" per line) or extra_args.
+        # NOTE: app.version is intentionally NOT set here — callers supply it via
+        # extra_set_values (e.g. app.version=<semver>), which would override an intrinsic value
+        # anyway, so setting one here would be dead weight.
         BASE_SET_ARGS=(
           --set app.name="${APP_NAME}"
-          --set app.version="github-${BRANCH}-${GITHUB_RUN_NUMBER}"
         )
 
-        # Build "--set key=value" pairs as an array so values containing spaces stay intact
-        # (an unquoted string would word-split them).
-        EXTRA_SET_ARGS=()
-        if [ -n "${EXTRA_SET_VALUES// /}" ]; then
+        # Parse a multi-line "key=value" string (one per line) into an args array under $1.
+        # Lines that are blank, or whose value after the first '=' is empty (e.g. "key="), are
+        # skipped so an unset/blank caller input never blanks a chart default via "--set key=".
+        # Lines with no '=' are skipped (not a valid --set pair). When $2 = "mask", each value is
+        # registered with ::add-mask:: so secrets never surface in the log. Result lands in OUT_ARGS.
+        build_set_args() {
+          local flag="$1" mode="$2" line kv val
+          OUT_ARGS=()
           while IFS= read -r line; do
-            KV=$(echo "$line" | sed 's/^ *//;s/ *$//')
-            [ -z "$KV" ] && continue
-            EXTRA_SET_ARGS+=( --set "$KV" )
-          done <<< "$EXTRA_SET_VALUES"
+            kv="${line#"${line%%[![:space:]]*}"}"   # strip leading whitespace
+            kv="${kv%"${kv##*[![:space:]]}"}"        # strip trailing whitespace
+            [ -z "$kv" ] && continue
+            case "$kv" in
+              *=*) val="${kv#*=}"; [ -z "$val" ] && continue ;;
+              *) continue ;;
+            esac
+            [ "$mode" = "mask" ] && echo "::add-mask::${val}"
+            OUT_ARGS+=( "$flag" "$kv" )
+          done
+        }
+
+        # Non-secret --set pairs.
+        EXTRA_SET_ARGS=()
+        if [ -n "${EXTRA_SET_VALUES//[[:space:]]/}" ]; then
+          build_set_args --set nomask <<< "$EXTRA_SET_VALUES"
+          EXTRA_SET_ARGS=( ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} )
         fi
 
-        # extra_args is raw CLI text (e.g. "--debug --wait"); split into argv tokens.
+        # Secret --set-string pairs (masked in logs, no type coercion). Applied after the
+        # non-secret pairs so a secret value wins over a same-keyed extra_set_values entry.
+        SECRET_SET_ARGS=()
+        if [ -n "${SECRET_SET_VALUES//[[:space:]]/}" ]; then
+          build_set_args --set-string mask <<< "$SECRET_SET_VALUES"
+          SECRET_SET_ARGS=( ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} )
+        fi
+
+        # extra_args is raw CLI text (e.g. "--debug --wait=legacy"); split into argv tokens.
         read -ra EXTRA_ARGS_ARR <<< "${EXTRA_ARGS:-}"
 
         ATOMIC_ARGS=()
@@ -349,7 +434,9 @@ runs:
           --install \
           --namespace "${NAMESPACE}" \
           --create-namespace \
-          "${BASE_SET_ARGS[@]}" ${EXTRA_SET_ARGS[@]+"${EXTRA_SET_ARGS[@]}"} \
+          "${BASE_SET_ARGS[@]}" \
+          ${EXTRA_SET_ARGS[@]+"${EXTRA_SET_ARGS[@]}"} \
+          ${SECRET_SET_ARGS[@]+"${SECRET_SET_ARGS[@]}"} \
           --timeout "${HELM_TIMEOUT}" \
           ${ATOMIC_ARGS[@]+"${ATOMIC_ARGS[@]}"} ${EXTRA_ARGS_ARR[@]+"${EXTRA_ARGS_ARR[@]}"}
         echo "HELM_GENERIC_DEPLOY_STATUS=✅ PASSED" >> "$GITHUB_ENV"
@@ -374,6 +461,37 @@ runs:
         fi
         echo "Pods (selector: ${SELECTOR}):"
         kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" || true
+
+    - name: Write deployment summary
+      if: always()
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        CHART_REF: ${{ steps.helm.outputs.chart-ref }}
+        CHART: ${{ inputs.chart }}
+        CHART_REPO: ${{ inputs.chart_repo }}
+        DEPLOY_OUTCOME: ${{ steps.helm.outcome }}
+      run: |
+        set -euo pipefail
+        if [ "${DEPLOY_OUTCOME:-}" = "success" ]; then
+          status="✅ Succeeded"
+        else
+          status="❌ Failed"
+        fi
+        {
+          echo "## ☸️ Helm Generic Deploy"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Status | ${status} |"
+          echo "| Release | \`${APP_NAME}\` |"
+          echo "| Namespace | \`${NAMESPACE}\` |"
+          echo "| Chart | \`${CHART_REF:-${CHART}}\` |"
+          echo "| Chart repo | \`${CHART_REPO:-n/a}\` |"
+          echo "| Kubeconfig | ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} |"
+          echo "| Helm deploy | ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached} |"
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Report failure
       if: failure()

@@ -506,9 +506,12 @@ jobs:
           chart: s9genericchart
           chart_repo: "https://charts.sf9.io"
 
-          # Helm timing/flags
+          # Helm timing/flags.
+          # --wait=legacy: s9genericchart renders a livenessProbe with NO startupProbe when
+          # probes are enabled, which can hang/fail under Helm 4's default kstatus watcher
+          # (helm/helm#31526). The legacy waiter restores the proven Helm 3 behaviour.
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
-          extra_args: "--wait"
+          extra_args: "--wait=legacy"
           atomic: ${{ inputs.atomic }}
 
           # Translate your previous comma-joined --set into line-based entries
@@ -524,7 +527,9 @@ jobs:
             ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
             ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
             ${{ inputs.helm-set-values }}
-            ${{ secrets.helm-set-secret-values }}
+
+          # Sensitive values: applied as masked --set-string (no type coercion), not --set.
+          secret_set_values: ${{ secrets.helm-set-secret-values }}
 
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
