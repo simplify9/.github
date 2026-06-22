@@ -164,11 +164,11 @@ jobs:
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
-          COMPATIBILITY_DATE: ${{ inputs.compatibility_date }}
-          ROUTE: ${{ inputs.route }}
-          PROJECT_NAME: ${{ inputs.project_name }}
-          ENVIRONMENT: ${{ inputs.environment }}
-          ASSETS_DIR: ${{ inputs.assets_dir }}
+          compatibility-date: ${{ inputs.compatibility_date }}
+          route: ${{ inputs.route }}
+          project-name: ${{ inputs.project_name }}
+          environment: ${{ inputs.environment }}
+          assets-dir: ${{ inputs.assets_dir }}
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v4
