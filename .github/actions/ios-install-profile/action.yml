@@ -37,7 +37,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "IOS_PROFILE_CP1_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Install provisioning profile (manual)
@@ -74,7 +74,7 @@ runs:
 
         echo "IOS_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Profile installed — Name: $NAME, UUID: $UUID"
         echo "::endgroup::"
 

@@ -138,8 +138,8 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "HPP_CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "HPP_CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "HELM_PKG_CP1_STATUS=⏳ Pending"
+          echo "HELM_PKG_CP2_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Set up Helm
@@ -234,7 +234,7 @@ runs:
 
         echo "Packaged chart: ${PACKAGE_FILE}"
         ls -la "$PACKAGE_DESTINATION/"
-        echo "HPP_CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "HELM_PKG_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Chart packaged — $CHART_NAME-$VERSION.tgz"
         echo "::endgroup::"
 
@@ -314,7 +314,7 @@ runs:
         helm push "${PACKAGE_FILE}" "${CHART_URL}"
 
         echo "chart-url=${CHART_URL}/$CHART_NAME:$VERSION" >> "$GITHUB_OUTPUT"
-        echo "HPP_CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "HELM_PKG_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Chart pushed (OCI) — $CHART_NAME:$VERSION → $REGISTRY"
 
     - name: Log out of OCI registry
@@ -369,7 +369,7 @@ runs:
         echo "✅ '$(basename "$PACKAGE_FILE")' uploaded successfully."
 
         echo "chart-url=${CHARTMUSEUM_URL%/}" >> "$GITHUB_OUTPUT"
-        echo "HPP_CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "HELM_PKG_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Chart pushed (ChartMuseum) — $CHART_NAME:$VERSION → $CHARTMUSEUM_URL"
 
     - name: Report failure
@@ -379,7 +379,7 @@ runs:
         CHART_NAME: ${{ inputs.chart-name }}
         VERSION: ${{ inputs.version }}
       run: |
-        echo "::error title=❌ [HELM] Package/push failed::Chart '$CHART_NAME:$VERSION'. Checkpoints — 1) Packaged: ${HPP_CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Pushed: ${HPP_CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
+        echo "::error title=❌ [HELM] Package/push failed::Chart '$CHART_NAME:$VERSION'. Checkpoints — 1) Packaged: ${HELM_PKG_CP1_STATUS:-⏭️ Not reached} | 2) Pushed: ${HELM_PKG_CP2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
 
 branding:
   icon: 'anchor'

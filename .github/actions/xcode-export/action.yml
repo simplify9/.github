@@ -43,7 +43,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "XCODE_EXPORT_CP1_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Export IPA
@@ -65,7 +65,7 @@ runs:
           -archivePath "${ARCHIVE_PATH}" \
           -exportOptionsPlist "${EXPORT_PLIST}" \
           -exportPath "${EXPORT_PATH}"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "XCODE_EXPORT_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ IPA exported — Output: ${EXPORT_PATH}"
         echo "::endgroup::"
 

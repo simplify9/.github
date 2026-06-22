@@ -49,7 +49,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "IOS_CERT_CP1_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Install signing certificate (.p12) into temp keychain
@@ -95,7 +95,7 @@ runs:
         security find-identity -v -p codesigning
 
         echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "IOS_CERT_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Certificate installed — keychain at $KEYCHAIN_PATH"
         echo "::endgroup::"
 
