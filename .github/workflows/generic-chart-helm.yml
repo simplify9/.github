@@ -240,6 +240,11 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # Full history + all tags so determine-semver reads them locally
+          # (no network fetch needed); persisted git token not required after.
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine semantic version
         id: semver
@@ -288,6 +293,11 @@ jobs:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
         uses: actions/checkout@v6
+        with:
+          # Full history + all tags so determine-semver reads them locally
+          # (no network fetch needed); persisted git token not required after.
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Configure GitHub Packages feed
         if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}

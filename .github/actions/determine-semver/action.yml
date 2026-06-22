@@ -5,11 +5,18 @@
 # inputs and the highest existing Git tag matching that major.minor prefix.
 #
 # Behaviour:
-#   - Reads tags locally (git tag --list); attempts a tag fetch first to cover
-#     shallow checkouts. Callers should checkout with full history + tags.
-#   - If no tag matches "<major>.<minor>.*", the patch starts at 0.
-#   - Otherwise the highest matching tag's patch component is incremented.
-#   - Unauthenticated — operates purely on local Git refs, no network/API calls.
+#   - Reads tags locally (git tag --list). Only when the checkout is shallow does
+#     it hit the network (git fetch --tags); if that fetch then fails it errors
+#     out rather than silently computing patch 0. Callers SHOULD checkout with
+#     fetch-depth: 0 so no fetch is needed (see Usage).
+#   - Only clean numeric release tags ("<major>.<minor>.<N>", N integer) are
+#     considered. Prerelease/build-metadata tags (e.g. 1.2.0-rc.1) and any
+#     non-numeric patch are ignored, so a stray tag can never reset patch to 0.
+#   - If no release tag matches "<major>.<minor>.*", the patch starts at 0.
+#     Otherwise the highest matching tag's patch component is incremented.
+#   - Unauthenticated by design — operates purely on local Git refs, no API call.
+#     This action only *computes* a version; tag creation is a separate concern
+#     (see tag-github-origin, which guards against version collisions).
 #
 # Inputs:
 #   major  (required)  Major version number (integer, e.g. 1).
@@ -19,6 +26,12 @@
 # should gate on steps.<id>.outcome, not on an output):
 #   version   The computed semantic version (e.g. 1.2.3).
 #
+# Concurrency / races: because the version is derived from existing tags, two
+# runs racing on the same major.minor line could compute the same patch. Callers
+# MUST serialize with a `concurrency:` group (per workflow+ref), and the final
+# tag creation (tag-github-origin) fails loudly if the tag already points at a
+# different commit — together these close the read/modify/write window.
+#
 # Usage:
 #   jobs:
 #     version:
@@ -26,7 +39,8 @@
 #       steps:
 #         - uses: actions/checkout@v4
 #           with:
-#             fetch-depth: 0          # full history + tags for accurate detection
+#             fetch-depth: 0            # full history + tags (no fetch needed)
+#             persist-credentials: false
 #         - name: Determine version
 #           id: semver
 #           uses: simplify9/.github/.github/actions/determine-semver@main
@@ -38,28 +52,24 @@
 # =============================================================================
 name: 'Determine Semantic Version'
 author: 'Simplify9'
-description: 'Reusable action to compute semantic version from major/minor and latest tag.'
+description: 'Reusable action to compute the next semantic version from major/minor and the highest existing release tag.'
 
 inputs:
   major:
-    description: 'Major version number'
+    description: 'Major version number (integer, e.g. 1).'
     required: true
   minor:
-    description: 'Minor version number'
+    description: 'Minor version number (integer, e.g. 2).'
     required: true
 
 outputs:
   version:
-    description: 'Computed semantic version'
+    description: 'Computed semantic version (e.g. 1.2.3). Set only on success.'
     value: ${{ steps.semver.outputs.version }}
 
 runs:
   using: "composite"
   steps:
-    - name: Initialize version computation
-      shell: bash
-      run: echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
     - name: Determine semantic version
       id: semver
       shell: bash
@@ -68,66 +78,66 @@ runs:
         MINOR: ${{ inputs.minor }}
       run: |
         set -euo pipefail
-        echo "::group::🔍 [CHECKPOINT 1/1] Compute Semantic Version"
-        # Validate inputs (values come from env, never interpolated into the script).
+
+        # Values arrive via env and are never interpolated into the script,
+        # so they cannot break out of the shell (no script-injection surface).
         major="$MAJOR"
         minor="$MINOR"
 
+        # --- Validate inputs --------------------------------------------------
         if ! [[ "$major" =~ ^[0-9]+$ ]]; then
-          echo "Error: Major version must be a number, got: $major"
+          echo "::error title=❌ [VERSION] Invalid input::Major version must be an integer, got: '$major'"
           exit 1
         fi
-
         if ! [[ "$minor" =~ ^[0-9]+$ ]]; then
-          echo "Error: Minor version must be a number, got: $minor"
+          echo "::error title=❌ [VERSION] Invalid input::Minor version must be an integer, got: '$minor'"
           exit 1
         fi
 
-        echo "Looking for existing tags with prefix: $major.$minor.*"
-        prefix="$major.$minor."
-
-        # Ensure we have all tags (in case of shallow checkout)
-        echo "Fetching all tags from remote..."
-        git fetch --tags --unshallow 2>/dev/null || git fetch --tags 2>/dev/null || echo "Could not fetch tags"
-
-        # List all tags for debugging
-        echo "All available tags:"
-        git tag --list | sort -V || echo "No tags found"
-
-        # Get latest tag matching the pattern
-        echo "Searching for tags matching pattern: $prefix*"
-        matching_tags=$(git tag --list "$prefix*" | sort -V)
-        if [[ -n "$matching_tags" ]]; then
-          echo "Found matching tags:"
-          echo "$matching_tags"
-        else
-          echo "No tags found matching pattern: $prefix*"
-        fi
-
-        latest_tag=$(echo "$matching_tags" | tail -n1)
-
-        if [[ -z "$latest_tag" ]]; then
-          patch=0
-          echo "No existing tags found for $major.$minor.*, starting with patch version 0"
-        else
-          echo "Found latest tag: $latest_tag"
-          # Extract patch version and increment
-          patch=$(echo "$latest_tag" | awk -F. '{print $3}')
-          if ! [[ "$patch" =~ ^[0-9]+$ ]]; then
-            echo "Warning: Could not parse patch version from tag $latest_tag, starting with 0"
-            patch=0
-          else
-            echo "Current patch version: $patch"
-            patch=$((patch + 1))
-            echo "Incremented patch version: $patch"
+        # --- Ensure tags are available ----------------------------------------
+        # With fetch-depth: 0 the repo is complete and this fetch is skipped.
+        # Only a shallow checkout needs the network; if that fails, error out
+        # instead of silently treating the line as empty (which yields .0).
+        if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" == "true" ]]; then
+          echo "Shallow checkout detected — fetching tags from origin…"
+          if ! git fetch --tags --quiet; then
+            echo "::error title=❌ [VERSION] Cannot read tags::Shallow checkout and tag fetch failed. Checkout with 'fetch-depth: 0' (recommended) or ensure the runner can fetch tags."
+            exit 1
           fi
         fi
 
-        version="$major.$minor.$patch"
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        # --- Find the highest existing patch on this major.minor line ---------
+        # Match ONLY clean numeric releases (X.Y.Z). The grep filters out
+        # prerelease/build tags (1.2.0-rc.1) and anything non-numeric, and
+        # sort -V gives true version ordering (1.2.10 > 1.2.9).
+        prefix="${major}.${minor}."
+        latest_tag="$(
+          git tag --list "${prefix}*" \
+            | grep -E "^${major}\.${minor}\.[0-9]+$" \
+            | sort -V \
+            | tail -n1 || true
+        )"
+
+        if [[ -z "$latest_tag" ]]; then
+          patch=0
+          echo "No existing ${prefix}* release tags — starting at patch 0."
+        else
+          patch="${latest_tag##*.}"          # component after the final dot
+          patch=$((patch + 1))
+          echo "Highest existing tag on this line: ${latest_tag} — next patch: ${patch}."
+        fi
+
+        version="${major}.${minor}.${patch}"
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
         echo "✅ Computed version: ${version}"
-        echo "::endgroup::"
+
+        # Full tag dump only under step-debug logging (RUNNER_DEBUG=1), to avoid
+        # log noise in repos with many tags.
+        if [[ "${RUNNER_DEBUG:-0}" == "1" ]]; then
+          echo "::group::All tags (debug)"
+          git tag --list | sort -V || true
+          echo "::endgroup::"
+        fi
 
     - name: Report failure
       if: failure()
@@ -136,8 +146,7 @@ runs:
         MAJOR: ${{ inputs.major }}
         MINOR: ${{ inputs.minor }}
       run: |
-        echo "::error title=❌ [VERSION] Semantic version computation failed::Version computation failed for $MAJOR.$MINOR.x. Check that major/minor are valid integers and git tags are accessible."
-        echo "CHECKPOINT_1_STATUS=❌ FAILED" >> "$GITHUB_ENV"
+        echo "::error title=❌ [VERSION] Semantic version computation failed::Could not compute ${MAJOR}.${MINOR}.x. Ensure major/minor are integers and tags are accessible (checkout with fetch-depth: 0)."
 
 branding:
   icon: 'tag'
