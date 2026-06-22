@@ -144,7 +144,6 @@ GOOGLE_PLAY_SERVICE_ACCOUNT_JSON     # Google Play service account JSON
         ├── dotnet-build/
         ├── dotnet-pack-push/
         ├── generate-wrangler-config/
-        ├── setup-cloudflare-project/
         ├── setup-cloudflare-domain/
         ├── ios-install-cert/
         ├── ios-install-profile/
@@ -802,7 +801,6 @@ uses: simplify9/.github/.github/actions/<name>@main
 
 | Action | Purpose | Key inputs |
 |---|---|---|
-| `setup-cloudflare-project` | Create or verify a Cloudflare Pages project | `api-token`, `account-id`, `project-name` |
 | `setup-cloudflare-domain` | Configure a custom domain; `fail-on-error: false` makes it non-blocking | `api-token`, `account-id`, `project-name`, `custom-domain` |
 | `generate-wrangler-config` | Generate `wrangler.toml` dynamically | `PROJECT_NAME`, `ROUTE`, `COMPATIBILITY_DATE`, `BUILD_FOR_OPENNEXT` |
 

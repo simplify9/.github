@@ -189,25 +189,28 @@ jobs:
           echo "✅ Build directory found, contents:"
           ls -la "$BUILD_DIR/"
 
-      - name: Setup Cloudflare Pages project
-        uses: simplify9/.github/.github/actions/setup-cloudflare-project@main
-        with:
-          api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          project-name: ${{ env.FULL_PROJECT_NAME }}
-          production-branch: ${{ inputs.target-branch }}
-          build-command: ${{ inputs.build-command }}
-          destination-dir: ${{ inputs.build-directory }}
-
       - name: Deploy to Cloudflare Pages
         id: deploy
         # cloudflare/pages-action is deprecated; wrangler-action is the supported
         # path for Pages CI. The deployment URL is exposed as the
         # 'deployment-url' output (pages-action used 'url').
+        #
+        # The Pages project must exist before `pages deploy`: in a non-interactive
+        # CI context wrangler will NOT auto-create it (it errors with "Project not
+        # found" / "cannot be run in a non-interactive context"). We create it in
+        # preCommands, which wrangler-action runs in a real shell
+        # (child_process.exec), so `|| echo` makes the create idempotent — a
+        # re-run where the project already exists is swallowed and the deploy
+        # proceeds. A genuine create failure (auth/network) still surfaces: the
+        # deploy command below then fails loudly against the missing project.
+        # This replaces the former custom setup-cloudflare-project action, using
+        # the same official tooling already in this pipeline.
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          preCommands: |
+            wrangler pages project create "${{ env.FULL_PROJECT_NAME }}" --production-branch="${{ inputs.target-branch }}" || echo "Project '${{ env.FULL_PROJECT_NAME }}' already exists — continuing"
           command: pages deploy ${{ inputs.build-directory }} --project-name=${{ env.FULL_PROJECT_NAME }} --branch=${{ inputs.target-branch }}
         env:
           NODE_ENV: ${{ inputs.environment }}

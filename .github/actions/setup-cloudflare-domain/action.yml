@@ -115,15 +115,14 @@ runs:
         echo "Checking if domain '$DOMAIN_NAME' is already configured..."
 
         response_file="$(mktemp)"
-        http_code="$(curl -sS \
+        curl -sS \
           --max-time 30 \
           --retry 3 \
           --retry-connrefused \
           -o "$response_file" \
-          -w '%{http_code}' \
           -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT_NAME/domains" \
           -H "Authorization: Bearer $API_TOKEN" \
-          -H "Content-Type: application/json")"
+          -H "Content-Type: application/json"
         RESPONSE="$(cat "$response_file")"
         rm -f "$response_file"
 
@@ -205,7 +204,9 @@ runs:
             # apart from "never ran" (empty output).
             echo "status=failed" >> "$GITHUB_OUTPUT"
             echo "❌ Failed to add custom domain (HTTP $http_code): $ERROR_MSG"
-            echo "Response: $RESPONSE"
+            # RESPONSE is valid JSON here (its .success was parsed above); log just
+            # the errors array rather than dumping the whole body.
+            echo "API errors: $(printf '%s' "$RESPONSE" | jq -c '.errors // []')"
 
             if [ "$FAIL_ON_ERROR" = "true" ]; then
               exit 1
@@ -226,6 +227,33 @@ runs:
         echo "status=already-configured" >> "$GITHUB_OUTPUT"
         echo "✅ Domain '$DOMAIN_NAME' was already configured"
         echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+    - name: Write domain summary
+      if: always()
+      shell: bash
+      env:
+        PROJECT_NAME: ${{ inputs.project-name }}
+        DOMAIN_NAME: ${{ inputs.domain-name }}
+        DOMAIN_STATUS: ${{ steps.add-domain.outputs.status || steps.domain-complete.outputs.status }}
+      run: |
+        set -euo pipefail
+        case "${DOMAIN_STATUS:-}" in
+          added)                     status="✅ Added" ;;
+          exists|already-configured) status="✅ Already configured" ;;
+          failed)                    status="⚠️ Failed (continued)" ;;
+          *)                         status="❌ Failed" ;;
+        esac
+        {
+          echo "## 🌐 Cloudflare Pages Custom Domain"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Status | ${status} |"
+          echo "| Project | \`${PROJECT_NAME}\` |"
+          echo "| Domain | \`${DOMAIN_NAME}\` |"
+          echo "| Domain check | ${CF_DOMAIN_CP1_STATUS:-⏭️ Not reached} |"
+          echo "| Domain configured | ${CF_DOMAIN_CP2_STATUS:-⏭️ Not reached} |"
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Report failure
       if: failure()

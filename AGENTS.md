@@ -281,7 +281,6 @@ steps:
 - `dotnet-pack-push` — `dotnet pack` → `dotnet nuget push`.
 
 ### Cloudflare
-- `setup-cloudflare-project` — Creates or verifies a Cloudflare Pages project.
 - `setup-cloudflare-domain` — Configures a custom domain on a Pages project. Has `fail-on-error` to make domain failure non-blocking.
 - `generate-wrangler-config` — Generates `wrangler.toml` dynamically. Supports OpenNext, static assets, and custom route lists.
 
