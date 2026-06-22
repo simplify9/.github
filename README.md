@@ -762,6 +762,35 @@ uses: simplify9/.github/.github/actions/<name>@main
 | `helm-generic` | Deploy a Helm chart (`helm upgrade --install`) with optional pre-deploy DB migration Job. Used by the `generic-chart-helm` and `generic-gateway-helm-template` reusable workflows | `app_name`, `namespace`, `kubeconfig_data` |
 | `helm-package-push` | Package chart and push to OCI registry | `chart-path`, `chart-name`, `chart-version` |
 
+> [!WARNING]
+> **Maintenance smell — three overlapping deploy actions.** `helm-deploy`, `helm-deploy-s9generic`, and
+> `helm-generic` are effectively **duplicates**: all three wrap `helm upgrade --install` and re-implement the
+> same concerns — kubeconfig decoding (raw-or-base64) and cleanup, Helm/kubectl install, atomic rollback,
+> `--set` / `--set-string` value handling, and release verification. They diverge only in incidental details,
+> which is exactly what makes them costly to maintain:
+>
+> | Concern | `helm-deploy` | `helm-deploy-s9generic` | `helm-generic` |
+> |---|---|---|---|
+> | Input naming | `kebab-case` | `kebab-case` | `snake_case` |
+> | Chart source | OCI / ChartMuseum | OCI / local path | Helm repo (`charts.sf9.io`) |
+> | Helm version | detects 3 vs 4 | detects 3 vs 4 | **pinned to Helm 4** |
+> | Pre-deploy migration Job | yes | no | yes |
+> | Secret values | `secret-set-string-values` | `secret-set-string-values` | `secret_set_values` |
+>
+> **Consequence:** every fix or hardening change (e.g. the `--set-string` secret path, kubeconfig handling,
+> Helm 4 `--wait` semantics) has to be applied — and tested — in three places, and they drift apart over time
+> with inconsistent input names and behaviour. This is a classic [Don't-Repeat-Yourself](https://en.wikipedia.org/wiki/Don%27t_repeat_yourself)
+> violation and a real source of bugs.
+>
+> **Recommended direction:** **consolidate these into a single, parameterized composite action** (e.g. one
+> `helm-deploy` action) that covers every chart source (OCI, ChartMuseum, Helm repo, local path) and makes the
+> migration Job and chart conventions optional inputs. Standardize on one input-naming convention, one secret
+> path (`--set-string`), and one Helm-version strategy. Keep the old action names as thin shims that forward to
+> the consolidated action (or alias them) so existing callers — the reusable workflows and any external
+> `@main` consumers — are not broken during migration. This removes far more long-term maintenance than any
+> per-action tweak, and is preferable to replacing them with an off-the-shelf marketplace action (none of which
+> cover the migration-Job-then-deploy orchestration or the `s9genericchart` conventions these encode).
+
 ### .NET
 
 | Action | Purpose | Key inputs |
