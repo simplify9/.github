@@ -24,9 +24,11 @@
 #   fail-on-error  (optional)  'true' to fail the action on a genuine domain
 #                              setup failure. Default 'false'.
 #
-# Outputs (set only on success paths):
+# Outputs:
 #   domain-status  Domain configuration result (added | exists |
-#                  already-configured).
+#                  already-configured | failed). 'failed' is set when a genuine
+#                  failure is swallowed because fail-on-error is 'false'; empty
+#                  if the step never ran.
 #
 # Usage:
 #   jobs:
@@ -66,7 +68,7 @@ inputs:
 
 outputs:
   domain-status:
-    description: "Domain configuration result on success: 'added', 'exists', or 'already-configured'."
+    description: "Domain configuration result: 'added', 'exists', 'already-configured', or 'failed' (genuine failure swallowed by fail-on-error=false). Empty if the step never ran."
     value: ${{ steps.add-domain.outputs.status || steps.domain-complete.outputs.status }}
 
 runs:
@@ -87,8 +89,8 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "CF_DOMAIN_CP1_STATUS=⏳ Pending"
+          echo "CF_DOMAIN_CP2_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Install jq for JSON parsing
@@ -141,7 +143,7 @@ runs:
           echo "exists=false" >> "$GITHUB_OUTPUT"
           echo "::warning title=Domain check failed::Could not check existing domains, will attempt to add"
         fi
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "CF_DOMAIN_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Add custom domain
       id: add-domain
@@ -187,6 +189,8 @@ runs:
           if [ "$DOMAIN_STATUS" = "pending" ]; then
             echo "📋 Please configure your DNS to point '$DOMAIN_NAME' to your Cloudflare Pages project"
           fi
+          echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ Domain configured — $DOMAIN_NAME → $PROJECT_NAME"
         else
           ERROR_MSG="$(printf '%s' "$RESPONSE" | jq -r '.errors[0].message // "Unknown error"')"
 
@@ -194,7 +198,12 @@ runs:
           if [[ "$ERROR_MSG" == *"already exists"* ]] || [[ "$ERROR_MSG" == *"already configured"* ]]; then
             echo "status=exists" >> "$GITHUB_OUTPUT"
             echo "ℹ️ Domain '$DOMAIN_NAME' is already configured — nothing to do"
+            echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+            echo "✅ Domain configured — $DOMAIN_NAME → $PROJECT_NAME"
           else
+            # Genuine failure. status=failed lets downstream consumers tell this
+            # apart from "never ran" (empty output).
+            echo "status=failed" >> "$GITHUB_OUTPUT"
             echo "❌ Failed to add custom domain (HTTP $http_code): $ERROR_MSG"
             echo "Response: $RESPONSE"
 
@@ -205,8 +214,6 @@ runs:
             fi
           fi
         fi
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Domain configured — $DOMAIN_NAME → $PROJECT_NAME"
 
     - name: Domain setup complete
       id: domain-complete
@@ -218,7 +225,7 @@ runs:
         set -euo pipefail
         echo "status=already-configured" >> "$GITHUB_OUTPUT"
         echo "✅ Domain '$DOMAIN_NAME' was already configured"
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Report failure
       if: failure()
@@ -227,7 +234,7 @@ runs:
         PROJECT_NAME: ${{ inputs.project-name }}
         DOMAIN_NAME: ${{ inputs.domain-name }}
       run: |
-        echo "::error title=❌ [CF-PAGES] Domain setup failed::project: $PROJECT_NAME, domain: $DOMAIN_NAME. Checkpoints — 1) Domain check: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Domain configured: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [CF-PAGES] Domain setup failed::project: $PROJECT_NAME, domain: $DOMAIN_NAME. Checkpoints — 1) Domain check: ${CF_DOMAIN_CP1_STATUS:-⏭️ Not reached} | 2) Domain configured: ${CF_DOMAIN_CP2_STATUS:-⏭️ Not reached}."
 
 branding:
   icon: 'globe'

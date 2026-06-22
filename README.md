@@ -909,7 +909,6 @@ When a `build` job must pass a file to a `deploy` job:
 | `docker/metadata-action` | `@v6` |
 | `docker/build-push-action` | `@v7` |
 | `cloudflare/wrangler-action` | `@v4` |
-| `cloudflare/pages-action` | `@v1` (repo archived; v1 is final) |
 | `gradle/actions/setup-gradle` | `@v4` |
 
 Do not upgrade `gradle/actions/setup-gradle` to v5 (requires runner ≥ 2.327.1) or v6 (proprietary commercial caching component).

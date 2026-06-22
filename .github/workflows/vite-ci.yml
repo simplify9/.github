@@ -103,7 +103,7 @@ jobs:
     name: Deploy to Cloudflare Pages (${{ inputs.environment }})
     
     outputs:
-      url: ${{ steps.deploy.outputs.url }}
+      url: ${{ steps.deploy.outputs.deployment-url }}
       project-name: ${{ env.FULL_PROJECT_NAME }}
     
     steps:
@@ -201,14 +201,14 @@ jobs:
 
       - name: Deploy to Cloudflare Pages
         id: deploy
-        uses: cloudflare/pages-action@v1
+        # cloudflare/pages-action is deprecated; wrangler-action is the supported
+        # path for Pages CI. The deployment URL is exposed as the
+        # 'deployment-url' output (pages-action used 'url').
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ env.FULL_PROJECT_NAME }}
-          directory: ${{ inputs.build-directory }}
-          # Optional: Uncomment the line below to enable GitHub integration
-          # gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: pages deploy ${{ inputs.build-directory }} --project-name=${{ env.FULL_PROJECT_NAME }} --branch=${{ inputs.target-branch }}
         env:
           NODE_ENV: ${{ inputs.environment }}
           ENVIRONMENT: ${{ inputs.environment }}
@@ -245,7 +245,7 @@ jobs:
           NODE_VERSION: ${{ inputs.node-version }}
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           BUILD_DIR: ${{ inputs.build-directory }}
-          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
           CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
           RUNNER_OS: ${{ runner.os }}
           ACTOR: ${{ github.actor }}

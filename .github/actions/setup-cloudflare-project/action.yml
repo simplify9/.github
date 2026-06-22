@@ -100,8 +100,8 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "CF_PROJECT_CP1_STATUS=⏳ Pending"
+          echo "CF_PROJECT_CP2_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Install jq for JSON parsing
@@ -146,7 +146,7 @@ runs:
           echo "exists=false" >> "$GITHUB_OUTPUT"
           echo "📝 Project '$PROJECT_NAME' does not exist"
         fi
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "CF_PROJECT_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Create Cloudflare Pages project
       id: create-project
@@ -195,7 +195,7 @@ runs:
           echo "url=https://${PROJECT_URL}.pages.dev" >> "$GITHUB_OUTPUT"
           echo "✅ Project '$PROJECT_NAME' created successfully"
           echo "🌐 Project URL: https://${PROJECT_URL}.pages.dev"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "CF_PROJECT_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ Project created — $PROJECT_NAME → https://${PROJECT_URL}.pages.dev"
         else
           ERROR_MSG="$(printf '%s' "$RESPONSE" | jq -r '.errors[0].message // "Unknown error"')"
@@ -203,7 +203,7 @@ runs:
           # Idempotent: an already-existing project is treated as success.
           if [[ "$ERROR_MSG" == *"already exists"* ]] || [[ "$ERROR_MSG" == *"duplicate"* ]]; then
             echo "ℹ️ Project '$PROJECT_NAME' already exists — nothing to do"
-            echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+            echo "CF_PROJECT_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
             echo "✅ Project configured — $PROJECT_NAME"
           else
             echo "❌ Failed to create project (HTTP $http_code): $ERROR_MSG"
@@ -220,7 +220,7 @@ runs:
       run: |
         set -euo pipefail
         echo "✅ Using existing Cloudflare Pages project: $PROJECT_NAME"
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "CF_PROJECT_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Report failure
       if: failure()
@@ -228,7 +228,7 @@ runs:
       env:
         PROJECT_NAME: ${{ inputs.project-name }}
       run: |
-        echo "::error title=❌ [CF-PAGES] Project setup failed::project: $PROJECT_NAME. Checkpoints — 1) Project check: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Project configured: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [CF-PAGES] Project setup failed::project: $PROJECT_NAME. Checkpoints — 1) Project check: ${CF_PROJECT_CP1_STATUS:-⏭️ Not reached} | 2) Project configured: ${CF_PROJECT_CP2_STATUS:-⏭️ Not reached}."
 
 branding:
   icon: 'cloud'

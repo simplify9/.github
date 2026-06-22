@@ -66,8 +66,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `docker/login-action` | `@v4` | |
 | `docker/metadata-action` | `@v6` | |
 | `docker/build-push-action` | `@v7` | |
-| `cloudflare/wrangler-action` | `@v4` | |
-| `cloudflare/pages-action` | `@v1` | Repo is archived; v1 is the final version — do not upgrade |
+| `cloudflare/wrangler-action` | `@v4` | Used for all Cloudflare Pages/Workers deploys (`command: pages deploy …` / `deploy`). Deployment URL is the `deployment-url` output |
 | `gradle/actions/setup-gradle` | `@v4` | Do NOT use `gradle/gradle-build-action` (archived). Do NOT upgrade to v5/v6: v5 requires runner ≥ 2.327.1; v6 has commercial caching license terms |
 
 **Pinned CLI binary versions (defaults in action inputs):**
@@ -350,7 +349,7 @@ steps:
 - **Do not enable any deployment by default** — all `deploy-to-*` inputs default to `false`
 - **Do not pass secrets as regular inputs** — declare them under `on.workflow_call.secrets:` or use `secrets: inherit`
 - **Do not mix Helm config and secret values** in a single `--set` call — use `--set-string` for anything that contains special characters or is sourced from a secret
-- **Do not use `cloudflare/pages-action` above `@v1`** — the repo is archived at v1.5.0; there is no v2
+- **Do not use `cloudflare/pages-action`** — it is deprecated and its repo is archived (final v1.5.0, no v2). Deploy Cloudflare Pages with `cloudflare/wrangler-action@v4` (`command: pages deploy <dir> --project-name=<name> --branch=<branch>`); the deployment URL is its `deployment-url` output
 
 ---
 
