@@ -14,8 +14,12 @@
 #   - An empty `projects` value is a graceful skip (these repos default it to ''
 #     to mean "this service does not publish a package"); a NON-empty value that
 #     matches nothing fails fast, so a typo can never silently publish nothing.
-#   - Secret-safe — the NuGet API key is passed via an env var (never the
-#     command line) and masked in logs.
+#   - Secret-safe — the NuGet API key is masked in the logs (::add-mask::)
+#     before it is used. It is then handed to `dotnet nuget push --api-key`,
+#     which is the only credential mechanism the CLI offers; the value itself is
+#     never echoed. State is passed between this action's own steps via step
+#     outputs (NOT $GITHUB_ENV), so the action never mutates the caller's job
+#     environment.
 #
 # Inputs:
 #   projects       (required) Path(s)/glob of .csproj to pack. Empty = skip.
@@ -24,7 +28,9 @@
 #   api-key        (required) API key for the NuGet feed.
 #   nuget-source   (required) NuGet feed/source URL.
 #
-# Outputs: none.
+# Outputs:
+#   packages-pushed  Number of packages successfully pushed (0 when skipped).
+#   package-paths    Newline-separated paths of the pushed .nupkg files.
 #
 # Usage:
 #   jobs:
@@ -33,12 +39,14 @@
 #       steps:
 #         - uses: actions/checkout@v4
 #         - name: Pack and push
+#           id: nuget
 #           uses: simplify9/.github/.github/actions/dotnet-pack-push@main
 #           with:
 #             projects: '**/*.Sdk.csproj'
 #             version: ${{ needs.version.outputs.version }}
 #             api-key: ${{ secrets.NUGET_API_KEY }}
 #             nuget-source: 'https://api.nuget.org/v3/index.json'
+#         - run: echo "Pushed ${{ steps.nuget.outputs.packages-pushed }} package(s)"
 # =============================================================================
 name: 'Dotnet Pack and Push'
 author: 'Simplify9'
@@ -62,10 +70,19 @@ inputs:
     description: 'NuGet feed/source URL'
     required: true
 
+outputs:
+  packages-pushed:
+    description: 'Number of NuGet packages successfully pushed (0 when packing was skipped).'
+    value: ${{ steps.push.outputs.packages-pushed }}
+  package-paths:
+    description: 'Newline-separated paths of the .nupkg files that were pushed.'
+    value: ${{ steps.push.outputs.package-paths }}
+
 runs:
   using: "composite"
   steps:
     - name: Pack NuGet packages
+      id: pack
       shell: bash
       env:
         PROJECTS: ${{ inputs.projects }}
@@ -74,20 +91,26 @@ runs:
       run: |
         set -euo pipefail
         shopt -s globstar nullglob
-        echo "BUILD_PHASE=Pack" >> "$GITHUB_ENV"
+        # Phase is published as a step output (not $GITHUB_ENV) so the trailing
+        # "Report failure" step can name the failing phase without leaking a
+        # variable into the caller's job environment.
+        echo "phase=Pack" >> "$GITHUB_OUTPUT"
         echo "::group::🔷 [1/2] Pack NuGet Packages"
 
         # An empty / whitespace-only input means "this repo publishes nothing".
         if [[ -z "${PROJECTS//[[:space:]]/}" ]]; then
           echo "No 'projects' provided — skipping NuGet pack & push."
-          echo "SKIP_PACK=true" >> "$GITHUB_ENV"
+          echo "skip-pack=true" >> "$GITHUB_OUTPUT"
           echo "::endgroup::"
           exit 0
         fi
 
-        # Expand the glob(s) into a unique list of existing .csproj files.
-        # Pathname expansion yields one element per match, so paths containing
-        # spaces are preserved correctly.
+        # `projects` is a WHITESPACE-SEPARATED list of glob patterns
+        # (e.g. `**/*.csproj  src/**/*.Sdk.csproj`). Each pattern is then
+        # expanded by pathname globbing; a single glob can still MATCH a path
+        # that contains spaces and it is preserved as one array element. (A
+        # literal path that itself contains spaces cannot be passed as input,
+        # because whitespace is what separates one pattern from the next.)
         declare -a PROJECT_SET=()
         read -ra PATTERNS <<< "$PROJECTS"
         for pattern in "${PATTERNS[@]}"; do
@@ -106,7 +129,7 @@ runs:
 
         nupkg_dir="${RUNNER_TEMP:-/tmp}/nupkg"
         rm -rf "$nupkg_dir"; mkdir -p "$nupkg_dir"
-        echo "NUPKG_DIR=$nupkg_dir" >> "$GITHUB_ENV"
+        echo "nupkg-dir=$nupkg_dir" >> "$GITHUB_OUTPUT"
 
         echo "Packing ${#PROJECT_SET[@]} project(s) (${VERSION:-no explicit version}):"
         for project in "${PROJECT_SET[@]}"; do
@@ -120,14 +143,16 @@ runs:
         echo "::endgroup::"
 
     - name: Push NuGet packages
-      if: ${{ env.SKIP_PACK != 'true' }}
+      id: push
+      if: ${{ steps.pack.outputs.skip-pack != 'true' }}
       shell: bash
       env:
         API_KEY: ${{ inputs.api-key }}
         NUGET_SOURCE: ${{ inputs.nuget-source }}
+        NUPKG_DIR: ${{ steps.pack.outputs.nupkg-dir }}
       run: |
         set -euo pipefail
-        echo "BUILD_PHASE=Push" >> "$GITHUB_ENV"
+        echo "phase=Push" >> "$GITHUB_OUTPUT"
         echo "::add-mask::$API_KEY"
         echo "::group::🔷 [2/2] Push NuGet Packages"
 
@@ -149,16 +174,28 @@ runs:
 
         echo "Pushing ${#PACKAGES[@]} package(s) → $NUGET_SOURCE"
         pushed=0 failed=0
+        declare -a pushed_paths=()
         for nupkg in "${PACKAGES[@]}"; do
           echo "→ $(basename "$nupkg")"
           # --skip-duplicate keeps re-runs idempotent (existing versions are a no-op).
           if dotnet nuget push "$nupkg" --api-key "$API_KEY" --source "$NUGET_SOURCE" --skip-duplicate; then
             pushed=$((pushed + 1))
+            pushed_paths+=("$nupkg")
           else
             echo "::warning title=NuGet push failed::$(basename "$nupkg")"
             failed=$((failed + 1))
           fi
         done
+
+        # Publish results as step outputs for downstream consumers (release
+        # notes, asset upload, notifications) so they need not re-glob. Written
+        # before the failure check below so a partial push still reports counts.
+        echo "packages-pushed=$pushed" >> "$GITHUB_OUTPUT"
+        {
+          echo "package-paths<<__NUPKG_PATHS_EOF__"
+          ((pushed > 0)) && printf '%s\n' "${pushed_paths[@]}"
+          echo "__NUPKG_PATHS_EOF__"
+        } >> "$GITHUB_OUTPUT"
 
         echo "Push summary: $pushed succeeded, $failed failed"
         if [[ $failed -gt 0 ]]; then
@@ -174,6 +211,8 @@ runs:
       env:
         PROJECTS: ${{ inputs.projects }}
         NUGET_SOURCE: ${{ inputs.nuget-source }}
+        # Latest phase that actually ran: Push if it started, else Pack.
+        BUILD_PHASE: ${{ steps.push.outputs.phase || steps.pack.outputs.phase || 'Pack' }}
       run: |
         echo "::error title=❌ [DOTNET] Pack/push failed::Failed during the '${BUILD_PHASE:-Pack}' phase. projects: ${PROJECTS}, feed: ${NUGET_SOURCE}."
 

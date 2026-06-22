@@ -17,6 +17,9 @@
 #         MSBuild build everything in a single, parallel, incremental pass.
 #   - Because the build target always contains the test projects, `dotnet test`
 #     runs with --no-build safely (no configuration / build-set mismatch).
+#   - State shared between this action's steps (the resolved build target and
+#     the current phase) travels via step outputs, NOT $GITHUB_ENV, so the
+#     action never mutates the caller's job environment.
 #   - `projects` and `test-projects` are real glob patterns (bash globstar):
 #     `**/*.csproj`, `src/**/*.csproj`, `**/*Tests/*.csproj`, a concrete
 #     path, or a space-separated list of any of these. obj/ and bin/ are
@@ -30,7 +33,8 @@
 #   dotnet-version  (optional) .NET SDK version (default: 8.0.x).
 #   run-tests       (optional) Whether to run tests after building (default: true).
 #
-# Outputs: none.
+# Outputs:
+#   build-target  The resolved *.sln (existing or ephemeral) that was built.
 #
 # Usage:
 #   jobs:
@@ -71,6 +75,11 @@ inputs:
     required: false
     default: 'true'
 
+outputs:
+  build-target:
+    description: 'The resolved solution or ephemeral .sln that was restored/built/tested.'
+    value: ${{ steps.resolve.outputs.build-target }}
+
 runs:
   using: "composite"
   steps:
@@ -93,6 +102,7 @@ runs:
           ${{ runner.os }}-nuget-
 
     - name: Resolve build target
+      id: resolve
       shell: bash
       env:
         PROJECTS: ${{ inputs.projects }}
@@ -101,7 +111,10 @@ runs:
       run: |
         set -euo pipefail
         shopt -s globstar nullglob
-        echo "BUILD_PHASE=Resolve" >> "$GITHUB_ENV"
+        # Phase/target are published as step outputs (not $GITHUB_ENV) so later
+        # steps and "Report failure" can read them without leaking variables
+        # into the caller's job environment.
+        echo "phase=Resolve" >> "$GITHUB_OUTPUT"
         echo "::group::🔷 Resolve build target"
 
         # Expand a whitespace-separated list of glob patterns into a unique,
@@ -165,32 +178,38 @@ runs:
           echo "Generated ephemeral solution: $target"
         fi
 
-        echo "BUILD_TARGET=$target" >> "$GITHUB_ENV"
+        echo "build-target=$target" >> "$GITHUB_OUTPUT"
         echo "::endgroup::"
 
     - name: Restore dependencies
+      id: restore
       shell: bash
+      env:
+        BUILD_TARGET: ${{ steps.resolve.outputs.build-target }}
       run: |
         set -euo pipefail
-        echo "BUILD_PHASE=Restore" >> "$GITHUB_ENV"
+        echo "phase=Restore" >> "$GITHUB_OUTPUT"
         echo "::group::🔷 [1/3] Restore Dependencies"
         echo "Restoring: $BUILD_TARGET"
         dotnet restore "$BUILD_TARGET"
         echo "::endgroup::"
 
     - name: Build
+      id: build
       shell: bash
       env:
         CONFIGURATION: ${{ inputs.configuration }}
+        BUILD_TARGET: ${{ steps.resolve.outputs.build-target }}
       run: |
         set -euo pipefail
-        echo "BUILD_PHASE=Build" >> "$GITHUB_ENV"
+        echo "phase=Build" >> "$GITHUB_OUTPUT"
         echo "::group::🔷 [2/3] Build"
         echo "Building: $BUILD_TARGET ($CONFIGURATION)"
         dotnet build "$BUILD_TARGET" --configuration "$CONFIGURATION" --no-restore
         echo "::endgroup::"
 
     - name: Test
+      id: test
       if: ${{ inputs.run-tests == 'true' }}
       shell: bash
       env:
@@ -199,7 +218,7 @@ runs:
       run: |
         set -euo pipefail
         shopt -s globstar nullglob
-        echo "BUILD_PHASE=Test" >> "$GITHUB_ENV"
+        echo "phase=Test" >> "$GITHUB_OUTPUT"
         echo "::group::🔷 [3/3] Run Tests"
 
         # Expand the test glob(s) the same way the build target was resolved.
@@ -251,6 +270,9 @@ runs:
       shell: bash
       env:
         CONFIGURATION: ${{ inputs.configuration }}
+        # Latest phase that actually ran, newest first; '.sln' target if resolved.
+        BUILD_PHASE: ${{ steps.test.outputs.phase || steps.build.outputs.phase || steps.restore.outputs.phase || steps.resolve.outputs.phase || 'Setup' }}
+        BUILD_TARGET: ${{ steps.resolve.outputs.build-target || 'unresolved' }}
       run: |
         echo "::error title=❌ [DOTNET] Build failed::Failed during the '${BUILD_PHASE:-Setup}' phase. Target: ${BUILD_TARGET:-unresolved}, configuration: ${CONFIGURATION}."
 
