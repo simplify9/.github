@@ -51,7 +51,7 @@
 #     nuget-projects      string  Glob of .csproj files to pack
 #                                 and push.  Leave empty to skip
 #                                 NuGet publishing entirely.      (default: '')
-#     test-projects       string  Glob of test .csproj files.    (default: '**/*UnitTests/*.csproj')
+#     test-projects       string  Glob of test .csproj files.    (default: '**/*Tests/*.csproj')
 #     run-tests           string  Set to 'true' to run tests.    (default: 'false')
 #
 #   Optional — Docker:
@@ -253,7 +253,7 @@ on:
       test-projects:
         description: 'Test projects to run (glob pattern)'
         required: false
-        default: '**/*UnitTests/*.csproj'
+        default: '**/*Tests/*.csproj'
         type: string
       run-tests:
         description: 'Whether to run tests'

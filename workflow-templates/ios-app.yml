@@ -42,10 +42,10 @@ jobs:
     uses: simplify9/.github/.github/workflows/ios-build.yml@main
     with:
       # ── Runner ────────────────────────────────────────────────────────────
-      xcode-version: "26"
+      xcode-version: "26" 
 
       # ── Ruby / CocoaPods ─────────────────────────────────────────────────
-      ruby-version: "3.1"
+      ruby-version: "3.1"          # REPLACE
       use-bundler: true
       enable-ccache: true
 
@@ -61,7 +61,7 @@ jobs:
       # ── Export & Upload ───────────────────────────────────────────────────
       generate-export-options: true
       ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
-      release-environment: ios-staging          # REPLACE if env name differs
+      release-environment: ios-staging
       disable-release: ${{ inputs.disable_release }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
@@ -81,7 +81,7 @@ jobs:
       xcode-version: "26"
 
       # ── Ruby / CocoaPods ─────────────────────────────────────────────────
-      ruby-version: "3.1"
+      ruby-version: "3.1"          # REPLACE
       use-bundler: true
       enable-ccache: true
 
@@ -97,7 +97,7 @@ jobs:
       # ── Export & Upload ───────────────────────────────────────────────────
       generate-export-options: true
       ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
-      release-environment: ios-production       # REPLACE if env name differs
+      release-environment: ios-production
       disable-release: ${{ inputs.disable_release }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}

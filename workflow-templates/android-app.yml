@@ -69,7 +69,7 @@ jobs:
       # ── Release ───────────────────────────────────────────────────────────
       play-track: internal
       changes-not-sent-for-review: true   # internal track: skip review queue for instant tester access
-      release-environment: android-internal   # REPLACE if env name differs
+      release-environment: android-internal
       disable-release: ${{ inputs.disable_release }}
     secrets:
       android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -98,7 +98,7 @@ jobs:
       # ── Release ───────────────────────────────────────────────────────────
       play-track: production
       # changes-not-sent-for-review defaults to false — Google review triggered on commit
-      release-environment: android-production  # REPLACE if env name differs
+      release-environment: android-production
       disable-release: ${{ inputs.disable_release }}
     secrets:
       android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

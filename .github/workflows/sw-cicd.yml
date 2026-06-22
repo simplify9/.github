@@ -29,7 +29,7 @@ on:
       test-projects:
         description: 'Test projects to run (glob pattern)'
         required: false
-        default: '**/*UnitTests/*.csproj'
+        default: '**/*Tests/*.csproj'
         type: string
       run-tests:
         description: 'Whether to run tests'

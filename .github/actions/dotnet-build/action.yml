@@ -2,18 +2,30 @@
 # Dotnet Restore and Build
 # =============================================================================
 # Restores, builds, and optionally tests .NET projects on a composite runner.
-# Auto-detects a solution file (*.sln); otherwise operates on the project glob.
 #
-# Behaviour:
-#   - Solution-aware — if a *.sln is present it is restored/built directly,
-#     otherwise the `projects` glob is expanded (find for wildcards).
-#   - Tests are opt-in via `run-tests` and run with --no-build against the
-#     `test-projects` glob.
-#   - Checkpoint statuses are surfaced in the failure annotation for triage.
+# Design (solution-first, single resolved target):
+#   - A single build target is resolved ONCE in the "Resolve build target" step
+#     and reused by restore, build, and test so the three phases can never
+#     diverge:
+#       * If the repository contains a solution (*.sln) it is used directly. A
+#         single solution anywhere is preferred; if several exist, a single
+#         root-level solution is used, otherwise the run fails fast asking for
+#         disambiguation (rather than silently building the wrong thing).
+#       * If there is no solution, the `projects` glob (plus `test-projects`
+#         when testing) is expanded and an ephemeral solution is generated in
+#         the runner temp dir. This honours the caller's glob EXACTLY and lets
+#         MSBuild build everything in a single, parallel, incremental pass.
+#   - Because the build target always contains the test projects, `dotnet test`
+#     runs with --no-build safely (no configuration / build-set mismatch).
+#   - `projects` and `test-projects` are real glob patterns (bash globstar):
+#     `**/*.csproj`, `src/**/*.csproj`, `**/*Tests/*.csproj`, a concrete
+#     path, or a space-separated list of any of these. obj/ and bin/ are
+#     always excluded.
 #
 # Inputs:
-#   projects        (required) Project(s) to restore/build (wildcards allowed).
-#   test-projects   (optional) Test project(s) to run (wildcards allowed).
+#   projects        (required) Project(s) to build when no solution is present
+#                   (glob allowed). Ignored when a *.sln is found.
+#   test-projects   (optional) Test project(s) to run (glob allowed).
 #   configuration   (optional) Build configuration (default: Release).
 #   dotnet-version  (optional) .NET SDK version (default: 8.0.x).
 #   run-tests       (optional) Whether to run tests after building (default: true).
@@ -39,13 +51,13 @@ description: 'Reusable action to restore, build, and optionally test .NET projec
 
 inputs:
   projects:
-    description: 'Project(s) to restore and build (wildcards allowed)'
+    description: 'Project(s) to restore and build when no solution is present (glob allowed)'
     required: true
     default: '**/*.csproj'
   test-projects:
-    description: 'Test project(s) to run (wildcards allowed)'
+    description: 'Test project(s) to run (glob allowed)'
     required: false
-    default: '**/*UnitTests/*.csproj'
+    default: '**/*Tests/*.csproj'
   configuration:
     description: 'Build configuration'
     required: false
@@ -62,91 +74,122 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Initialize .NET build
-      shell: bash
-      run: |
-        set -euo pipefail
-        {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending"
-          echo "CHECKPOINT_3_STATUS=⏭️ Skipped"
-        } >> "$GITHUB_ENV"
-
     - name: Setup .NET
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
+
+    # NuGet packages are cached manually (not via setup-dotnet's built-in
+    # `cache: true`) because the built-in cache requires committed
+    # packages.lock.json files, which these repositories do not use. Keying on
+    # the project/package manifests invalidates the cache only when
+    # dependencies can actually change; restore-keys give a warm partial hit.
     - name: Cache NuGet packages
       uses: actions/cache@v5
       with:
         path: ~/.nuget/packages
-        # Keyed on project/package manifests so the cache invalidates when
-        # dependencies change; restore-keys give a warm partial hit otherwise.
         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json', '**/Directory.Packages.props') }}
         restore-keys: |
           ${{ runner.os }}-nuget-
-    - name: Restore dependencies
+
+    - name: Resolve build target
       shell: bash
       env:
         PROJECTS: ${{ inputs.projects }}
+        TEST_PROJECTS: ${{ inputs.test-projects }}
+        RUN_TESTS: ${{ inputs.run-tests }}
       run: |
         set -euo pipefail
-        echo "::group::🔷 [CHECKPOINT 1/3] Restore Dependencies"
-        # Check if there's a solution file first
-        if ls *.sln 1> /dev/null 2>&1; then
-          echo "Found solution file(s), restoring solution..."
-          dotnet restore *.sln
-        else
-          echo "No solution file found, restoring individual projects..."
-          # If projects input contains wildcards, restore without arguments to restore all
-          if [[ "$PROJECTS" == *"*"* ]]; then
-            dotnet restore
+        shopt -s globstar nullglob
+        echo "BUILD_PHASE=Resolve" >> "$GITHUB_ENV"
+        echo "::group::🔷 Resolve build target"
+
+        # Expand a whitespace-separated list of glob patterns into a unique,
+        # newline-free list of matching files, excluding build output dirs.
+        # Pathname expansion yields one element per match, so paths containing
+        # spaces are preserved correctly.
+        expand_globs() {
+          local raw="$1" pattern match
+          local -a patterns=() out=()
+          read -ra patterns <<< "$raw"
+          for pattern in "${patterns[@]}"; do
+            for match in $pattern; do
+              [[ "$match" == *"/obj/"* || "$match" == *"/bin/"* ]] && continue
+              [[ -f "$match" ]] || continue
+              out+=("$match")
+            done
+          done
+          # de-duplicate while preserving order
+          printf '%s\n' "${out[@]}" | awk 'NF && !seen[$0]++'
+        }
+
+        # 1) Prefer an existing solution.
+        mapfile -t SOLUTIONS < <(find . -name '*.sln' -not -path '*/obj/*' -not -path '*/bin/*' | sort)
+        target=""
+        if [[ ${#SOLUTIONS[@]} -eq 1 ]]; then
+          target="${SOLUTIONS[0]}"
+          echo "Found solution: $target"
+        elif [[ ${#SOLUTIONS[@]} -gt 1 ]]; then
+          mapfile -t ROOT_SOLUTIONS < <(find . -maxdepth 1 -name '*.sln' | sort)
+          if [[ ${#ROOT_SOLUTIONS[@]} -eq 1 ]]; then
+            target="${ROOT_SOLUTIONS[0]}"
+            echo "Multiple solutions found; using the root-level solution: $target"
           else
-            dotnet restore $PROJECTS
+            echo "::error title=❌ [DOTNET] Ambiguous solution::Found ${#SOLUTIONS[@]} solutions and no single root-level solution. Restructure the repo or remove extra .sln files."
+            printf '  - %s\n' "${SOLUTIONS[@]}"
+            exit 1
           fi
         fi
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+        # 2) No solution: build an ephemeral one from the project/test globs so
+        #    restore/build/test all operate on a single, consistent target.
+        if [[ -z "$target" ]]; then
+          echo "No solution found; resolving from project glob(s): $PROJECTS"
+          mapfile -t BUILD_SET < <(expand_globs "$PROJECTS")
+          if [[ "$RUN_TESTS" == "true" ]]; then
+            # Include test projects in the build set so --no-build is valid.
+            mapfile -t TEST_SET < <(expand_globs "$TEST_PROJECTS")
+            BUILD_SET+=("${TEST_SET[@]}")
+            mapfile -t BUILD_SET < <(printf '%s\n' "${BUILD_SET[@]}" | awk 'NF && !seen[$0]++')
+          fi
+          if [[ ${#BUILD_SET[@]} -eq 0 ]]; then
+            echo "::error title=❌ [DOTNET] No projects found::No *.sln and no projects matched '$PROJECTS'."
+            exit 1
+          fi
+          echo "Resolved ${#BUILD_SET[@]} project(s):"
+          printf '  - %s\n' "${BUILD_SET[@]}"
+          target="${RUNNER_TEMP:-/tmp}/__ci_build.sln"
+          rm -f "$target"
+          dotnet new sln --name "__ci_build" --output "${RUNNER_TEMP:-/tmp}" >/dev/null
+          dotnet sln "$target" add "${BUILD_SET[@]}" >/dev/null
+          echo "Generated ephemeral solution: $target"
+        fi
+
+        echo "BUILD_TARGET=$target" >> "$GITHUB_ENV"
         echo "::endgroup::"
+
+    - name: Restore dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "BUILD_PHASE=Restore" >> "$GITHUB_ENV"
+        echo "::group::🔷 [1/3] Restore Dependencies"
+        echo "Restoring: $BUILD_TARGET"
+        dotnet restore "$BUILD_TARGET"
+        echo "::endgroup::"
+
     - name: Build
       shell: bash
       env:
-        PROJECTS: ${{ inputs.projects }}
         CONFIGURATION: ${{ inputs.configuration }}
       run: |
         set -euo pipefail
-        echo "::group::🔷 [CHECKPOINT 2/3] Build"
-        # Check if there's a solution file first
-        if ls *.sln 1> /dev/null 2>&1; then
-          echo "Found solution file(s), building solution..."
-          dotnet build *.sln --configuration "$CONFIGURATION" --no-restore
-        else
-          echo "No solution file found, building projects..."
-          # If projects input contains wildcards, find and build each project
-          if [[ "$PROJECTS" == *"*"* ]]; then
-            # Use find to locate projects matching the pattern
-            projects_pattern="$PROJECTS"
-            echo "Looking for projects matching: $projects_pattern"
-
-            if [[ "$projects_pattern" == "**/*.csproj" ]]; then
-              # Handle the common case of **/*.csproj
-              find . -name "*.csproj" -type f | while read -r project; do
-                echo "Building $project..."
-                dotnet build "$project" --configuration "$CONFIGURATION" --no-restore
-              done
-            else
-              # Handle other patterns
-              for project in $(find . -name "*.csproj" -type f); do
-                echo "Building $project..."
-                dotnet build "$project" --configuration "$CONFIGURATION" --no-restore
-              done
-            fi
-          else
-            # Single project or space-separated list
-            dotnet build $PROJECTS --configuration "$CONFIGURATION" --no-restore
-          fi
-        fi
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "BUILD_PHASE=Build" >> "$GITHUB_ENV"
+        echo "::group::🔷 [2/3] Build"
+        echo "Building: $BUILD_TARGET ($CONFIGURATION)"
+        dotnet build "$BUILD_TARGET" --configuration "$CONFIGURATION" --no-restore
         echo "::endgroup::"
+
     - name: Test
       if: ${{ inputs.run-tests == 'true' }}
       shell: bash
@@ -155,48 +198,61 @@ runs:
         CONFIGURATION: ${{ inputs.configuration }}
       run: |
         set -euo pipefail
-        echo "::group::🔷 [CHECKPOINT 3/3] Run Tests"
-        # Handle wildcards in test projects
-        if [[ "$TEST_PROJECTS" == *"*"* ]]; then
-          test_pattern="$TEST_PROJECTS"
-          echo "Looking for test projects matching: $test_pattern"
+        shopt -s globstar nullglob
+        echo "BUILD_PHASE=Test" >> "$GITHUB_ENV"
+        echo "::group::🔷 [3/3] Run Tests"
 
-          if [[ "$test_pattern" == "**/*UnitTests/*.csproj" ]] || [[ "$test_pattern" == "**/*Tests/*.csproj" ]] || [[ "$test_pattern" == "**/*Test*.csproj" ]]; then
-            # Handle common test patterns
-            found_tests=false
-            for test_project in $(find . -name "*Test*.csproj" -o -name "*Tests.csproj" -type f); do
-              echo "Testing $test_project..."
-              dotnet test "$test_project" --no-build --verbosity normal --configuration "$CONFIGURATION"
-              found_tests=true
-            done
+        # Expand the test glob(s) the same way the build target was resolved.
+        declare -a TEST_SET=()
+        read -ra TEST_PATTERNS <<< "$TEST_PROJECTS"
+        for pattern in "${TEST_PATTERNS[@]}"; do
+          for match in $pattern; do
+            [[ "$match" == *"/obj/"* || "$match" == *"/bin/"* ]] && continue
+            [[ -f "$match" ]] || continue
+            TEST_SET+=("$match")
+          done
+        done
+        mapfile -t TEST_SET < <(printf '%s\n' "${TEST_SET[@]}" | awk 'NF && !seen[$0]++')
 
-            if [ "$found_tests" = false ]; then
-              echo "No test projects found matching pattern: $test_pattern"
-              echo "Skipping tests..."
-            fi
+        if [[ ${#TEST_SET[@]} -eq 0 ]]; then
+          # Fail loud, never pass quiet: if test-looking projects exist but the
+          # glob missed them, this is almost certainly a naming/glob mismatch
+          # that would otherwise produce a false-green run.
+          mapfile -t LOOKS_LIKE_TESTS < <(find . -iname '*test*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' | sort)
+          if [[ ${#LOOKS_LIKE_TESTS[@]} -gt 0 ]]; then
+            echo "::warning title=⚠️ [DOTNET] Tests not run::run-tests is enabled but '$TEST_PROJECTS' matched no projects, yet ${#LOOKS_LIKE_TESTS[@]} test-looking project(s) exist. Tests did NOT run — check the test-projects glob."
+            printf '  - %s\n' "${LOOKS_LIKE_TESTS[@]}"
           else
-            # Handle other wildcard patterns
-            for test_project in $(find . -name "*.csproj" -type f | grep -i test); do
-              echo "Testing $test_project..."
-              dotnet test "$test_project" --no-build --verbosity normal --configuration "$CONFIGURATION"
-            done
+            echo "No test projects matched '$TEST_PROJECTS' and none were found in the repo — skipping tests."
           fi
-        else
-          # Single test project or space-separated list
-          echo "Running tests for: $TEST_PROJECTS"
-          dotnet test $TEST_PROJECTS --no-build --verbosity normal --configuration "$CONFIGURATION"
+          echo "::endgroup::"
+          exit 0
         fi
-        echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+        results_dir="${RUNNER_TEMP:-/tmp}/test-results"
+        mkdir -p "$results_dir"
+        echo "Running ${#TEST_SET[@]} test project(s):"
+        for test_project in "${TEST_SET[@]}"; do
+          echo "→ $test_project"
+          # --no-build is safe: every test project is part of the build target.
+          # trx logs give machine-readable results; consumers can publish them
+          # or add GitHubActionsTestLogger for inline annotations.
+          dotnet test "$test_project" \
+            --no-build \
+            --configuration "$CONFIGURATION" \
+            --verbosity normal \
+            --logger "trx;LogFileName=$(basename "$test_project" .csproj).trx" \
+            --results-directory "$results_dir"
+        done
         echo "::endgroup::"
 
     - name: Report failure
       if: failure()
       shell: bash
       env:
-        PROJECTS: ${{ inputs.projects }}
         CONFIGURATION: ${{ inputs.configuration }}
       run: |
-        echo "::error title=❌ [DOTNET] Build failed::projects: $PROJECTS, config: $CONFIGURATION. Checkpoints — 1) Restore: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Build: ${CHECKPOINT_2_STATUS:-⏭️ Not reached} | 3) Tests: ${CHECKPOINT_3_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [DOTNET] Build failed::Failed during the '${BUILD_PHASE:-Setup}' phase. Target: ${BUILD_TARGET:-unresolved}, configuration: ${CONFIGURATION}."
 
 branding:
   icon: 'package'

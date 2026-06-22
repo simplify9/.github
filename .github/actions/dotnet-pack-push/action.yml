@@ -2,19 +2,23 @@
 # Dotnet Pack and Push
 # =============================================================================
 # Packs .NET project(s) into NuGet packages and pushes them to a feed.
-# Auto-discovers projects from a glob (excluding bin/obj) or takes an explicit
-# list, then packs each into ./nupkg and pushes with --skip-duplicate.
 #
-# Behaviour:
-#   - Glob-aware — wildcard `projects` expand via find (bin/obj excluded);
-#     explicit space-separated lists are used verbatim.
-#   - Optional `version` is applied via /p:Version when provided.
+# Design (glob-honest, single resolved set):
+#   - The `projects` input is resolved ONCE into an explicit list of .csproj
+#     files using real bash globbing (globstar), excluding obj/ and bin/. The
+#     glob is honoured EXACTLY — `**/*.csproj`, `src/**/*.csproj`,
+#     `**/*.Sdk.csproj`, a concrete path, or a space-separated list all work.
+#   - Each resolved project is packed with --no-build (the build action runs
+#     first in the pipeline) into a single output directory, then every
+#     resulting .nupkg is pushed with --skip-duplicate so re-runs are idempotent.
+#   - An empty `projects` value is a graceful skip (these repos default it to ''
+#     to mean "this service does not publish a package"); a NON-empty value that
+#     matches nothing fails fast, so a typo can never silently publish nothing.
 #   - Secret-safe — the NuGet API key is passed via an env var (never the
 #     command line) and masked in logs.
-#   - Push uses --skip-duplicate so re-runs do not hard-fail on existing versions.
 #
 # Inputs:
-#   projects       (required) Path(s) to .csproj to pack (wildcards/multiple allowed).
+#   projects       (required) Path(s)/glob of .csproj to pack. Empty = skip.
 #   configuration  (optional) Build configuration (default: Release).
 #   version        (optional) Semantic version for the NuGet package(s).
 #   api-key        (required) API key for the NuGet feed.
@@ -31,7 +35,7 @@
 #         - name: Pack and push
 #           uses: simplify9/.github/.github/actions/dotnet-pack-push@main
 #           with:
-#             projects: '**/*.csproj'
+#             projects: '**/*.Sdk.csproj'
 #             version: ${{ needs.version.outputs.version }}
 #             api-key: ${{ secrets.NUGET_API_KEY }}
 #             nuget-source: 'https://api.nuget.org/v3/index.json'
@@ -42,7 +46,7 @@ description: 'Reusable action to pack .NET project(s) and push the resulting NuG
 
 inputs:
   projects:
-    description: 'Path(s) to .csproj file(s) to pack (supports wildcards and multiple projects)'
+    description: 'Path(s)/glob of .csproj file(s) to pack. Empty value skips packing.'
     required: true
   configuration:
     description: 'Build configuration'
@@ -61,15 +65,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Initialize NuGet pack and push
-      shell: bash
-      run: |
-        set -euo pipefail
-        {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending"
-        } >> "$GITHUB_ENV"
-
     - name: Pack NuGet packages
       shell: bash
       env:
@@ -78,144 +73,99 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        echo "::group::🔷 [CHECKPOINT 1/2] Pack NuGet Packages"
-        # Create output directory
-        mkdir -p ./nupkg
+        shopt -s globstar nullglob
+        echo "BUILD_PHASE=Pack" >> "$GITHUB_ENV"
+        echo "::group::🔷 [1/2] Pack NuGet Packages"
 
-        projects_input="$PROJECTS"
-        echo "Processing projects: $projects_input"
-
-        # Handle wildcards and multiple projects
-        if [[ "$projects_input" == *"*"* ]]; then
-          echo "Wildcard pattern detected, finding matching projects..."
-
-          if [[ "$projects_input" == "**/*.csproj" ]]; then
-            # Handle the common case of **/*.csproj
-            project_files=$(find . -name "*.csproj" -type f | grep -v "/bin/" | grep -v "/obj/")
-          else
-            # Handle other wildcard patterns
-            project_files=$(find . -name "*.csproj" -type f | grep -v "/bin/" | grep -v "/obj/")
-          fi
-
-          if [[ -z "$project_files" ]]; then
-            echo "Error: No .csproj files found matching pattern: $projects_input"
-            exit 1
-          fi
-
-          echo "Found project files:"
-          echo "$project_files"
-
-        else
-          # Handle space-separated or single project list
-          project_files="$projects_input"
+        # An empty / whitespace-only input means "this repo publishes nothing".
+        if [[ -z "${PROJECTS//[[:space:]]/}" ]]; then
+          echo "No 'projects' provided — skipping NuGet pack & push."
+          echo "SKIP_PACK=true" >> "$GITHUB_ENV"
+          echo "::endgroup::"
+          exit 0
         fi
 
-        # Pack each project
-        packed_count=0
-        for project in $project_files; do
-          # Skip if project file doesn't exist
-          if [ ! -f "$project" ]; then
-            echo "::warning title=NuGet project not found::Skipping '$project' — file does not exist."
-            continue
-          fi
-
-          echo "Processing project: $project"
-
-          # Pack with or without version
-          if [ -z "$VERSION" ]; then
-            echo "Packing $project without explicit version..."
-            if dotnet pack "$project" --configuration "$CONFIGURATION" --no-build --output ./nupkg; then
-              echo "✅ Successfully packed: $project"
-              packed_count=$((packed_count + 1))
-            else
-              echo "❌ Failed to pack: $project"
-              exit 1
-            fi
-          else
-            echo "Packing $project with version $VERSION..."
-            if dotnet pack "$project" --configuration "$CONFIGURATION" --no-build --output ./nupkg /p:Version="$VERSION"; then
-              echo "✅ Successfully packed: $project"
-              packed_count=$((packed_count + 1))
-            else
-              echo "❌ Failed to pack: $project"
-              exit 1
-            fi
-          fi
+        # Expand the glob(s) into a unique list of existing .csproj files.
+        # Pathname expansion yields one element per match, so paths containing
+        # spaces are preserved correctly.
+        declare -a PROJECT_SET=()
+        read -ra PATTERNS <<< "$PROJECTS"
+        for pattern in "${PATTERNS[@]}"; do
+          for match in $pattern; do
+            [[ "$match" == *"/obj/"* || "$match" == *"/bin/"* ]] && continue
+            [[ "$match" == *.csproj && -f "$match" ]] || continue
+            PROJECT_SET+=("$match")
+          done
         done
+        mapfile -t PROJECT_SET < <(printf '%s\n' "${PROJECT_SET[@]}" | awk 'NF && !seen[$0]++')
 
-        echo "Successfully packed $packed_count project(s)"
-
-        if [ $packed_count -eq 0 ]; then
-          echo "Error: No projects were successfully packed!"
+        if [[ ${#PROJECT_SET[@]} -eq 0 ]]; then
+          echo "::error title=❌ [DOTNET] No packable projects::'projects' was set to '$PROJECTS' but no matching .csproj files were found."
           exit 1
         fi
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ [1/2] Packed $packed_count project(s)"
+
+        nupkg_dir="${RUNNER_TEMP:-/tmp}/nupkg"
+        rm -rf "$nupkg_dir"; mkdir -p "$nupkg_dir"
+        echo "NUPKG_DIR=$nupkg_dir" >> "$GITHUB_ENV"
+
+        echo "Packing ${#PROJECT_SET[@]} project(s) (${VERSION:-no explicit version}):"
+        for project in "${PROJECT_SET[@]}"; do
+          echo "→ $project"
+          declare -a pack_args=("$project" --configuration "$CONFIGURATION" --no-build --output "$nupkg_dir")
+          [[ -n "$VERSION" ]] && pack_args+=("-p:Version=$VERSION")
+          dotnet pack "${pack_args[@]}"
+        done
+
+        echo "✅ [1/2] Packed ${#PROJECT_SET[@]} project(s) into $nupkg_dir"
         echo "::endgroup::"
+
     - name: Push NuGet packages
+      if: ${{ env.SKIP_PACK != 'true' }}
       shell: bash
       env:
         API_KEY: ${{ inputs.api-key }}
         NUGET_SOURCE: ${{ inputs.nuget-source }}
       run: |
         set -euo pipefail
-        echo "::group::🔷 [CHECKPOINT 2/2] Push NuGet Packages"
+        echo "BUILD_PHASE=Push" >> "$GITHUB_ENV"
         echo "::add-mask::$API_KEY"
+        echo "::group::🔷 [2/2] Push NuGet Packages"
 
-        # Validate required inputs
-        if [ -z "$API_KEY" ]; then
-          echo "Error: API key is required but not provided!"
+        if [[ -z "$API_KEY" ]]; then
+          echo "::error title=❌ [DOTNET] Missing API key::api-key input is required to push."
+          exit 1
+        fi
+        if [[ -z "$NUGET_SOURCE" ]]; then
+          echo "::error title=❌ [DOTNET] Missing feed::nuget-source input is required to push."
           exit 1
         fi
 
-        if [ -z "$NUGET_SOURCE" ]; then
-          echo "Error: NuGet source is required but not provided!"
+        shopt -s nullglob
+        declare -a PACKAGES=("$NUPKG_DIR"/*.nupkg)
+        if [[ ${#PACKAGES[@]} -eq 0 ]]; then
+          echo "::error title=❌ [DOTNET] No packages::No .nupkg files were produced in $NUPKG_DIR."
           exit 1
         fi
 
-        # Check if any nupkg files were created
-        if ! ls ./nupkg/*.nupkg 1> /dev/null 2>&1; then
-          echo "Error: No NuGet packages found in ./nupkg/"
-          exit 1
-        fi
-
-        echo "Found NuGet packages to push:"
-        ls -la ./nupkg/*.nupkg
-
-        echo "Pushing NuGet packages to: $NUGET_SOURCE"
-        echo "Using provided API key for authentication"
-
-        # Push each package individually for better error handling
-        pushed_count=0
-        failed_count=0
-
-        for nupkg in ./nupkg/*.nupkg; do
-          if [ -f "$nupkg" ]; then
-            echo "Pushing package: $(basename "$nupkg")"
-            if dotnet nuget push "$nupkg" --api-key "$API_KEY" --source "$NUGET_SOURCE" --skip-duplicate; then
-              echo "✅ Successfully pushed: $(basename "$nupkg")"
-              pushed_count=$((pushed_count + 1))
-            else
-              echo "❌ Failed to push: $(basename "$nupkg")"
-              failed_count=$((failed_count + 1))
-            fi
+        echo "Pushing ${#PACKAGES[@]} package(s) → $NUGET_SOURCE"
+        pushed=0 failed=0
+        for nupkg in "${PACKAGES[@]}"; do
+          echo "→ $(basename "$nupkg")"
+          # --skip-duplicate keeps re-runs idempotent (existing versions are a no-op).
+          if dotnet nuget push "$nupkg" --api-key "$API_KEY" --source "$NUGET_SOURCE" --skip-duplicate; then
+            pushed=$((pushed + 1))
+          else
+            echo "::warning title=NuGet push failed::$(basename "$nupkg")"
+            failed=$((failed + 1))
           fi
         done
 
-        echo "Push summary: $pushed_count successful, $failed_count failed"
-
-        if [ $failed_count -gt 0 ]; then
-          echo "Some packages failed to push"
+        echo "Push summary: $pushed succeeded, $failed failed"
+        if [[ $failed -gt 0 ]]; then
+          echo "::error title=❌ [DOTNET] Push failed::$failed package(s) failed to push to $NUGET_SOURCE."
           exit 1
         fi
-
-        if [ $pushed_count -eq 0 ]; then
-          echo "No packages were pushed"
-          exit 1
-        fi
-
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ [2/2] Pushed $pushed_count package(s) → $NUGET_SOURCE"
+        echo "✅ [2/2] Pushed $pushed package(s) → $NUGET_SOURCE"
         echo "::endgroup::"
 
     - name: Report failure
@@ -225,7 +175,7 @@ runs:
         PROJECTS: ${{ inputs.projects }}
         NUGET_SOURCE: ${{ inputs.nuget-source }}
       run: |
-        echo "::error title=❌ [DOTNET] Pack/push failed::projects: $PROJECTS, feed: $NUGET_SOURCE. Checkpoints — 1) Pack: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Push: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+        echo "::error title=❌ [DOTNET] Pack/push failed::Failed during the '${BUILD_PHASE:-Pack}' phase. projects: ${PROJECTS}, feed: ${NUGET_SOURCE}."
 
 branding:
   icon: 'package'
