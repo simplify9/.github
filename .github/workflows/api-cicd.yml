@@ -606,13 +606,17 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [version, build]
-    # Tag only after a successful build so tags never reference an unshipped
-    # version.
+    needs: [version, build, deploy-development, deploy-staging, deploy-production]
+    # Tag only after all requested deploys succeed so tags always reference a shipped version.
+    # Unselected deploy jobs (inputs.deploy-to-X is false) are skipped — only a failed deploy
+    # should block tagging.
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
-          && needs.build.result == 'success' }}
+          && needs.build.result == 'success'
+          && (needs['deploy-development'].result == 'success' || needs['deploy-development'].result == 'skipped')
+          && (needs['deploy-staging'].result == 'success' || needs['deploy-staging'].result == 'skipped')
+          && (needs['deploy-production'].result == 'success' || needs['deploy-production'].result == 'skipped') }}
     permissions:
       contents: write
     steps:

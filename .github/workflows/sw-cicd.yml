@@ -512,14 +512,16 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [version, nuget, ci]
-    # Tag only after a successful build so tags never reference an unshipped
-    # version. A skipped nuget job (no nuget-projects) must not block tagging.
+    needs: [version, nuget, ci, deploy-development]
+    # Tag only after a successful deploy so tags always reference a shipped version.
+    # A skipped nuget job (no nuget-projects) or skipped deploy (deploy-to-development
+    # is false) must not block tagging — only a failed deploy should block it.
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
           && needs.ci.result == 'success'
-          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped')
+          && (needs['deploy-development'].result == 'success' || needs['deploy-development'].result == 'skipped') }}
     permissions:
       contents: write
     steps:
