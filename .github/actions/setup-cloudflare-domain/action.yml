@@ -203,6 +203,7 @@ runs:
             # Genuine failure. status=failed lets downstream consumers tell this
             # apart from "never ran" (empty output).
             echo "status=failed" >> "$GITHUB_OUTPUT"
+            echo "CF_DOMAIN_CP2_STATUS=❌ FAILED" >> "$GITHUB_ENV"
             echo "❌ Failed to add custom domain (HTTP $http_code): $ERROR_MSG"
             # RESPONSE is valid JSON here (its .success was parsed above); log just
             # the errors array rather than dumping the whole body.
