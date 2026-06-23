@@ -830,7 +830,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v5
         with:
-          version: latest
+          version: v4.2.0
 
       - name: Prepare Helm chart metadata
         shell: bash

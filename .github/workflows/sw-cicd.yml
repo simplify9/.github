@@ -361,7 +361,7 @@ jobs:
           chart-name: ${{ inputs.chart-name }}
           chart-path: ${{ inputs.chart-path }}
           version: ${{ needs.version.outputs.version }}
-          helm-version: '3.2.4'
+          helm-version: 'v4.2.0'
           update-dependencies: 'true'
           publish-method: 'chartmuseum'
           chartmuseum-url: ${{ env.CHART_REPO_URL }}
