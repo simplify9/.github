@@ -171,6 +171,8 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
+      git-tag: ${{ steps.semver.outputs.git-tag }}
+      is-release: ${{ steps.semver.outputs.is-release }}
     steps:
       - name: Announce version job
         run: |
@@ -190,6 +192,12 @@ jobs:
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
+          # Only the default branch produces a clean, git-taggable release version;
+          # other branches get an ephemeral prerelease (e.g. 2.0.68-staging.45) so they
+          # never collide on the shared git-tag namespace.
+          release-branch: ${{ github.event.repository.default_branch }}
+          current-ref: ${{ github.ref_name }}
+          build-id: ${{ github.run_number }}
 
       - name: Write version job summary
         if: always()
@@ -330,6 +338,8 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
+          # Org requirement: EVERY pushed image carries the 'latest' tag, on any branch.
+          tag-latest: 'true'
 
       - name: Confirm Docker image built
         run: |
@@ -530,7 +540,7 @@ jobs:
         with:
           github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          tag: ${{ needs.version.outputs.version }}
+          tag: ${{ needs.version.outputs.git-tag }}
           sha: ${{ github.sha }}
 
       - name: Write tag job summary

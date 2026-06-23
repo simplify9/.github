@@ -9,22 +9,29 @@
 #     it hit the network (git fetch --tags); if that fetch then fails it errors
 #     out rather than silently computing patch 0. Callers SHOULD checkout with
 #     fetch-depth: 0 so no fetch is needed (see Usage).
-#   - Only clean numeric release tags ("<major>.<minor>.<N>", N integer) are
-#     considered. Prerelease/build-metadata tags (e.g. 1.2.0-rc.1) and any
-#     non-numeric patch are ignored, so a stray tag can never reset patch to 0.
-#   - If no release tag matches "<major>.<minor>.*", the patch starts at 0.
-#     Otherwise the highest matching tag's patch component is incremented.
+#   - The patch is the highest existing patch on the "<major>.<minor>." line + 1,
+#     counting BOTH clean tags ("X.Y.N") and qualified branch tags
+#     ("X.Y.N-<branch>.<run>") — so the counter advances even when only
+#     non-release branches are built. Tags with no numeric patch are ignored.
+#   - The IMAGE version is always a clean x.y.z. The git-tag output is clean on
+#     the release branch and qualified (x.y.z-<branch>.<run>) elsewhere, so two
+#     branches never collide on the shared git-tag namespace.
 #   - Unauthenticated by design — operates purely on local Git refs, no API call.
-#     This action only *computes* a version; tag creation is a separate concern
-#     (see tag-github-origin, which guards against version collisions).
+#     This action only *computes* values; tag creation is a separate concern
+#     (see tag-github-origin, which guards against same-name collisions).
 #
 # Inputs:
-#   major  (required)  Major version number (integer, e.g. 1).
-#   minor  (required)  Minor version number (integer, e.g. 2).
+#   major           (required)  Major version number (integer, e.g. 1).
+#   minor           (required)  Minor version number (integer, e.g. 2).
+#   release-branch  (optional)  Branch that gets the clean git tag.
+#   current-ref     (optional)  Ref being built (github.ref_name).
+#   build-id        (optional)  Per-run id (github.run_number) for qualified tags.
 #
 # Outputs (set only on success — on hard failure the step exits non-zero and you
 # should gate on steps.<id>.outcome, not on an output):
-#   version   The computed semantic version (e.g. 1.2.3).
+#   version    Clean image/semantic version (e.g. 1.2.3).
+#   git-tag    Git tag to create (clean on release branch, else x.y.z-<branch>.<run>).
+#   is-release 'true' on the release branch, else 'false'.
 #
 # Concurrency / races: because the version is derived from existing tags, two
 # runs racing on the same major.minor line could compute the same patch. Callers
@@ -61,11 +68,35 @@ inputs:
   minor:
     description: 'Minor version number (integer, e.g. 2).'
     required: true
+  release-branch:
+    description: >-
+      Branch that gets a CLEAN git tag (a real release, e.g. the repo default
+      branch). Other branches get a qualified, collision-proof git tag
+      (x.y.z-<branch>.<run>). The image version is always a clean x.y.z either
+      way. Leave empty to always treat the build as a release (clean git tag).
+    required: false
+    default: ''
+  current-ref:
+    description: 'Branch/ref currently being built (pass github.ref_name). Compared against release-branch and used to qualify the git tag.'
+    required: false
+    default: ''
+  build-id:
+    description: >-
+      Unique-per-run id (pass github.run_number) appended to the qualified git
+      tag on non-release branches so it never collides across runs/branches.
+    required: false
+    default: ''
 
 outputs:
   version:
-    description: 'Computed semantic version (e.g. 1.2.3). Set only on success.'
+    description: 'Image/semantic version — always a clean x.y.z (e.g. 1.2.3). Use this for the container image tag. Set only on success.'
     value: ${{ steps.semver.outputs.version }}
+  git-tag:
+    description: 'Git tag to create: clean x.y.z on the release branch, or x.y.z-<branch>.<run> elsewhere (collision-proof). Pass this to tag-github-origin.'
+    value: ${{ steps.semver.outputs.git-tag }}
+  is-release:
+    description: "'true' when this build is on the release branch (clean git tag); 'false' for a qualified branch tag."
+    value: ${{ steps.semver.outputs.is-release }}
 
 runs:
   using: "composite"
@@ -76,6 +107,9 @@ runs:
       env:
         MAJOR: ${{ inputs.major }}
         MINOR: ${{ inputs.minor }}
+        RELEASE_BRANCH: ${{ inputs.release-branch }}
+        CURRENT_REF: ${{ inputs.current-ref }}
+        BUILD_ID: ${{ inputs.build-id }}
       run: |
         set -euo pipefail
 
@@ -107,29 +141,60 @@ runs:
         fi
 
         # --- Find the highest existing patch on this major.minor line ---------
-        # Match ONLY clean numeric releases (X.Y.Z). The grep filters out
-        # prerelease/build tags (1.2.0-rc.1) and anything non-numeric, and
-        # sort -V gives true version ordering (1.2.10 > 1.2.9).
+        # Count BOTH clean releases (X.Y.Z) and qualified branch tags
+        # (X.Y.Z-<branch>.<run>) so the patch keeps advancing even when only
+        # non-release branches are built (their tags carry the same X.Y.<patch>).
+        # We extract just the numeric patch right after the prefix, then take the
+        # numeric max. (Build-metadata-only tags with no patch are still excluded.)
         prefix="${major}.${minor}."
-        latest_tag="$(
+        latest_patch="$(
           git tag --list "${prefix}*" \
-            | grep -E "^${major}\.${minor}\.[0-9]+$" \
-            | sort -V \
+            | grep -E "^${major}\.${minor}\.[0-9]+(-.*)?$" \
+            | sed -E "s/^${major}\.${minor}\.([0-9]+).*$/\1/" \
+            | sort -n \
             | tail -n1 || true
         )"
 
-        if [[ -z "$latest_tag" ]]; then
+        if [[ -z "$latest_patch" ]]; then
           patch=0
-          echo "No existing ${prefix}* release tags — starting at patch 0."
+          echo "No existing ${prefix}* tags — starting at patch 0."
         else
-          patch="${latest_tag##*.}"          # component after the final dot
-          patch=$((patch + 1))
-          echo "Highest existing tag on this line: ${latest_tag} — next patch: ${patch}."
+          patch=$((latest_patch + 1))
+          echo "Highest existing patch on this line: ${latest_patch} — next patch: ${patch}."
         fi
 
+        # The IMAGE version is always a clean x.y.z (used for the registry tag).
         version="${major}.${minor}.${patch}"
-        echo "version=${version}" >> "$GITHUB_OUTPUT"
-        echo "✅ Computed version: ${version}"
+
+        # --- Git tag: clean on the release branch, qualified elsewhere --------------
+        # Git tags share one repo-global namespace, so a plain x.y.z created from two
+        # branches collides. The release branch gets the clean tag (a real release);
+        # every other branch gets x.y.z-<branch>.<run>, which is unique per run and
+        # therefore never collides — while still carrying the patch so the counter
+        # above keeps advancing. The image tag is unaffected (always clean x.y.z).
+        if [[ -z "$RELEASE_BRANCH" || "$CURRENT_REF" == "$RELEASE_BRANCH" ]]; then
+          is_release=true
+          git_tag="$version"
+        else
+          is_release=false
+          # Sanitize the ref into a valid SemVer-prerelease / git-ref identifier.
+          safe_ref="$(printf '%s' "$CURRENT_REF" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g; s/-{2,}/-/g; s/^-+//; s/-+$//')"
+          [[ -z "$safe_ref" ]] && safe_ref="branch"
+          if [[ -n "$BUILD_ID" ]]; then
+            git_tag="${version}-${safe_ref}.${BUILD_ID}"
+          else
+            git_tag="${version}-${safe_ref}"
+          fi
+        fi
+
+        {
+          echo "version=${version}"
+          echo "git-tag=${git_tag}"
+          echo "is-release=${is_release}"
+        } >> "$GITHUB_OUTPUT"
+        echo "✅ image version=${version} | git tag=${git_tag} | release=${is_release}"
 
         # Full tag dump only under step-debug logging (RUNNER_DEBUG=1), to avoid
         # log noise in repos with many tags.
