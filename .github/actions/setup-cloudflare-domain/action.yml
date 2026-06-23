@@ -93,6 +93,14 @@ runs:
           echo "CF_DOMAIN_CP2_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
+    - name: Announce action
+      shell: bash
+      env:
+        PROJECT_NAME: ${{ inputs.project-name }}
+        DOMAIN_NAME: ${{ inputs.domain-name }}
+      run: |
+        echo "::notice title=🌐 Cloudflare Custom Domain Setup::Adding domain '$DOMAIN_NAME' to Pages project '$PROJECT_NAME'"
+
     - name: Install jq for JSON parsing
       shell: bash
       run: |
@@ -111,6 +119,7 @@ runs:
         DOMAIN_NAME: ${{ inputs.domain-name }}
       run: |
         set -euo pipefail
+        echo "::group::🔍 [1/2] Check domain existence"
         echo "::add-mask::$API_TOKEN"
         echo "Checking if domain '$DOMAIN_NAME' is already configured..."
 
@@ -143,6 +152,7 @@ runs:
           echo "::warning title=Domain check failed::Could not check existing domains, will attempt to add"
         fi
         echo "CF_DOMAIN_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
 
     - name: Add custom domain
       id: add-domain
@@ -156,6 +166,7 @@ runs:
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
       run: |
         set -euo pipefail
+        echo "::group::🌐 [2/2] Configure custom domain"
         echo "::add-mask::$API_TOKEN"
         echo "Adding custom domain '$DOMAIN_NAME' to project '$PROJECT_NAME'..."
 
@@ -190,6 +201,7 @@ runs:
           fi
           echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ Domain configured — $DOMAIN_NAME → $PROJECT_NAME"
+          echo "::endgroup::"
         else
           ERROR_MSG="$(printf '%s' "$RESPONSE" | jq -r '.errors[0].message // "Unknown error"')"
 
@@ -199,6 +211,7 @@ runs:
             echo "ℹ️ Domain '$DOMAIN_NAME' is already configured — nothing to do"
             echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
             echo "✅ Domain configured — $DOMAIN_NAME → $PROJECT_NAME"
+            echo "::endgroup::"
           else
             # Genuine failure. status=failed lets downstream consumers tell this
             # apart from "never ran" (empty output).
@@ -208,6 +221,7 @@ runs:
             # RESPONSE is valid JSON here (its .success was parsed above); log just
             # the errors array rather than dumping the whole body.
             echo "API errors: $(printf '%s' "$RESPONSE" | jq -c '.errors // []')"
+            echo "::endgroup::"
 
             if [ "$FAIL_ON_ERROR" = "true" ]; then
               exit 1
@@ -225,9 +239,11 @@ runs:
         DOMAIN_NAME: ${{ inputs.domain-name }}
       run: |
         set -euo pipefail
+        echo "::group::🌐 [2/2] Configure custom domain"
         echo "status=already-configured" >> "$GITHUB_OUTPUT"
         echo "✅ Domain '$DOMAIN_NAME' was already configured"
         echo "CF_DOMAIN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
 
     - name: Write domain summary
       if: always()
