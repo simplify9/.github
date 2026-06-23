@@ -2,9 +2,11 @@
 # Docker Build and Push
 # =============================================================================
 # Builds a Docker image (optionally multi-platform via Buildx/QEMU) and pushes
-# it to a container registry. Tags are derived from the supplied version plus a
-# 'latest' tag on the default branch. Registry auth uses docker/login-action so
-# credentials are never placed on a command line.
+# it to a container registry. Each build publishes up to three independent,
+# short tags: the version (x.y.z), the branch name (auto-detected from the
+# running ref), and 'latest' (moving, on by default; opt out via tag-latest).
+# Keeping them separate avoids one long combined tag. Registry auth uses
+# docker/login-action so credentials are never placed on a command line.
 #
 # Behaviour:
 #   - QEMU is only set up for non-native/multi-arch builds (skipped for the
@@ -23,7 +25,9 @@
 #   context        (optional)  Build context. Default '.'.
 #   platforms      (optional)  Target platforms. Default 'linux/amd64'.
 #   push           (optional)  Push image to registry. Default 'true'.
+#   tag-latest     (optional)  Also tag/push 'latest' on every push. Default 'true'.
 #   cache          (optional)  Enable GHA build cache. Default 'true'.
+#   (The branch-named tag is auto-detected from github.ref_name — not an input.)
 #   build-args     (optional)  Newline-separated build args (KEY=VALUE).
 #   build-secrets  (optional)  Newline-separated BuildKit secrets (KEY=VALUE).
 #
@@ -83,6 +87,17 @@ inputs:
     description: 'Push image to registry'
     required: false
     default: 'true'
+  # When 'true', a 'latest' tag is pushed alongside the versioned tag on EVERY push,
+  # so the registry's 'latest' always resolves to the most recently pushed image
+  # (regardless of branch). Set to 'false' for builds that must not move 'latest'
+  # (e.g. throwaway feature-branch images).
+  tag-latest:
+    description: "Also tag and push 'latest' on every push"
+    required: false
+    default: 'true'
+  # NOTE: the branch-named tag is NOT an input — it is auto-detected from the ref the
+  # workflow is running on (github.ref_name) and always added (sanitized to a valid
+  # Docker tag). So a build on 'staging' always also tags the image ':staging'.
   # GHA cache notes:
   # (1) Legacy GHA cache backend shut down 2025-04-15; only Cache Service API v2 is supported.
   #     Staying on current action versions handles this automatically — no config change needed.
@@ -157,15 +172,41 @@ runs:
         echo "DOCKER_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ [1/2] Registry auth — $REGISTRY"
 
+    - name: Sanitize branch tag
+      id: branchtag
+      shell: bash
+      env:
+        # Auto-detected from the ref being built (e.g. 'staging', 'development') —
+        # no input required; the running branch is always added as a tag.
+        BRANCH: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+        # Reduce the branch name to a valid Docker tag: lowercase, keep only
+        # [a-z0-9_.-], collapse runs to '-', trim leading/trailing separators,
+        # cap at 128 chars. Empty -> empty output (branch tag omitted).
+        if [[ -n "${BRANCH:-}" ]]; then
+          safe="$(printf '%s' "$BRANCH" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9_.-]+/-/g; s/-{2,}/-/g; s/^[._-]+//; s/[._-]+$//')"
+          safe="${safe:0:128}"
+        else
+          safe=""
+        fi
+        echo "value=${safe}" >> "$GITHUB_OUTPUT"
+        echo "🏷️ Branch tag: '${safe:-<none>}'"
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v6
       with:
         images: |
           ${{ inputs.registry != 'docker.io' && format('{0}/{1}', inputs.registry, inputs.image-name) || inputs.image-name }}
+        # Three independent tags per build: the version (x.y.z), the branch name
+        # (moving), and latest (moving) — kept separate so no single tag gets long.
         tags: |
           type=raw,value=${{ inputs.version }}
-          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=${{ steps.branchtag.outputs.value }},enable=${{ steps.branchtag.outputs.value != '' }}
+          type=raw,value=latest,enable=${{ inputs.tag-latest == 'true' }}
         flavor: |
           latest=false
 

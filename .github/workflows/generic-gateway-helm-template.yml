@@ -346,6 +346,8 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
+      git-tag: ${{ steps.semver.outputs.git-tag }}
+      is-release: ${{ steps.semver.outputs.is-release }}
     steps:
       - name: Announce version job
         run: |
@@ -365,6 +367,12 @@ jobs:
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
+          # Only the default branch produces a clean, git-taggable release version;
+          # other branches get an ephemeral prerelease (e.g. 2.0.68-staging.45) so they
+          # never collide on the shared git-tag namespace.
+          release-branch: ${{ github.event.repository.default_branch }}
+          current-ref: ${{ github.ref_name }}
+          build-id: ${{ github.run_number }}
 
       - name: Write version job summary
         if: always()
@@ -394,6 +402,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
+      git-tag: ${{ steps.nuget-semver.outputs.git-tag }}
     env:
       GITHUB_TOKEN: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
       NUGET_AUTH_TOKEN: ${{ secrets.nuget-api-key }}
@@ -433,6 +442,12 @@ jobs:
         with:
           major: ${{ inputs.nuget-major-version }}
           minor: ${{ inputs.nuget-minor-version }}
+          # Same branch scoping as the image version: only the default branch yields a
+          # clean, taggable/pushable NuGet version; other branches get an ephemeral
+          # prerelease so they never collide on git tags or the NuGet feed.
+          release-branch: ${{ github.event.repository.default_branch }}
+          current-ref: ${{ github.ref_name }}
+          build-id: ${{ github.run_number }}
 
       - name: Dotnet Restore Build and Test
         if: ${{ inputs.package-nuget }}
@@ -507,6 +522,8 @@ jobs:
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
           build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
+          # Org requirement: EVERY pushed image carries the 'latest' tag, on any branch.
+          tag-latest: 'true'
 
       - name: Confirm Docker image built
         run: |
@@ -1125,7 +1142,7 @@ jobs:
         with:
           github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          tag: ${{ needs.version.outputs.version }}
+          tag: ${{ needs.version.outputs.git-tag }}
           sha: ${{ github.sha }}
 
       - name: Tag NuGet version on GitHub origin
@@ -1134,5 +1151,5 @@ jobs:
         with:
           github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          tag: ${{ needs.nuget.outputs.version }}
+          tag: ${{ needs.nuget.outputs.git-tag }}
           sha: ${{ github.sha }}

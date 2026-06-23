@@ -32,6 +32,11 @@ on:
         required: false
         default: Dockerfile
         type: string
+      tag_latest:
+        description: "Also tag and push 'latest' on every push, so the registry's 'latest' always resolves to the most recently pushed image"
+        required: false
+        default: true
+        type: boolean
 
 # NOTE: we do NOT declare workflow_call.secrets here; we resolve them dynamically below.
 
@@ -150,10 +155,20 @@ jobs:
           VER: ${{ inputs.version }}
           RUN: ${{ github.run_number }}
           BRANCH: ${{ steps.branch.outputs.name }}
+          TAG_LATEST: ${{ inputs.tag_latest }}
         run: |
           set -euo pipefail
           echo "::group::🐳 [CHECKPOINT 2/2] Build and push image: ${APP}"
-          echo "→ Tags: ${EFFECTIVE_REGISTRY}/${APP}:github-${BRANCH}-${VER} | github-${BRANCH}-${RUN}"
+          # Build the tag list; 'latest' is appended on every push (unless tag_latest=false)
+          # so the registry's 'latest' always resolves to the most recently pushed image.
+          TAG_ARGS=(
+            --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$VER"
+            --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$RUN"
+          )
+          if [ "${TAG_LATEST}" = "true" ]; then
+            TAG_ARGS+=( --tag "$EFFECTIVE_REGISTRY/$APP:latest" )
+          fi
+          echo "→ Tags: $(printf '%s ' "${TAG_ARGS[@]}" | sed 's/--tag //g')"
           echo "→ Dockerfile: ${FILE} | Context: ${CTX}"
           # Disable build provenance/attestations explicitly
           # (belt & suspenders: env var + explicit flag)
@@ -164,8 +179,7 @@ jobs:
             --provenance=false \
             --cache-from "type=registry,ref=$EFFECTIVE_REGISTRY/$APP:buildcache" \
             --cache-to "type=registry,ref=$EFFECTIVE_REGISTRY/$APP:buildcache,mode=max" \
-            --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$VER" \
-            --tag "$EFFECTIVE_REGISTRY/$APP:github-$BRANCH-$RUN" \
+            "${TAG_ARGS[@]}" \
             "$CTX"
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/2] Image built and pushed — PASSED"
