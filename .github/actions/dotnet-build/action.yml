@@ -41,7 +41,7 @@
 #     build:
 #       runs-on: ubuntu-latest
 #       steps:
-#         - uses: actions/checkout@v4
+#         - uses: actions/checkout@v6
 #         - name: Restore and build
 #           uses: simplify9/.github/.github/actions/dotnet-build@main
 #           with:

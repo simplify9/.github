@@ -37,7 +37,7 @@
 #     deploy:
 #       runs-on: ubuntu-latest
 #       steps:
-#         - uses: actions/checkout@v4
+#         - uses: actions/checkout@v6
 #         - name: Generate wrangler.toml
 #           uses: simplify9/.github/.github/actions/generate-wrangler-config@main
 #           with:
@@ -51,9 +51,9 @@ description: "Generates a wrangler.toml file dynamically for Cloudflare Workers"
 
 inputs:
   compatibility-date:
-    description: "Wrangler compatibility_date (e.g. 2024-10-20)"
+    description: "Wrangler compatibility_date (e.g. 2026-06-23)"
     required: true
-    default: "2024-10-20"
+    default: "2026-06-23"
   route:
     description: "Route pattern or newline-separated list (e.g. example.com/*)"
     required: true

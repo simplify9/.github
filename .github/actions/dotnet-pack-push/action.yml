@@ -37,7 +37,7 @@
 #     publish:
 #       runs-on: ubuntu-latest
 #       steps:
-#         - uses: actions/checkout@v4
+#         - uses: actions/checkout@v6
 #         - name: Pack and push
 #           id: nuget
 #           uses: simplify9/.github/.github/actions/dotnet-pack-push@main

@@ -147,7 +147,7 @@ inputs:
   atomic:
     description: "If 'true', roll back automatically when the deploy fails (--atomic on Helm 3, --rollback-on-failure on Helm 4+). Implies --wait. Default 'false' preserves the historical no-rollback behaviour; 'true' is recommended for production."
     required: false
-    default: 'false'
+    default: 'true'
   create-namespace:
     description: 'Create namespace if it does not exist'
     required: false
