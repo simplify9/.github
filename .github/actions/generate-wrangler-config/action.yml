@@ -1,77 +1,145 @@
+# =============================================================================
+# Generate wrangler.toml
+# =============================================================================
+# Dynamically generates a wrangler.toml file for deploying Cloudflare Workers.
+# Supports plain Workers, OpenNext builds, and configurable static assets.
+#
+# Behaviour:
+#   - Writes wrangler.toml into the current working directory and exposes its
+#     path via the `config-path` output.
+#   - route accepts a single pattern or a newline-separated list; each becomes a
+#     custom-domain route under [[env.<environment>.routes]].
+#   - main entry: ".open-next/worker.js" when build-for-opennext=true, otherwise
+#     main-entry if provided, otherwise no main line (backwards compatible).
+#   - compatibility_flags defaults to ["nodejs_compat"]; pass a comma/space
+#     separated list to override, or an empty string to omit the line.
+#   - The [assets] block is emitted when assets-dir is non-empty (directory line)
+#     and/or when build-for-opennext=true or add-assets-binding=true (ASSETS
+#     binding line). Pass an empty assets-dir with no binding to omit it entirely
+#     (supports assets-less Workers).
+#
+# Inputs (kebab-case):
+#   compatibility-date    (required)  Wrangler compatibility_date (e.g. 2024-10-20).
+#   route                 (required)  Route pattern or newline-separated list.
+#   project-name          (required)  General project name.
+#   environment           (optional)  Deployment environment name (default production).
+#   assets-dir            (optional)  Static assets directory (default .vercel/output/static).
+#   build-for-opennext    (optional)  Build for OpenNext (default false).
+#   main-entry            (optional)  Explicit Worker main entry; empty = none unless OpenNext.
+#   add-assets-binding    (optional)  Add binding = "ASSETS" under [assets] (default false).
+#   compatibility-flags   (optional)  Comma/space separated flags (default nodejs_compat).
+#
+# Outputs:
+#   config-path  Path to the generated Wrangler config file (wrangler.toml).
+#
+# Usage:
+#   jobs:
+#     deploy:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v6
+#         - name: Generate wrangler.toml
+#           uses: simplify9/.github/.github/actions/generate-wrangler-config@main
+#           with:
+#             compatibility-date: '2024-10-20'
+#             route: example.com/*
+#             project-name: my-worker
+# =============================================================================
 name: "Generate wrangler.toml"
+author: 'Simplify9'
 description: "Generates a wrangler.toml file dynamically for Cloudflare Workers"
-author: "Simplify9"
 
 inputs:
-  COMPATIBILITY_DATE:
-    description: "Wrangler compatibility_date (e.g. 2024-10-20)"
+  compatibility-date:
+    description: "Wrangler compatibility_date (e.g. 2026-06-23)"
     required: true
-    default: "2024-10-20"
-  ROUTE:
+    default: "2026-06-23"
+  route:
     description: "Route pattern or newline-separated list (e.g. example.com/*)"
     required: true
-  PROJECT_NAME:
-    description: "General Project Name"
+  project-name:
+    description: "General project name"
     required: true
-  ENVIRONMENT:
+  environment:
     description: "Deployment environment name (e.g. production, staging)"
     required: false
     default: "production"
-  ASSETS_DIR:
-    description: "Directory for static assets served (wrangler [assets] directory)"
+  assets-dir:
+    description: "Directory for static assets served (wrangler [assets] directory). Empty string omits the directory line."
     required: false
     default: ".vercel/output/static"
-  BUILD_FOR_OPENNEXT:
-    description: "Build for OpenNext (uses .open-next/worker.js as main and adds ASSETS binding)"
+  build-for-opennext:
+    description: "Build for OpenNext (uses .open-next/worker.js as main and adds the ASSETS binding)"
     required: false
     default: "false"
-  MAIN_ENTRY:
-    description: "Optional explicit Worker main entry (e.g. worker.js). If empty, no main is written unless BUILD_FOR_OPENNEXT=true."
+  main-entry:
+    description: "Optional explicit Worker main entry (e.g. worker.js). If empty, no main is written unless build-for-opennext=true."
     required: false
     default: ""
-  ADD_ASSETS_BINDING:
+  add-assets-binding:
     description: "If true, add binding = \"ASSETS\" under [assets] (in addition to OpenNext behavior)."
     required: false
     default: "false"
+  compatibility-flags:
+    description: "Comma/space separated Wrangler compatibility_flags (default nodejs_compat). Empty string omits the line."
+    required: false
+    default: "nodejs_compat"
+
+outputs:
+  config-path:
+    description: "Path to the generated Wrangler config file"
+    value: ${{ steps.generate.outputs.config-path }}
 
 runs:
   using: "composite"
   steps:
-    - name: Initialize wrangler.toml generation
-      shell: bash
-      run: |
-        {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-        } >> "$GITHUB_ENV"
-
     - name: Generate wrangler.toml
+      id: generate
       shell: bash
+      env:
+        COMPATIBILITY_DATE: ${{ inputs['compatibility-date'] }}
+        ROUTE: ${{ inputs['route'] }}
+        PROJECT_NAME: ${{ inputs['project-name'] }}
+        ENVIRONMENT: ${{ inputs['environment'] }}
+        ASSETS_DIR: ${{ inputs['assets-dir'] }}
+        BUILD_FOR_OPENNEXT: ${{ inputs['build-for-opennext'] }}
+        MAIN_ENTRY: ${{ inputs['main-entry'] }}
+        ADD_ASSETS_BINDING: ${{ inputs['add-assets-binding'] }}
+        COMPATIBILITY_FLAGS: ${{ inputs['compatibility-flags'] }}
       run: |
-        echo "::group::⚡ [CHECKPOINT 1/1] Generate wrangler.toml"
         set -euo pipefail
+        echo "::group::⚡ Generate wrangler.toml"
 
-        COMPAT_DATE="${{ inputs.COMPATIBILITY_DATE }}"
-        ROUTE_INPUT="${{ inputs.ROUTE }}"
-        PROJECT_NAME="${{ inputs.PROJECT_NAME }}"
-        ENVIRONMENT="${{ inputs.ENVIRONMENT }}"
-        ASSETS_DIR="${{ inputs.ASSETS_DIR }}"
-        BUILD_FOR_OPENNEXT="${{ inputs.BUILD_FOR_OPENNEXT }}"
-        MAIN_ENTRY_INPUT="${{ inputs.MAIN_ENTRY }}"
-        ADD_ASSETS_BINDING="${{ inputs.ADD_ASSETS_BINDING }}"
+        # Values come from env (never interpolated into the script). PROJECT_NAME,
+        # ENVIRONMENT, ASSETS_DIR, BUILD_FOR_OPENNEXT and ADD_ASSETS_BINDING are
+        # used directly from the environment; the rest are renamed for clarity.
+        COMPAT_DATE="$COMPATIBILITY_DATE"
+        ROUTE_INPUT="$ROUTE"
+        MAIN_ENTRY_INPUT="$MAIN_ENTRY"
+        COMPAT_FLAGS_INPUT="$COMPATIBILITY_FLAGS"
 
-        [ -z "$COMPAT_DATE" ] && echo "Missing COMPATIBILITY_DATE" && exit 1
-        [ -z "$ROUTE_INPUT" ] && echo "Missing ROUTE" && exit 1
-        [ -z "$PROJECT_NAME" ] && echo "Missing PROJECT_NAME" && exit 1
+        [ -z "$COMPAT_DATE" ] && echo "Missing compatibility-date" >&2 && exit 1
+        [ -z "$ROUTE_INPUT" ] && echo "Missing route" >&2 && exit 1
+        [ -z "$PROJECT_NAME" ] && echo "Missing project-name" >&2 && exit 1
+
+        # Trim leading/trailing whitespace without invoking xargs (which would
+        # mangle quotes/backslashes in a value).
+        trim() {
+          local s="$1"
+          s="${s#"${s%%[![:space:]]*}"}"
+          s="${s%"${s##*[![:space:]]}"}"
+          printf '%s' "$s"
+        }
 
         ROUTES=()
         while IFS= read -r raw_route; do
-          TRIMMED_ROUTE="$(echo "$raw_route" | xargs)"
+          TRIMMED_ROUTE="$(trim "$raw_route")"
           [ -z "$TRIMMED_ROUTE" ] && continue
           ROUTES+=("$TRIMMED_ROUTE")
         done <<< "$ROUTE_INPUT"
 
         if [ "${#ROUTES[@]}" -eq 0 ]; then
-          echo "No valid ROUTE entries provided" >&2
+          echo "No valid route entries provided" >&2
           exit 1
         fi
 
@@ -86,8 +154,8 @@ runs:
         done
 
         # Decide main entry:
-        # - If BUILD_FOR_OPENNEXT=true: keep previous behavior -> .open-next/worker.js
-        # - Else if MAIN_ENTRY is set: use that
+        # - If build-for-opennext=true: keep previous behavior -> .open-next/worker.js
+        # - Else if main-entry is set: use that
         # - Else: no main line (backwards compatible for non-OpenNext callers)
         MAIN_LINE=""
         if [ "$BUILD_FOR_OPENNEXT" = "true" ]; then
@@ -96,38 +164,71 @@ runs:
           MAIN_LINE="main = \"${MAIN_ENTRY_INPUT}\""
         fi
 
-        # Decide assets binding:
-        # - Previously only added when BUILD_FOR_OPENNEXT=true
-        # - Now can also be added when ADD_ASSETS_BINDING=true
-        ASSETS_BINDING_LINE=""
+        # Decide compatibility flags (comma/space separated -> TOML array).
+        # Empty input omits the line entirely.
+        COMPAT_FLAGS_LINE=""
+        if [ -n "$COMPAT_FLAGS_INPUT" ]; then
+          FLAG_ITEMS=()
+          IFS=', ' read -r -a RAW_FLAGS <<< "$COMPAT_FLAGS_INPUT"
+          for f in "${RAW_FLAGS[@]}"; do
+            [ -z "$f" ] && continue
+            FLAG_ITEMS+=("\"$f\"")
+          done
+          if [ "${#FLAG_ITEMS[@]}" -gt 0 ]; then
+            JOINED="$(IFS=','; echo "${FLAG_ITEMS[*]}")"
+            COMPAT_FLAGS_LINE="compatibility_flags = [${JOINED}]"
+          fi
+        fi
+
+        # Decide [assets] block:
+        # - directory line is emitted when assets-dir is non-empty
+        # - ASSETS binding line is emitted for OpenNext or when add-assets-binding=true
+        # - The whole block is omitted when neither applies (assets-less Worker)
+        WANT_BINDING="false"
         if [ "$BUILD_FOR_OPENNEXT" = "true" ] || [ "$ADD_ASSETS_BINDING" = "true" ]; then
-          ASSETS_BINDING_LINE='binding = "ASSETS"'
+          WANT_BINDING="true"
+        fi
+
+        ASSETS_BLOCK=""
+        if [ -n "$ASSETS_DIR" ] || [ "$WANT_BINDING" = "true" ]; then
+          ASSETS_BLOCK="[assets]"
+          if [ -n "$ASSETS_DIR" ]; then
+            ASSETS_BLOCK="${ASSETS_BLOCK}"$'\n'"directory = \"./${ASSETS_DIR}\""
+          fi
+          if [ "$WANT_BINDING" = "true" ]; then
+            ASSETS_BLOCK="${ASSETS_BLOCK}"$'\n'"binding = \"ASSETS\""
+          fi
         fi
 
         cat > wrangler.toml <<EOF
         name = "${PROJECT_NAME}"
         ${MAIN_LINE}
         compatibility_date = "${COMPAT_DATE}"
-        compatibility_flags = ["nodejs_compat"]
+        ${COMPAT_FLAGS_LINE}
 
         [env.${ENVIRONMENT}]
         name = "${PROJECT_NAME}-${ENVIRONMENT}"
         ${ROUTE_BLOCKS}
 
-        [assets]
-        directory = "./${ASSETS_DIR}"
-        ${ASSETS_BINDING_LINE}
+        ${ASSETS_BLOCK}
         EOF
+
+        echo "config-path=wrangler.toml" >> "$GITHUB_OUTPUT"
 
         echo "Generated wrangler.toml:"
         echo "---------------------------"
         cat wrangler.toml
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ wrangler.toml generated — project: ${PROJECT_NAME}, env: ${ENVIRONMENT}, routes: ${#ROUTES[@]}"
         echo "::endgroup::"
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        PROJECT_NAME: ${{ inputs['project-name'] }}
       run: |
-        echo "::error title=❌ [CF-WORKERS] wrangler.toml generation failed::Config generation failed for project '${{ inputs.PROJECT_NAME }}'. Check that ROUTE, PROJECT_NAME, and COMPATIBILITY_DATE inputs are valid."
+        echo "::error title=❌ [CF-WORKERS] wrangler.toml generation failed::Config generation failed for project '$PROJECT_NAME'. Check that route, project-name, and compatibility-date inputs are valid."
+
+branding:
+  icon: 'settings'
+  color: 'orange'

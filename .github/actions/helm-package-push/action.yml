@@ -1,6 +1,62 @@
+# =============================================================================
+# Helm Chart Package and Push
+# =============================================================================
+# Packages a Helm chart and publishes it to either an OCI registry (helm push)
+# or a ChartMuseum instance (HTTP upload). Optionally rewrites Chart.yaml
+# version/appVersion and the image repository/tag in values.yaml before packaging.
+#
+# Behaviour:
+#   - Registry/ChartMuseum credentials are passed via env vars and read from
+#     stdin (helm login --password-stdin) or a curl --netrc-file, never as a
+#     literal command-line argument.
+#   - publish-method selects oci (default) or chartmuseum; the unused path is
+#     skipped via step-level if: conditions.
+#   - Chart.yaml and values.yaml are edited with yq (YAML-aware), not sed.
+#   - Image repository values are lowercased before being written to values.yaml.
+#   - The OCI registry session is logged out at the end (if: always()).
+#
+# Inputs:
+#   chart-path            (optional)  Chart directory. Default './chart'.
+#   chart-name            (required)  Chart name (used for the package filename).
+#   version               (required)  Chart version and appVersion.
+#   registry              (optional)  OCI registry URL. Default 'docker.io'.
+#   repository            (required)  Repository path within the registry.
+#   username              (required)  Registry username.
+#   password              (required)  Registry password or token.
+#   update-chart-yaml     (optional)  Update Chart.yaml versions. Default 'true'.
+#   package-destination   (optional)  Output dir for packages. Default './helm-packages'.
+#   update-dependencies   (optional)  Run helm package --dependency-update. Default 'false'.
+#   helm-version          (optional)  Helm version to install. Default 'latest'.
+#   image-repository      (optional)  Image repository to set in values.yaml.
+#   image-tag             (optional)  Image tag to set in values.yaml.
+#   update-image-values   (optional)  Update image repo/tag in values.yaml. Default 'false'.
+#   publish-method        (optional)  'oci' or 'chartmuseum'. Default 'oci'.
+#   chartmuseum-url       (optional)  ChartMuseum base URL (required for chartmuseum).
+#   chartmuseum-username  (optional)  ChartMuseum username (required for chartmuseum).
+#   chartmuseum-password  (optional)  ChartMuseum password/token (required for chartmuseum).
+#
+# Outputs (set on the success path):
+#   chart-package  Path to the packaged chart file.
+#   chart-url      Published chart location (OCI URL or ChartMuseum URL).
+#
+# Usage:
+#   - name: Package and push Helm chart
+#     uses: simplify9/.github/.github/actions/helm-package-push@main
+#     with:
+#       chart-name: my-app
+#       chart-path: ./chart
+#       version: ${{ needs.version.outputs.version }}
+#       registry: ghcr.io
+#       repository: ${{ github.repository_owner }}/charts
+#       username: ${{ secrets.registry-username || github.actor }}
+#       password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+#       image-repository: ghcr.io/${{ github.repository }}
+#       image-tag: ${{ needs.version.outputs.version }}
+#       update-image-values: 'true'
+# =============================================================================
 name: 'Helm Chart Package and Push'
-description: 'Package and publish Helm chart to OCI registry or ChartMuseum'
 author: 'Simplify9'
+description: 'Package and publish Helm chart to OCI registry or ChartMuseum'
 
 inputs:
   chart-path:
@@ -80,9 +136,10 @@ runs:
     - name: Initialize chart package and push
       shell: bash
       run: |
+        set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          echo "HELM_PKG_CP1_STATUS=⏳ Pending"
+          echo "HELM_PKG_CP2_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Set up Helm
@@ -92,98 +149,123 @@ runs:
 
     - name: Create package destination directory
       shell: bash
+      env:
+        PACKAGE_DESTINATION: ${{ inputs.package-destination }}
       run: |
-        mkdir -p ${{ inputs.package-destination }}
+        set -euo pipefail
+        mkdir -p "$PACKAGE_DESTINATION"
 
     - name: Update Chart.yaml versions
       if: inputs.update-chart-yaml == 'true'
       shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        CHART_PATH: ${{ inputs.chart-path }}
       run: |
-        echo "Updating Chart.yaml with version: ${{ inputs.version }}"
-        sed -i "s/^version:.*/version: ${{ inputs.version }}/" ${{ inputs.chart-path }}/Chart.yaml
-        sed -i "s/^appVersion:.*/appVersion: ${{ inputs.version }}/" ${{ inputs.chart-path }}/Chart.yaml
-        
+        set -euo pipefail
+        echo "Updating Chart.yaml with version: $VERSION"
+        # yq is YAML-aware (pre-installed on GitHub-hosted runners): it edits the
+        # real version/appVersion keys regardless of formatting, ordering or quoting.
+        yq -i '.version = strenv(VERSION) | .appVersion = strenv(VERSION)' "$CHART_PATH/Chart.yaml"
+
         echo "Updated Chart.yaml content:"
-        cat ${{ inputs.chart-path }}/Chart.yaml
+        cat "$CHART_PATH/Chart.yaml"
 
     - name: Update values.yaml image configuration
       if: inputs.update-image-values == 'true'
       shell: bash
+      env:
+        CHART_PATH: ${{ inputs.chart-path }}
+        IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
       run: |
-        VALUES_FILE="${{ inputs.chart-path }}/values.yaml"
-        
-        if [ -n "${{ inputs.image-repository }}" ]; then
+        set -euo pipefail
+        VALUES_FILE="$CHART_PATH/values.yaml"
+
+        # yq is YAML-aware (pre-installed on GitHub-hosted runners): it targets the
+        # real .image.repository / .image.tag keys at any indentation. We only write
+        # when an .image mapping already exists, so we never invent a stray block.
+        if [ -n "$IMAGE_REPOSITORY" ]; then
           # Convert image repository to lowercase
-          IMAGE_REPO_LOWER=$(echo "${{ inputs.image-repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "Updating image repository to: ${IMAGE_REPO_LOWER} (lowercase)"
-          if grep -q "^image:" "$VALUES_FILE"; then
-            # Update existing image.repository with lowercase value
-            sed -i "/^image:/,/^[[:space:]]*repository:/ s|repository:.*|repository: ${IMAGE_REPO_LOWER}|" "$VALUES_FILE"
+          IMAGE_REPO_LOWER=$(printf '%s' "$IMAGE_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          export IMAGE_REPO_LOWER
+          if yq -e '.image' "$VALUES_FILE" >/dev/null 2>&1; then
+            echo "Updating image repository to: ${IMAGE_REPO_LOWER} (lowercase)"
+            yq -i '.image.repository = strenv(IMAGE_REPO_LOWER)' "$VALUES_FILE"
           else
-            echo "::warning title=image.repository not updated::image.repository not found in values.yaml"
+            echo "::warning title=image.repository not updated::image section not found in values.yaml"
           fi
         fi
-        
-        if [ -n "${{ inputs.image-tag }}" ]; then
-          echo "Updating image tag to: ${{ inputs.image-tag }}"
-          if grep -q "^image:" "$VALUES_FILE"; then
-            # Update existing image.tag
-            sed -i "/^image:/,/^[[:space:]]*tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|" "$VALUES_FILE"
+
+        if [ -n "$IMAGE_TAG" ]; then
+          if yq -e '.image' "$VALUES_FILE" >/dev/null 2>&1; then
+            echo "Updating image tag to: $IMAGE_TAG"
+            yq -i '.image.tag = strenv(IMAGE_TAG)' "$VALUES_FILE"
           else
-            echo "::warning title=image.tag not updated::image.tag not found in values.yaml"
+            echo "::warning title=image.tag not updated::image section not found in values.yaml"
           fi
         fi
-        
-        if [ "${{ inputs.update-image-values }}" == "true" ]; then
-          echo "Updated values.yaml image section:"
-          sed -n '/^image:/,/^[^[:space:]]/p' "$VALUES_FILE" | head -n -1
-        fi
+
+        echo "Updated values.yaml image section:"
+        yq '.image' "$VALUES_FILE"
 
     - name: Package Helm chart
       id: package
       shell: bash
+      env:
+        CHART_PATH: ${{ inputs.chart-path }}
+        CHART_NAME: ${{ inputs.chart-name }}
+        VERSION: ${{ inputs.version }}
+        PACKAGE_DESTINATION: ${{ inputs.package-destination }}
+        UPDATE_DEPENDENCIES: ${{ inputs.update-dependencies }}
       run: |
+        set -euo pipefail
         echo "::group::☸️ [CHECKPOINT 1/2] Package Helm Chart"
-        echo "Packaging Helm chart from ${{ inputs.chart-path }}"
-        if [ "${{ inputs.update-dependencies }}" = "true" ]; then
+        echo "Packaging Helm chart from $CHART_PATH"
+        if [ "$UPDATE_DEPENDENCIES" = "true" ]; then
           echo "Running helm package with dependency update enabled"
-          helm package ${{ inputs.chart-path }} --dependency-update --destination ${{ inputs.package-destination }}/
+          helm package "$CHART_PATH" --dependency-update --destination "$PACKAGE_DESTINATION/"
         else
-          helm package ${{ inputs.chart-path }} --destination ${{ inputs.package-destination }}/
+          helm package "$CHART_PATH" --destination "$PACKAGE_DESTINATION/"
         fi
-        
-        PACKAGE_FILE="${{ inputs.package-destination }}/${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
-        echo "package-path=${PACKAGE_FILE}" >> $GITHUB_OUTPUT
-        
+
+        PACKAGE_FILE="$PACKAGE_DESTINATION/$CHART_NAME-$VERSION.tgz"
+        echo "package-path=${PACKAGE_FILE}" >> "$GITHUB_OUTPUT"
+
         echo "Packaged chart: ${PACKAGE_FILE}"
-        ls -la ${{ inputs.package-destination }}/
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart packaged — ${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
+        ls -la "$PACKAGE_DESTINATION/"
+        echo "HELM_PKG_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "✅ Chart packaged — $CHART_NAME-$VERSION.tgz"
         echo "::endgroup::"
 
     - name: Validate publish configuration
       shell: bash
+      env:
+        PUBLISH_METHOD: ${{ inputs.publish-method }}
+        CHARTMUSEUM_URL: ${{ inputs.chartmuseum-url }}
+        CHARTMUSEUM_USERNAME: ${{ inputs.chartmuseum-username }}
+        CHARTMUSEUM_PASSWORD: ${{ inputs.chartmuseum-password }}
       run: |
-        publish_method="${{ inputs.publish-method }}"
-        case "$publish_method" in
+        set -euo pipefail
+        case "$PUBLISH_METHOD" in
           oci|chartmuseum)
             ;;
           *)
-            echo "Error: Unsupported publish-method '$publish_method'. Use 'oci' or 'chartmuseum'."
+            echo "Error: Unsupported publish-method '$PUBLISH_METHOD'. Use 'oci' or 'chartmuseum'."
             exit 1
             ;;
         esac
 
-        if [ "$publish_method" = "chartmuseum" ]; then
-          if [ -z "${{ inputs.chartmuseum-url }}" ]; then
+        if [ "$PUBLISH_METHOD" = "chartmuseum" ]; then
+          if [ -z "$CHARTMUSEUM_URL" ]; then
             echo "Error: chartmuseum-url is required when publish-method is chartmuseum."
             exit 1
           fi
-          if [ -z "${{ inputs.chartmuseum-username }}" ]; then
+          if [ -z "$CHARTMUSEUM_USERNAME" ]; then
             echo "Error: chartmuseum-username is required when publish-method is chartmuseum."
             exit 1
           fi
-          if [ -z "${{ inputs.chartmuseum-password }}" ]; then
+          if [ -z "$CHARTMUSEUM_PASSWORD" ]; then
             echo "Error: chartmuseum-password is required when publish-method is chartmuseum."
             exit 1
           fi
@@ -192,68 +274,113 @@ runs:
     - name: Configure Helm registry authentication
       if: inputs.publish-method == 'oci'
       shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
       run: |
-        echo "::add-mask::${{ inputs.password }}"
-        echo "🔐 Authenticating with OCI registry: ${{ inputs.registry }}..."
-        registry_host="${{ inputs.registry }}"
+        set -euo pipefail
+        echo "::add-mask::$PASSWORD"
+        echo "🔐 Authenticating with OCI registry: $REGISTRY..."
+        registry_host="$REGISTRY"
         if [ "$registry_host" = "docker.io" ]; then
           # Docker Hub's Helm/OCI endpoint requires this hostname for registry login.
           registry_host="registry-1.docker.io"
         fi
-        helm registry login "$registry_host" -u ${{ inputs.username }} -p ${{ inputs.password }}
+        printf '%s' "$PASSWORD" | helm registry login "$registry_host" -u "$USERNAME" --password-stdin
         echo "✅ Registry authentication successful."
 
     - name: Push Helm chart to OCI registry
       if: inputs.publish-method == 'oci'
       id: push_oci
       shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        REPOSITORY: ${{ inputs.repository }}
+        CHART_NAME: ${{ inputs.chart-name }}
+        VERSION: ${{ inputs.version }}
+        PACKAGE_DESTINATION: ${{ inputs.package-destination }}
       run: |
-        PACKAGE_FILE="${{ inputs.package-destination }}/${{ inputs.chart-name }}-${{ inputs.version }}.tgz"
-        
-        if [ "${{ inputs.registry }}" != "docker.io" ]; then
-          CHART_URL="oci://${{ inputs.registry }}/${{ inputs.repository }}"
+        set -euo pipefail
+        PACKAGE_FILE="$PACKAGE_DESTINATION/$CHART_NAME-$VERSION.tgz"
+
+        if [ "$REGISTRY" != "docker.io" ]; then
+          CHART_URL="oci://$REGISTRY/$REPOSITORY"
         else
-          CHART_URL="oci://${{ inputs.repository }}"
+          CHART_URL="oci://$REPOSITORY"
         fi
-        
+
         echo "Pushing chart to: ${CHART_URL}"
         helm push "${PACKAGE_FILE}" "${CHART_URL}"
-        
-        echo "chart-url=${CHART_URL}/${{ inputs.chart-name }}:${{ inputs.version }}" >> $GITHUB_OUTPUT
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart pushed (OCI) — ${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.registry }}"
+
+        echo "chart-url=${CHART_URL}/$CHART_NAME:$VERSION" >> "$GITHUB_OUTPUT"
+        echo "HELM_PKG_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "✅ Chart pushed (OCI) — $CHART_NAME:$VERSION → $REGISTRY"
+
+    - name: Log out of OCI registry
+      if: always() && inputs.publish-method == 'oci'
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+      run: |
+        set -euo pipefail
+        # Clear the cached registry credentials so nothing is left in
+        # ~/.config/helm for later steps (matters most on self-hosted runners).
+        registry_host="$REGISTRY"
+        if [ "$registry_host" = "docker.io" ]; then
+          registry_host="registry-1.docker.io"
+        fi
+        helm registry logout "$registry_host" >/dev/null 2>&1 || true
 
     - name: Push Helm chart to ChartMuseum
       if: inputs.publish-method == 'chartmuseum'
       id: push_chartmuseum
       shell: bash
+      env:
+        CHARTMUSEUM_URL: ${{ inputs.chartmuseum-url }}
+        CHARTMUSEUM_USERNAME: ${{ inputs.chartmuseum-username }}
+        CHARTMUSEUM_PASSWORD: ${{ inputs.chartmuseum-password }}
+        CHART_NAME: ${{ inputs.chart-name }}
+        VERSION: ${{ inputs.version }}
+        PACKAGE_FILE: ${{ steps.package.outputs.package-path }}
       run: |
-        CHARTMUSEUM_URL="${{ inputs.chartmuseum-url }}"
+        set -euo pipefail
         CHARTMUSEUM_API_URL="${CHARTMUSEUM_URL%/}/api/charts"
-        shopt -s nullglob
-        chart_packages=("${{ inputs.package-destination }}"/*.tgz)
 
-        if [ ${#chart_packages[@]} -eq 0 ]; then
-          echo "Error: No packaged charts found under ${{ inputs.package-destination }}"
+        # Push the single artifact we just built (mirrors the OCI path), rather
+        # than globbing the destination dir which could re-upload stale charts.
+        if [ ! -f "$PACKAGE_FILE" ]; then
+          echo "Error: Packaged chart not found at $PACKAGE_FILE"
           exit 1
         fi
 
-        echo "::add-mask::${{ inputs.chartmuseum-password }}"
-        echo "📡 Uploading chart(s) to ChartMuseum: ${CHARTMUSEUM_API_URL}"
-        for f in "${chart_packages[@]}"; do
-          echo "🚀 Uploading '$(basename "$f")'..."
-          curl --fail --show-error --silent --data-binary "@${f}" \
-            "${CHARTMUSEUM_API_URL}" \
-            --user "${{ inputs.chartmuseum-username }}:${{ inputs.chartmuseum-password }}"
-          echo "✅ '$(basename "$f")' uploaded successfully."
-        done
+        # Derive the bare host for the netrc 'machine' entry (strip scheme/port/path).
+        CM_HOST=$(printf '%s' "$CHARTMUSEUM_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#[/:].*$##')
 
-        echo "chart-url=${CHARTMUSEUM_URL%/}" >> $GITHUB_OUTPUT
-        echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart pushed (ChartMuseum) — ${{ inputs.chart-name }}:${{ inputs.version }} → ${{ inputs.chartmuseum-url }}"
+        echo "::add-mask::$CHARTMUSEUM_PASSWORD"
+        echo "📡 Uploading chart to ChartMuseum: ${CHARTMUSEUM_API_URL}"
+        echo "🚀 Uploading '$(basename "$PACKAGE_FILE")'..."
+        # Credentials are passed via --netrc-file from a process substitution, so
+        # they never appear in the process argv (visible to `ps` on the runner).
+        curl -sS --max-time 30 --retry 3 --retry-connrefused \
+          --fail --show-error --data-binary "@${PACKAGE_FILE}" \
+          --netrc-file <(printf 'machine %s login %s password %s\n' "$CM_HOST" "$CHARTMUSEUM_USERNAME" "$CHARTMUSEUM_PASSWORD") \
+          "${CHARTMUSEUM_API_URL}"
+        echo "✅ '$(basename "$PACKAGE_FILE")' uploaded successfully."
+
+        echo "chart-url=${CHARTMUSEUM_URL%/}" >> "$GITHUB_OUTPUT"
+        echo "HELM_PKG_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "✅ Chart pushed (ChartMuseum) — $CHART_NAME:$VERSION → $CHARTMUSEUM_URL"
 
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        CHART_NAME: ${{ inputs.chart-name }}
+        VERSION: ${{ inputs.version }}
       run: |
-        echo "::error title=❌ [HELM] Package/push failed::Chart '${{ inputs.chart-name }}:${{ inputs.version }}'. Checkpoints — 1) Packaged: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Pushed: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
+        echo "::error title=❌ [HELM] Package/push failed::Chart '$CHART_NAME:$VERSION'. Checkpoints — 1) Packaged: ${HELM_PKG_CP1_STATUS:-⏭️ Not reached} | 2) Pushed: ${HELM_PKG_CP2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
+
+branding:
+  icon: 'anchor'
+  color: 'blue'

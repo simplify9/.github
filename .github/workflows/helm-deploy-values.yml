@@ -188,7 +188,12 @@ jobs:
             ARGS+=(--create-namespace)
           fi
           if [ "${ATOMIC}" = "true" ]; then
-            ARGS+=(--atomic)
+            HELM_MAJOR="$(helm version --template '{{.Version}}' 2>/dev/null | sed -E 's/^v?([0-9]+).*/\1/')"
+            if [ "${HELM_MAJOR:-3}" -ge 4 ]; then
+              ARGS+=(--rollback-on-failure)
+            else
+              ARGS+=(--atomic)
+            fi
           fi
           if [ "${WAIT}" = "true" ]; then
             ARGS+=(--wait)

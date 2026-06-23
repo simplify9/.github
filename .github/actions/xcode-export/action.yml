@@ -1,6 +1,30 @@
+# =============================================================================
+# Simplify9 Xcode Export
+# =============================================================================
+# Exports a signed IPA from an existing .xcarchive using xcodebuild
+# -exportArchive driven by an exportOptions.plist.
+#
+# Behaviour:
+#   - Verifies the archive exists, creates the output directory, then runs
+#     xcodebuild -exportArchive with the provided export options plist.
+#
+# Inputs:
+#   archivePath         (required)  Path to the .xcarchive to export.
+#   exportOptionsPlist  (required)  Path to exportOptions.plist.
+#   exportPath          (required)  Output directory for the exported IPA.
+#
+# Usage:
+#   - name: Export IPA
+#     uses: simplify9/.github/.github/actions/xcode-export@main
+#     with:
+#       archivePath: build/App.xcarchive
+#       exportOptionsPlist: ExportOptions.plist
+#       exportPath: build/export
+# =============================================================================
 name: Simplify9 Xcode Export
+author: 'Simplify9'
 description: Export an IPA from an Xcode archive using export options.
-author: simplify9
+
 inputs:
   archivePath:
     required: true
@@ -19,7 +43,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "XCODE_EXPORT_CP1_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Export IPA
@@ -41,7 +65,7 @@ runs:
           -archivePath "${ARCHIVE_PATH}" \
           -exportOptionsPlist "${EXPORT_PLIST}" \
           -exportPath "${EXPORT_PATH}"
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "XCODE_EXPORT_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ IPA exported — Output: ${EXPORT_PATH}"
         echo "::endgroup::"
 
@@ -53,3 +77,7 @@ runs:
       run: |
         set -euo pipefail
         echo "::error title=❌ [IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${ARCHIVE_PATH}'. Check exportOptionsPlist path and signing configuration."
+
+branding:
+  icon: 'upload'
+  color: 'blue'

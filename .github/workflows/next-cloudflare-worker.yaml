@@ -170,12 +170,12 @@ jobs:
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
-          COMPATIBILITY_DATE: ${{ inputs.compatibility_date }}
-          ROUTE: ${{ inputs.route != '' && inputs.route || vars.CLOUDFLARE_ROUTE || vars.ROUTE }}
-          PROJECT_NAME: ${{ inputs.project_name }}
-          ENVIRONMENT: ${{ inputs.environment }}
-          ASSETS_DIR: ${{ inputs.assets_dir }}
-          BUILD_FOR_OPENNEXT: "true"
+          compatibility-date: ${{ inputs.compatibility_date }}
+          route: ${{ inputs.route != '' && inputs.route || vars.CLOUDFLARE_ROUTE || vars.ROUTE }}
+          project-name: ${{ inputs.project_name }}
+          environment: ${{ inputs.environment }}
+          assets-dir: ${{ inputs.assets_dir }}
+          build-for-opennext: "true"
 
       - name: Install OpenNext.js Cloudflare adapter
         run: npm install @opennextjs/cloudflare@${{ inputs.opennextjs_version }} --no-save --force --no-package-lock

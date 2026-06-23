@@ -66,8 +66,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `docker/login-action` | `@v4` | |
 | `docker/metadata-action` | `@v6` | |
 | `docker/build-push-action` | `@v7` | |
-| `cloudflare/wrangler-action` | `@v4` | |
-| `cloudflare/pages-action` | `@v1` | Repo is archived; v1 is the final version — do not upgrade |
+| `cloudflare/wrangler-action` | `@v4` | Used for all Cloudflare Pages/Workers deploys (`command: pages deploy …` / `deploy`). Deployment URL is the `deployment-url` output |
 | `gradle/actions/setup-gradle` | `@v4` | Do NOT use `gradle/gradle-build-action` (archived). Do NOT upgrade to v5/v6: v5 requires runner ≥ 2.327.1; v6 has commercial caching license terms |
 
 **Pinned CLI binary versions (defaults in action inputs):**
@@ -125,7 +124,7 @@ Every composite action **must** follow the 4-pillar log output framework. This a
 
 **4 Pillars:**
 1. **Meaningful and context-aware** — emit a `::notice::` announcement on the first step with key input values
-2. **Checkpoint-driven** — wrap each critical operation in `::group::`/`::endgroup::`, track status in `CHECKPOINT_N_STATUS` env vars
+2. **Checkpoint-driven** — wrap each critical operation in `::group::`/`::endgroup::`, track status in **namespaced** `<PREFIX>_CP{N}_STATUS` env vars (e.g. `DOCKER_CP1_STATUS`, `HELM_DEPLOY_CP2_STATUS`). Never use bare `CHECKPOINT_N_STATUS` in a composite action — see the namespacing rule below
 3. **Systematically consistent** — use the canonical emoji/tag vocabulary below
 4. **Summarised** — last step (`if: always()`) writes a structured table to `$GITHUB_STEP_SUMMARY`
 
@@ -152,8 +151,9 @@ steps:
     shell: bash
     run: |
       echo "::notice title=🏷️ [DOMAIN] Action Name::key: ${{ inputs.key }}"
-      echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-      echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+      # <PREFIX> = a short, action-specific prefix (e.g. DOCKER, HELM_DEPLOY, CF_DOMAIN)
+      echo "<PREFIX>_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
   # 2. Existing work step — wrap with group, set status at end
   - name: Do the work
@@ -161,7 +161,7 @@ steps:
     run: |
       echo "::group::🏷️ [CHECKPOINT 1/2] Step Name"
       # ... existing commands ...
-      echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
       echo "::endgroup::"
 
   # 3. For uses: steps — add a confirm step immediately after
@@ -169,14 +169,14 @@ steps:
   - name: Confirm step complete
     shell: bash
     run: |
-      echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
   # 4. Failure report (before summary)
   - name: Report failure
     if: failure()
     shell: bash
     run: |
-      echo "::error title=❌ [DOMAIN] Action failed::context. Checkpoints — 1) Name: ${CHECKPOINT_1_STATUS:-⏭️ Not reached} | 2) Name: ${CHECKPOINT_2_STATUS:-⏭️ Not reached}."
+      echo "::error title=❌ [DOMAIN] Action failed::context. Checkpoints — 1) Name: ${<PREFIX>_CP1_STATUS:-⏭️ Not reached} | 2) Name: ${<PREFIX>_CP2_STATUS:-⏭️ Not reached}."
 
   # 5. Summary (always last, always runs)
   - name: Write action summary
@@ -196,14 +196,15 @@ steps:
 
       | # | Checkpoint | Status |
       |---|------------|--------|
-      | 1 | Step One | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |
-      | 2 | Step Two | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |
+      | 1 | Step One | ${<PREFIX>_CP1_STATUS:-⏭️ Not reached} |
+      | 2 | Step Two | ${<PREFIX>_CP2_STATUS:-⏭️ Not reached} |
       $EOF
 ```
 
 **Rules:**
+- **Namespace checkpoint env vars per action** — use `<PREFIX>_CP{N}_STATUS` (e.g. `DOCKER_CP1_STATUS`), never bare `CHECKPOINT_N_STATUS`. A composite action's `>> "$GITHUB_ENV"` writes leak into the **caller's** job environment, so a bare `CHECKPOINT_1_STATUS` silently overwrites the calling workflow's (and sibling actions') same-named checkpoints, corrupting their failure reports and summaries. The prefix must be unique per action (e.g. `IOS_CERT` vs `IOS_PROFILE`, `HELM_DEPLOY` vs `HELM_PKG`) so two actions in one job can't collide either
 - Use `EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)` for the heredoc delimiter — never a fixed string like `EOF` which can collide with step output
-- `CHECKPOINT_N_STATUS` defaults to `⏭️ Skipped` (not `⏳ Pending`) when the step is always skipped (e.g. optional `if:` steps that never run in most call sites)
+- `<PREFIX>_CP{N}_STATUS` defaults to `⏭️ Skipped` (not `⏳ Pending`) when the step is always skipped (e.g. optional `if:` steps that never run in most call sites)
 - For Docker actions (`entrypoint.sh` / Python scripts), emit `::group::`, `::notice::`, and `::error::` via `echo` / `print()` and write the summary by appending to `$GITHUB_STEP_SUMMARY`
 - Do not add checkpoints for trivial one-liner steps (masking, `mkdir`, `chmod`) — only for operations that can meaningfully fail independently
 
@@ -280,7 +281,6 @@ steps:
 - `dotnet-pack-push` — `dotnet pack` → `dotnet nuget push`.
 
 ### Cloudflare
-- `setup-cloudflare-project` — Creates or verifies a Cloudflare Pages project.
 - `setup-cloudflare-domain` — Configures a custom domain on a Pages project. Has `fail-on-error` to make domain failure non-blocking.
 - `generate-wrangler-config` — Generates `wrangler.toml` dynamically. Supports OpenNext, static assets, and custom route lists.
 
@@ -350,7 +350,7 @@ steps:
 - **Do not enable any deployment by default** — all `deploy-to-*` inputs default to `false`
 - **Do not pass secrets as regular inputs** — declare them under `on.workflow_call.secrets:` or use `secrets: inherit`
 - **Do not mix Helm config and secret values** in a single `--set` call — use `--set-string` for anything that contains special characters or is sourced from a secret
-- **Do not use `cloudflare/pages-action` above `@v1`** — the repo is archived at v1.5.0; there is no v2
+- **Do not use `cloudflare/pages-action`** — it is deprecated and its repo is archived (final v1.5.0, no v2). Deploy Cloudflare Pages with `cloudflare/wrangler-action@v4` (`command: pages deploy <dir> --project-name=<name> --branch=<branch>`); the deployment URL is its `deployment-url` output
 
 ---
 

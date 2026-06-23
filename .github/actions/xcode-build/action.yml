@@ -1,6 +1,45 @@
+# =============================================================================
+# Simplify9 Xcode Build
+# =============================================================================
+# Builds and archives an iOS app with xcodebuild, defaulting to CI-safe manual
+# signing. Assembles xcodebuild arguments in a bash array so values are passed
+# safely, and supports both manual and automatic signing styles.
+#
+# Behaviour:
+#   - Manual signing (default): requires developmentTeam; optionally sets the
+#     code-sign identity, provisioning profile UUID, bundle id, and keychain.
+#   - Automatic signing: passes -allowProvisioningUpdates.
+#   - Optionally prints a filtered build-settings summary before archiving and
+#     pipes output through xcpretty when available (raw output otherwise).
+#
+# Inputs:
+#   workspace               (required)  Path to the .xcworkspace.
+#   scheme                  (required)  Xcode scheme to build.
+#   configuration           (required)  Build configuration (e.g. Release).
+#   archivePath             (required)  Output path for the generated .xcarchive.
+#   destination             (optional)  Xcode destination. Default generic/platform=iOS.
+#   signingStyle            (optional)  manual or automatic. Default manual.
+#   developmentTeam         (optional)  Apple Developer Team ID (required for manual).
+#   codeSignIdentity        (optional)  Code signing identity for manual signing.
+#   provisioningProfileUuid (optional)  Provisioning profile UUID.
+#   bundleId                (optional)  PRODUCT_BUNDLE_IDENTIFIER override.
+#   keychainPath            (optional)  Keychain containing the signing identity.
+#   derivedDataPath         (optional)  Derived data path.
+#   debugBuildSettings      (optional)  true/false: print build settings before archive.
+#
+# Usage:
+#   - name: Build and archive
+#     uses: simplify9/.github/.github/actions/xcode-build@main
+#     with:
+#       workspace: App.xcworkspace
+#       scheme: App
+#       configuration: Release
+#       archivePath: build/App.xcarchive
+#       developmentTeam: ABCDE12345
+# =============================================================================
 name: Simplify9 Xcode Build
+author: 'Simplify9'
 description: Build and archive an iOS app using xcodebuild (CI-safe manual signing).
-author: simplify9
 
 inputs:
   workspace:
@@ -55,7 +94,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "CHECKPOINT_1_STATUS=⏳ Pending"
+          echo "XCODE_BUILD_CP1_STATUS=⏳ Pending"
         } >> "$GITHUB_ENV"
 
     - name: Build and archive
@@ -147,7 +186,7 @@ runs:
           xcodebuild "${ARGS[@]}"
         fi
 
-        echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "XCODE_BUILD_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Archive created — ${ARCHIVE_PATH}"
         echo "::endgroup::"
 
@@ -160,4 +199,8 @@ runs:
         SIGNING_STYLE: ${{ inputs.signingStyle }}
       run: |
         set -euo pipefail
-        echo "::error title=❌ [IOS] Build failed::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}. Checkpoints — 1) Archive: ${CHECKPOINT_1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
+        echo "::error title=❌ [IOS] Build failed::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}. Checkpoints — 1) Archive: ${XCODE_BUILD_CP1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
+
+branding:
+  icon: 'box'
+  color: 'blue'

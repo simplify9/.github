@@ -42,7 +42,7 @@ on:
       test-projects:
         description: 'Test projects to run before packing (glob pattern)'
         required: false
-        default: '**/*UnitTests/*.csproj'
+        default: '**/*Tests/*.csproj'
         type: string
       run-tests:
         description: 'Whether to run tests before packing'
@@ -80,13 +80,18 @@ on:
         required: false
         default: 'development'
         type: string
+      deploy-environment:
+        description: 'GitHub Environment name for the deploy job (controls protection rules and scoped secrets)'
+        required: false
+        default: 'development'
+        type: string
       helm-timeout-minutes:
         description: 'Optional Helm timeout in minutes (e.g., 15). If empty, defaults to 10 minutes.'
         required: false
         default: ''
         type: string
       atomic:
-        description: "If 'true', pass --atomic to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        description: "If 'true', pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
         required: false
         default: 'true'
         type: string
@@ -210,6 +215,11 @@ on:
         description: 'Generated NuGet package version'
         value: ${{ jobs.nuget.outputs.version }}
 
+# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   # Set default registry and image name
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
@@ -218,6 +228,9 @@ env:
 jobs:
   version:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
@@ -227,6 +240,11 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # Full history + all tags so determine-semver reads them locally
+          # (no network fetch needed); persisted git token not required after.
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine semantic version
         id: semver
@@ -234,14 +252,6 @@ jobs:
         with:
           major: ${{ inputs.major-version }}
           minor: ${{ inputs.minor-version }}
- 
-      - name: Tag new version on GitHub origin
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.semver.outputs.version }}
-          sha: ${{ github.sha }}
 
       - name: Write version job summary
         if: always()
@@ -267,6 +277,8 @@ jobs:
 
   nuget:
     runs-on: ubuntu-latest
+    if: ${{ inputs.package-nuget }}
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
     env:
@@ -281,6 +293,11 @@ jobs:
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
         uses: actions/checkout@v6
+        with:
+          # Full history + all tags so determine-semver reads them locally
+          # (no network fetch needed); persisted git token not required after.
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Configure GitHub Packages feed
         if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
@@ -324,19 +341,6 @@ jobs:
           api-key: ${{ secrets.nuget-api-key }}
           nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
 
-      - name: Tag NuGet version on GitHub origin
-        if: ${{ inputs.package-nuget }}
-        uses: simplify9/.github/.github/actions/tag-github-origin@main
-        with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          tag: ${{ steps.nuget-semver.outputs.version }}
-          sha: ${{ github.sha }}
-
-      - name: Skip NuGet packaging
-        if: ${{ !inputs.package-nuget }}
-        run: echo 'NuGet packaging disabled; skipping NuGet job but keeping dependency chain.'
-
       - name: Write nuget job summary
         if: always()
         env:
@@ -361,7 +365,12 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, nuget]
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
@@ -414,8 +423,9 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [version, build]
-    environment: development
+    environment: ${{ inputs.deploy-environment }}
     steps:
       - name: Announce deploy job
         run: |
@@ -427,7 +437,7 @@ jobs:
         id: ingress
         shell: bash
         run: |
-          HOSTS_INPUT="${{ inputs.ingress-hosts }}"
+          HOSTS_INPUT="${{ inputs.ingress-hosts || inputs.ingress-host }}"
           PATHS_INPUT="${{ inputs.ingress-paths }}"
           TLS_ARRAY_INPUT="${{ inputs.ingress-tls-secrets }}"
 
@@ -496,9 +506,12 @@ jobs:
           chart: s9genericchart
           chart_repo: "https://charts.sf9.io"
 
-          # Helm timing/flags
+          # Helm timing/flags.
+          # --wait=legacy: s9genericchart renders a livenessProbe with NO startupProbe when
+          # probes are enabled, which can hang/fail under Helm 4's default kstatus watcher
+          # (helm/helm#31526). The legacy waiter restores the proven Helm 3 behaviour.
           helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
-          extra_args: "--wait"
+          extra_args: "--wait=legacy"
           atomic: ${{ inputs.atomic }}
 
           # Translate your previous comma-joined --set into line-based entries
@@ -514,7 +527,10 @@ jobs:
             ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
             ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
             ${{ inputs.helm-set-values }}
-              
+
+          # Sensitive values: applied as masked --set-string (no type coercion), not --set.
+          secret_set_values: ${{ secrets.helm-set-secret-values }}
+
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
           init_job_image: ${{ inputs.init-job-image }}
@@ -569,3 +585,35 @@ jobs:
             echo "| 1 | Ingress values generated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
             echo "| 2 | Helm deployment | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [version, nuget, build]
+    # Tag only after a successful build so tags never reference an unshipped
+    # version. A disabled nuget job (result: success with skipped steps) must
+    # not block tagging.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.build.result == 'success'
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.version }}
+          sha: ${{ github.sha }}
+
+      - name: Tag NuGet version on GitHub origin
+        if: ${{ inputs.package-nuget }}
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.nuget.outputs.version }}
+          sha: ${{ github.sha }}
