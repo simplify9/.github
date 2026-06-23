@@ -425,6 +425,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, build]
+    # Explicit guard required: without an `if`, the implicit success() evaluates the
+    # whole dependency chain (deploy -> build -> nuget). A disabled nuget job
+    # (package-nuget=false, result: skipped) poisons that chain and silently skips
+    # deploy. Mirror the build/tag guards so a skipped nuget never blocks deploy.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.build.result == 'success' }}
     environment: ${{ inputs.deploy-environment }}
     steps:
       - name: Announce deploy job
