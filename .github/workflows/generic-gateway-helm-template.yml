@@ -1100,14 +1100,14 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [version, nuget, build]
-    # Tag only after a successful build so tags never reference an unshipped
-    # version. A disabled nuget job (result: success with skipped steps) must
-    # not block tagging.
+    needs: [version, nuget, build, deploy]
+    # Tag only after a successful deploy so tags always reference a shipped version.
+    # A disabled nuget job (result: success with skipped steps) must not block tagging.
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
           && needs.build.result == 'success'
+          && needs.deploy.result == 'success'
           && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
     permissions:
       contents: write
