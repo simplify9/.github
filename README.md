@@ -810,7 +810,9 @@ with:
 
 The onboarding step skips cert and listener creation entirely; it only validates that `https-wildcard-sf9-io` exists on the gateway. The wildcard cert covers `*.sf9.io` already.
 
-**Mixed listener mode** — one release, two hostnames, different modes:
+##### Mixed listener mode
+
+One release, two hostnames, different modes:
 
 ```yaml
 with:
