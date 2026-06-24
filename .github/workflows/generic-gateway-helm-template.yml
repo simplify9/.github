@@ -288,6 +288,16 @@ on:
         required: false
         default: ''
         type: string
+      init-job-image-pull-secret:
+        description: |-
+          Name of the Kubernetes imagePullSecret attached to the migration Job pod.
+          Defaults to 'sf9cr' (the org-wide registry secret). Override when the migration
+          image lives in a different registry — e.g. 'mealiverycr' for
+          registry.digitalocean.com/mealiverycr/... images.
+          Set to an empty string to attach no pull secret (public images).
+        required: false
+        default: 'sf9cr'
+        type: string
 
     secrets:
       registry-username:
@@ -994,6 +1004,36 @@ jobs:
             # know which guards will fire without querying the live state twice.
             preflight_capacity_check 2
 
+            # ---------------------------------------------------------------------------
+            # DNS pre-flight: verify the hostname resolves directly to the gateway's
+            # external IP before applying the Certificate or waiting for issuance.
+            # HTTP-01 ACME challenges require port 80 to be reachable from the internet
+            # at the exact IP the hostname resolves to. A Cloudflare proxy (orange cloud)
+            # or a missing/wrong A record causes cert-manager's self-check to time out,
+            # turning a 5-second config error into a 600s pipeline hang.
+            # ---------------------------------------------------------------------------
+            gateway_ip=$(kubectl -n "${GATEWAY_NAMESPACE}" get gateway "${GATEWAY_NAME}" \
+              -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || echo "")
+            if [ -n "${gateway_ip}" ]; then
+              resolved=$(dig +short "${host}" 2>/dev/null \
+                | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+                | head -5 || echo "")
+              if [ -z "${resolved}" ]; then
+                echo "❌ DNS pre-flight failed: '${host}' has no A record."
+                echo "   Create an A record: ${host} → ${gateway_ip}"
+                exit 1
+              fi
+              if ! echo "${resolved}" | grep -Fxq "${gateway_ip}"; then
+                echo "❌ DNS pre-flight failed: '${host}' does not resolve to the gateway IP."
+                echo "   Resolved to: $(echo "${resolved}" | tr '\n' ' ')"
+                echo "   Gateway IP:  ${gateway_ip} (${GATEWAY_NAME} in ${GATEWAY_NAMESPACE})"
+                echo "   HTTP-01 ACME requires DNS to point directly to the gateway — not through a proxy."
+                echo "   If using Cloudflare: set the record to DNS-only mode (grey cloud) for this hostname."
+                exit 1
+              fi
+              echo "✅ DNS pre-flight passed: '${host}' → ${gateway_ip}"
+            fi
+
             kubectl apply -f <(printf '%s\n' \
               "apiVersion: cert-manager.io/v1" \
               "kind: Certificate" \
@@ -1088,6 +1128,7 @@ jobs:
           init_job_secret_key: ${{ inputs.init-job-secret-key }}
           init_job_connstring_env: ${{ inputs.init-job-connstring-env }}
           init_job_environment_env: ${{ inputs.init-job-environment-env }}
+          init_job_image_pull_secret: ${{ inputs.init-job-image-pull-secret }}
           environment: ${{ inputs.environment }}
 
       - name: Confirm Helm deployed
