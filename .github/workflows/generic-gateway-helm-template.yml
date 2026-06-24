@@ -1004,34 +1004,40 @@ jobs:
             # know which guards will fire without querying the live state twice.
             preflight_capacity_check 2
 
+            # Read cert readiness once — shared by the DNS pre-flight and the
+            # Order purge below so both conditions pay one kubectl call.
+            cert_ready_now=$(kubectl get certificate "${cert_name}" -n "${GATEWAY_NAMESPACE}" \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+
             # ---------------------------------------------------------------------------
-            # DNS pre-flight: verify the hostname resolves directly to the gateway's
-            # external IP before applying the Certificate or waiting for issuance.
-            # HTTP-01 ACME challenges require port 80 to be reachable from the internet
-            # at the exact IP the hostname resolves to. A Cloudflare proxy (orange cloud)
-            # or a missing/wrong A record causes cert-manager's self-check to time out,
-            # turning a 5-second config error into a 600s pipeline hang.
+            # DNS pre-flight: only runs when the cert is not already Ready.
+            # A valid cert means no issuance is needed this run, so DNS reachability
+            # is irrelevant — orange-cloud Cloudflare proxy is fine in that case.
+            # When the cert IS absent or stuck, a proxy or wrong A record causes
+            # cert-manager's HTTP-01 self-check to time out (600s hang); fail fast.
             # ---------------------------------------------------------------------------
-            gateway_ip=$(kubectl -n "${GATEWAY_NAMESPACE}" get gateway "${GATEWAY_NAME}" \
-              -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || echo "")
-            if [ -n "${gateway_ip}" ]; then
-              resolved=$(dig +short "${host}" 2>/dev/null \
-                | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
-                | head -5 || echo "")
-              if [ -z "${resolved}" ]; then
-                echo "❌ DNS pre-flight failed: '${host}' has no A record."
-                echo "   Create an A record: ${host} → ${gateway_ip}"
-                exit 1
+            if [ "${cert_ready_now}" != "True" ]; then
+              gateway_ip=$(kubectl -n "${GATEWAY_NAMESPACE}" get gateway "${GATEWAY_NAME}" \
+                -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || echo "")
+              if [ -n "${gateway_ip}" ]; then
+                resolved=$(dig +short "${host}" 2>/dev/null \
+                  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+                  | head -5 || echo "")
+                if [ -z "${resolved}" ]; then
+                  echo "❌ DNS pre-flight failed: '${host}' has no A record."
+                  echo "   Create an A record: ${host} → ${gateway_ip}"
+                  exit 1
+                fi
+                if ! echo "${resolved}" | grep -Fxq "${gateway_ip}"; then
+                  echo "❌ DNS pre-flight failed: '${host}' does not resolve to the gateway IP."
+                  echo "   Resolved to: $(echo "${resolved}" | tr '\n' ' ')"
+                  echo "   Gateway IP:  ${gateway_ip} (${GATEWAY_NAME} in ${GATEWAY_NAMESPACE})"
+                  echo "   HTTP-01 ACME requires DNS to point directly to the gateway — not through a proxy."
+                  echo "   If using Cloudflare: set the record to DNS-only mode (grey cloud) for this hostname."
+                  exit 1
+                fi
+                echo "✅ DNS pre-flight passed: '${host}' → ${gateway_ip}"
               fi
-              if ! echo "${resolved}" | grep -Fxq "${gateway_ip}"; then
-                echo "❌ DNS pre-flight failed: '${host}' does not resolve to the gateway IP."
-                echo "   Resolved to: $(echo "${resolved}" | tr '\n' ' ')"
-                echo "   Gateway IP:  ${gateway_ip} (${GATEWAY_NAME} in ${GATEWAY_NAMESPACE})"
-                echo "   HTTP-01 ACME requires DNS to point directly to the gateway — not through a proxy."
-                echo "   If using Cloudflare: set the record to DNS-only mode (grey cloud) for this hostname."
-                exit 1
-              fi
-              echo "✅ DNS pre-flight passed: '${host}' → ${gateway_ip}"
             fi
 
             kubectl apply -f <(printf '%s\n' \
@@ -1054,8 +1060,6 @@ jobs:
             # re-run after a late DNS update leaves the cert stuck in backoff
             # until the failed Orders are deleted. Only errored/invalid Orders
             # are removed — pending Orders on a freshly created cert are untouched.
-            cert_ready_now=$(kubectl get certificate "${cert_name}" -n "${GATEWAY_NAMESPACE}" \
-              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
             if [ "${cert_ready_now}" != "True" ]; then
               orders_output=$(kubectl get orders -n "${GATEWAY_NAMESPACE}" \
                 -l "cert-manager.io/certificate-name=${cert_name}" \
