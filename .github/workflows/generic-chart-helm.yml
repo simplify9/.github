@@ -168,6 +168,16 @@ on:
         required: false
         default: ''
         type: string
+      init-job-image-pull-secret:
+        description: |-
+          Name of the Kubernetes imagePullSecret attached to the migration Job pod.
+          Defaults to 'sf9cr' (the org-wide registry secret). Override when the migration
+          image lives in a different registry — e.g. 'mealiverycr' for
+          registry.digitalocean.com/mealiverycr/... images.
+          Set to an empty string to attach no pull secret (public images).
+        required: false
+        default: 'sf9cr'
+        type: string
 
     secrets:
       # Container registry secrets
@@ -564,6 +574,7 @@ jobs:
           init_job_secret_key: ${{ inputs.init-job-secret-key }}
           init_job_connstring_env: ${{ inputs.init-job-connstring-env }}
           init_job_environment_env: ${{ inputs.init-job-environment-env }}
+          init_job_image_pull_secret: ${{ inputs.init-job-image-pull-secret }}
           environment: ${{ inputs.environment }}
 
       - name: Confirm Helm deployed
