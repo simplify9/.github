@@ -753,7 +753,7 @@ Full CI/CD pipeline for APIs and microservices using the **Kubernetes Gateway AP
 | `routing-mode` | | `gateway` | `gateway`, `ingress`, or `dual` |
 | `gateway-hostnames` | | `''` | Comma- or newline-separated hostnames for the HTTPRoute |
 | `gateway-section-name` | | `''` | **Global** shared listener name — all hosts attach to this one listener (legacy; use `gateway-section-names` for mixed deployments) |
-| `gateway-section-names` | | `''` | **Per-hostname** section names, one line per hostname aligned with `gateway-hostnames`. Empty line = dedicated mode; non-empty = shared listener name. See [Mixed listener mode](#mixed-listener-mode) below. |
+| `gateway-section-names` | | `''` | **Per-hostname** section names, one line per hostname aligned with `gateway-hostnames`. **Blank line** (no characters) = dedicated mode; non-empty line = shared listener name. All non-empty lines must be at the same indent level — see [Mixed listener mode](#mixed-listener-mode). |
 | `gateway-paths` | | `/` | Route paths (comma or newline) |
 | `gateway-parent-name` | | `public-gateway` | Gateway resource name |
 | `gateway-parent-namespace` | | `s9-dev-edge` | Namespace of the Gateway resource |
@@ -812,7 +812,9 @@ The onboarding step skips cert and listener creation entirely; it only validates
 
 ##### Mixed listener mode
 
-One release, two hostnames, different modes:
+One release, two hostnames, different modes.
+
+**Option A — blank line for dedicated (simplest, always safe):**
 
 ```yaml
 with:
@@ -822,11 +824,40 @@ with:
     api-stg.zeenah.io
     zeenah-api.sf9.io
   gateway-section-names: |
-                          # blank  → dedicated for api-stg.zeenah.io
-    https-wildcard-sf9-io # shared → for zeenah-api.sf9.io
+
+    https-wildcard-sf9-io
 ```
 
-The Helm chart receives two `parentRefs` entries — one per hostname — so the single HTTPRoute attaches to both the dedicated `https-api-stg-zeenah-io` listener and the existing wildcard `https-wildcard-sf9-io` listener. The onboarding step creates listeners and a cert only for `api-stg.zeenah.io`; it validates `https-wildcard-sf9-io` exists for `zeenah-api.sf9.io`.
+The first line is completely empty → dedicated for `api-stg.zeenah.io`. The second line → shared listener for `zeenah-api.sf9.io`.
+
+**Option B — comment-as-entry (annotated, same indentation required):**
+
+```yaml
+  gateway-section-names: |
+    # api-stg.zeenah.io -> dedicated
+    https-wildcard-sf9-io # zeenah-api.sf9.io -> shared
+```
+
+The comment line strips to `""` → dedicated. Both lines are at the **same indentation level** — this is required.
+
+> **YAML indentation gotcha:** YAML sets block scalar indentation from the **first non-empty line**. Every non-empty line after it must be at the same or greater indentation. If you put a deeply-indented comment above a less-indented section name, YAML treats the second line as outside the block and raises a parse error. Keep all non-empty lines at a consistent depth. When in doubt, use blank lines (Option A).
+
+The Helm chart receives two `parentRefs` entries so the single HTTPRoute attaches to both the dedicated `https-api-stg-zeenah-io` listener and the wildcard `https-wildcard-sf9-io` listener. The onboarding step creates listeners and a cert only for `api-stg.zeenah.io`; it validates `https-wildcard-sf9-io` exists for `zeenah-api.sf9.io`.
+
+**Three hostnames — first dedicated, two on the same wildcard:**
+
+```yaml
+gateway-hostnames: |
+  api-stg.zeenah.io
+  zeenah-api.sf9.io
+  api-stglol.sf9.io
+gateway-section-names: |
+  # dedicated
+  https-wildcard-sf9-io
+  https-wildcard-sf9-io
+```
+
+When two hosts share the same section name the pipeline emits a **single** `parentRefs` entry for that listener — the Gateway API forbids duplicate `(name, namespace, sectionName)` tuples. The onboarding step still validates the listener once per host.
 
 > **DNS and Cloudflare proxy:** HTTP-01 ACME challenge requires the hostname to resolve directly to the gateway IP. If using Cloudflare, set the record to **DNS-only mode (grey cloud)** while the certificate is being issued. Once the certificate is `Ready`, you can re-enable the orange cloud — the pipeline detects an already-ready certificate and skips the DNS pre-flight check on subsequent runs.
 

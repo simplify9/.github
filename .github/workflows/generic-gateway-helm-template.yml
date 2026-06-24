@@ -155,18 +155,31 @@ on:
       gateway-section-names:
         description: |
           Per-hostname section name overrides — one entry per line, aligned by
-          position with gateway-hostnames. An empty line means DEDICATED mode
-          for that host (full cert + listener provisioning). A non-empty line
-          means SHARED mode (the named listener must already exist; no cert or
-          listener is created for that host).
+          position with gateway-hostnames. An empty (blank) line means DEDICATED
+          mode for that host (full cert + listener provisioning). A non-empty
+          line means SHARED mode (the named listener must already exist; no cert
+          or listener is created for that host).
 
-          Example — two hostnames, first dedicated, second shared:
-            gateway-hostnames: |
-              api-stg.zeenah.io
-              zeenah-api.sf9.io
+          YAML block scalar indentation rule: the block indentation is set by
+          the FIRST non-empty line. Every subsequent non-empty line must be at
+          the same depth — a line with less indentation ends the block and
+          causes a YAML parse error.
+
+          Simplest — truly blank line for dedicated host:
             gateway-section-names: |
-                                    # blank  → dedicated for api-stg.zeenah.io
-              https-wildcard-sf9-io # shared → for zeenah-api.sf9.io
+
+              https-wildcard-sf9-io
+
+          With inline annotations — comment line at the SAME indent as the
+          section name lines (the # is stripped by the script at runtime):
+            gateway-section-names: |
+              # api-stg.zeenah.io -> dedicated
+              https-wildcard-sf9-io # zeenah-api.sf9.io -> shared
+
+          WRONG — comment at deeper indent than section name (parse error):
+            gateway-section-names: |
+                            # blank -> this line is MORE indented than below
+              https-wildcard-sf9-io  <- YAML sees this as outside the block!
 
           When this input is set it takes precedence over gateway-section-name
           (the singular form) and generates one parentRef per hostname instead
@@ -691,6 +704,7 @@ jobs:
               mapfile -t _raw_sections < <(echo "${GATEWAY_SECTION_NAMES_RAW}" | sed 's/\r//g')
               _pref_idx=0
               _sn_pos=0
+              _emitted_sections=""
               while IFS= read -r _h; do
                 _h=$(echo "$_h" | xargs)
                 [ -z "$_h" ] && continue
@@ -701,21 +715,32 @@ jobs:
                   _sn=$(echo "${_raw_sections[$_sn_pos]}" | xargs | sed 's/#.*//' | xargs)
                 fi
                 _sn_pos=$((_sn_pos + 1))
-                output+="gateway.parentRefs[$_pref_idx].name=${GATEWAY_PARENT_NAME}\\n"
-                output+="gateway.parentRefs[$_pref_idx].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
                 if [ -n "$_sn" ]; then
-                  # Shared mode: use the explicit section name directly.
-                  output+="gateway.parentRefs[$_pref_idx].sectionName=${_sn}\\n"
+                  # Shared mode — always record in section_names_list so the onboarding
+                  # step can validate the listener for every host that uses it.
+                  # Only emit one parentRef per unique sectionName: the Gateway API spec
+                  # forbids duplicate (name, namespace, sectionName) tuples in parentRefs,
+                  # so two sf9.io hosts sharing the same wildcard listener must produce a
+                  # single parentRef entry, not two identical ones.
                   section_names_list+="${_sn}"$'\n'
+                  if ! echo "$_emitted_sections" | grep -Fxq "$_sn"; then
+                    _emitted_sections+="${_sn}"$'\n'
+                    output+="gateway.parentRefs[$_pref_idx].name=${GATEWAY_PARENT_NAME}\\n"
+                    output+="gateway.parentRefs[$_pref_idx].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
+                    output+="gateway.parentRefs[$_pref_idx].sectionName=${_sn}\\n"
+                    _pref_idx=$((_pref_idx + 1))
+                  fi
                 else
-                  # Dedicated mode: auto-slug the hostname into a section name so
-                  # the HTTPRoute is pinned to this host's own HTTPS listener.
+                  # Dedicated mode: each host gets its own unique parentRef
+                  # (auto-slugged sectionName is guaranteed unique per hostname).
                   _slug=$(echo "$_h" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
                   _auto_sn=$(echo "https-${_slug}" | cut -c1-63 | sed 's/-$//')
+                  output+="gateway.parentRefs[$_pref_idx].name=${GATEWAY_PARENT_NAME}\\n"
+                  output+="gateway.parentRefs[$_pref_idx].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
                   output+="gateway.parentRefs[$_pref_idx].sectionName=${_auto_sn}\\n"
                   section_names_list+=''$'\n'
+                  _pref_idx=$((_pref_idx + 1))
                 fi
-                _pref_idx=$((_pref_idx + 1))
               done < <(echo "$gateway_hosts_input" | sed 's/\r//g' | tr ',' '\n')
             else
               # Legacy single-parentRef mode — fully backwards compatible.
