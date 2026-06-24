@@ -152,6 +152,28 @@ on:
         required: false
         default: ''
         type: string
+      gateway-section-names:
+        description: |
+          Per-hostname section name overrides — one entry per line, aligned by
+          position with gateway-hostnames. An empty line means DEDICATED mode
+          for that host (full cert + listener provisioning). A non-empty line
+          means SHARED mode (the named listener must already exist; no cert or
+          listener is created for that host).
+
+          Example — two hostnames, first dedicated, second shared:
+            gateway-hostnames: |
+              api-stg.zeenah.io
+              zeenah-api.sf9.io
+            gateway-section-names: |
+                                    # blank  → dedicated for api-stg.zeenah.io
+              https-wildcard-sf9-io # shared → for zeenah-api.sf9.io
+
+          When this input is set it takes precedence over gateway-section-name
+          (the singular form) and generates one parentRef per hostname instead
+          of a single shared parentRef. Leave unset to use the legacy behaviour.
+        required: false
+        default: ''
+        type: string
       gateway-hostnames:
         description: Gateway hostnames comma or newline
         required: false
@@ -591,6 +613,7 @@ jobs:
           GATEWAY_PARENT_NAME: ${{ inputs.gateway-parent-name }}
           GATEWAY_PARENT_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
           GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
+          GATEWAY_SECTION_NAMES_RAW: ${{ inputs.gateway-section-names }}
           GATEWAY_HOSTNAMES_RAW: ${{ inputs.gateway-hostnames }}
           GATEWAY_PATHS_RAW: ${{ inputs.gateway-paths }}
           GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
@@ -656,18 +679,57 @@ jobs:
           output+="ingress.enabled=${ingress_enabled}\\n"
           output+="config.enabled=${CONFIGMAP_ENABLED}\\n"
 
-          if [ "$gateway_enabled" = "true" ]; then
-            output+="gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}\\n"
-            output+="gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
+          # Per-hostname section names list — populated only when gateway-section-names
+          # (plural) is used; remains empty in legacy mode. Passed to the onboarding
+          # step so it knows which hosts need dedicated provisioning vs shared listeners.
+          section_names_list=""
 
-            effective_section="${GATEWAY_SECTION_NAME}"
-            if [ -z "$effective_section" ] && [ "$host_count" -eq 1 ]; then
-              first_host=$(echo "$host_list" | head -n1)
-              slug=$(echo "$first_host" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
-              effective_section=$(echo "https-${slug}" | cut -c1-63 | sed 's/-$//')
-            fi
-            if [ -n "$effective_section" ]; then
-              output+="gateway.parentRefs[0].sectionName=${effective_section}\\n"
+          if [ "$gateway_enabled" = "true" ]; then
+            if [ -n "$(echo "${GATEWAY_SECTION_NAMES_RAW:-}" | tr -d '[:space:]\r\n')" ]; then
+              # Per-hostname mode: one parentRef per host, section name resolved from
+              # gateway-section-names by position (empty entry = auto-slug for dedicated).
+              mapfile -t _raw_sections < <(echo "${GATEWAY_SECTION_NAMES_RAW}" | sed 's/\r//g')
+              _pref_idx=0
+              _sn_pos=0
+              while IFS= read -r _h; do
+                _h=$(echo "$_h" | xargs)
+                [ -z "$_h" ] && continue
+                _sn=""
+                if [ "$_sn_pos" -lt "${#_raw_sections[@]}" ]; then
+                  # Strip shell-style comments so callers can annotate lines
+                  # (e.g. "  # blank → dedicated" or "https-wildcard-sf9-io # shared").
+                  _sn=$(echo "${_raw_sections[$_sn_pos]}" | xargs | sed 's/#.*//' | xargs)
+                fi
+                _sn_pos=$((_sn_pos + 1))
+                output+="gateway.parentRefs[$_pref_idx].name=${GATEWAY_PARENT_NAME}\\n"
+                output+="gateway.parentRefs[$_pref_idx].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
+                if [ -n "$_sn" ]; then
+                  # Shared mode: use the explicit section name directly.
+                  output+="gateway.parentRefs[$_pref_idx].sectionName=${_sn}\\n"
+                  section_names_list+="${_sn}"$'\n'
+                else
+                  # Dedicated mode: auto-slug the hostname into a section name so
+                  # the HTTPRoute is pinned to this host's own HTTPS listener.
+                  _slug=$(echo "$_h" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
+                  _auto_sn=$(echo "https-${_slug}" | cut -c1-63 | sed 's/-$//')
+                  output+="gateway.parentRefs[$_pref_idx].sectionName=${_auto_sn}\\n"
+                  section_names_list+=''$'\n'
+                fi
+                _pref_idx=$((_pref_idx + 1))
+              done < <(echo "$gateway_hosts_input" | sed 's/\r//g' | tr ',' '\n')
+            else
+              # Legacy single-parentRef mode — fully backwards compatible.
+              output+="gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}\\n"
+              output+="gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
+              effective_section="${GATEWAY_SECTION_NAME}"
+              if [ -z "$effective_section" ] && [ "$host_count" -eq 1 ]; then
+                first_host=$(echo "$host_list" | head -n1)
+                slug=$(echo "$first_host" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
+                effective_section=$(echo "https-${slug}" | cut -c1-63 | sed 's/-$//')
+              fi
+              if [ -n "$effective_section" ]; then
+                output+="gateway.parentRefs[0].sectionName=${effective_section}\\n"
+              fi
             fi
 
             hidx=0
@@ -742,6 +804,10 @@ jobs:
             printf "%s" "$host_list"
             echo
             echo "EOF"
+            echo "gateway-section-names-list<<EOF"
+            printf "%s" "$section_names_list"
+            echo
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/2] Routing values generated — mode: ${mode}"
@@ -760,6 +826,7 @@ jobs:
           GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
           HOST_LIST: ${{ steps.routing.outputs.gateway-host-list }}
           GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
+          SECTION_NAMES_LIST: ${{ steps.routing.outputs.gateway-section-names-list }}
         run: |
           set -euo pipefail
 
@@ -986,9 +1053,37 @@ jobs:
             echo "Rollback: removed listener '${target_name}' (index ${zero_idx})."
           }
 
+          # Parse per-hostname section names aligned with HOST_LIST.
+          # Empty array (legacy mode) means every host runs in dedicated mode.
+          mapfile -t _per_host_sections < <(printf "%s" "${SECTION_NAMES_LIST:-}")
+          _host_idx=0
+
           while IFS= read -r host; do
             host=$(echo "$host" | xargs)
             [ -z "$host" ] && continue
+
+            # Resolve the section name for this specific host position.
+            _per_host_sn=""
+            if [ "${#_per_host_sections[@]}" -gt 0 ] && [ "$_host_idx" -lt "${#_per_host_sections[@]}" ]; then
+              _per_host_sn=$(echo "${_per_host_sections[$_host_idx]}" | xargs)
+            fi
+            _host_idx=$((_host_idx + 1))
+
+            if [ -n "$_per_host_sn" ]; then
+              # Shared listener mode for this specific host: validate the named
+              # listener exists on the gateway; no cert or listener is created.
+              echo "Shared listener mode for '${host}': section-name='${_per_host_sn}'."
+              _existing_listeners=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+                -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}' 2>/dev/null || true)
+              if ! echo "$_existing_listeners" | grep -Fxq "${_per_host_sn}"; then
+                echo "❌ Shared listener '${_per_host_sn}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' for host '${host}'."
+                echo "   Available listeners:"
+                echo "$_existing_listeners" | sed 's/^/     /'
+                exit 1
+              fi
+              echo "✅ Shared listener '${_per_host_sn}' confirmed for '${host}'."
+              continue
+            fi
 
             slug=$(to_slug "$host")
             cert_name="$slug"
