@@ -45,6 +45,7 @@
 | Next.js static export | Cloudflare Workers | [`next-static-cloudflare-worker.yaml`](#next-static-cloudflare-workeryaml) |
 | Vite (Workers edge deploy) | Cloudflare Workers | [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml) |
 | REST API / microservice | Docker + Kubernetes | [`api-cicd.yml`](#api-cicdyml) |
+| REST API / microservice | Docker + Kubernetes (Gateway API) | [`generic-gateway-helm-template.yml`](#generic-gateway-helm-templateyml) |
 | .NET application | NuGet + Docker + Kubernetes | [`sw-cicd.yml`](#sw-cicdyml) |
 | Docker image only (no deploy) | Container registry | [`ci-docker.yaml`](#ci-dockeryaml) |
 | Helm deploy only (no Docker) | Kubernetes via Helm | [`ci-helm.yaml`](#ci-helmyaml) |
@@ -725,7 +726,109 @@ CI/CD for **Cilium Gateway API-aware** Helm charts. Extends `generic-chart-helm.
 
 #### `generic-gateway-helm-template.yml`
 
-Runs `helm template` rendering validation only — no packaging, no pushing. Use in pull requests to verify chart correctness without publishing.
+Full CI/CD pipeline for APIs and microservices using the **Kubernetes Gateway API** (Cilium). Covers semantic versioning → Docker build/push → Gateway listener + TLS certificate auto-onboarding → Helm deploy. This is the standard pipeline for any service that needs its own hostname on the cluster.
+
+**Pipeline stages**
+
+1. **Version** — `determine-semver` computes the next `major.minor.patch` from git tags.
+2. **Build** — Docker image built and pushed to the container registry.
+3. **Routing values** — generates `gateway.*` Helm `--set` values from the hostname and path inputs; handles per-hostname listener mode selection.
+4. **Auto-onboard** — for each dedicated hostname: DNS pre-flight check, cert-manager `Certificate` CR apply, failed ACME Order purge, HTTP + HTTPS listener patch; for shared hostnames: named listener validation only.
+5. **Helm deploy** — `helm upgrade --install` against `s9genericchart-v2` (or a custom chart).
+6. **Tag** — writes the new semver tag back to the calling repo.
+
+**Listener modes**
+
+| Mode | When to use | What the onboarding step does |
+|---|---|---|
+| **Dedicated** (default) | Custom domains (`api-stg.zeenah.io`) | Creates HTTP + HTTPS listeners, issues a TLS certificate via cert-manager HTTP-01 |
+| **Shared / wildcard** | Internal subdomains (`myapp.sf9.io`, `myapp.talmaro.com`) | Validates the named shared listener exists; skips cert and listener creation entirely |
+
+**Key inputs**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `app-name` | | (repo name) | Helm release name and Docker image name |
+| `namespace` | | `development` | Kubernetes deployment namespace |
+| `routing-mode` | | `gateway` | `gateway`, `ingress`, or `dual` |
+| `gateway-hostnames` | | `''` | Comma- or newline-separated hostnames for the HTTPRoute |
+| `gateway-section-name` | | `''` | **Global** shared listener name — all hosts attach to this one listener (legacy; use `gateway-section-names` for mixed deployments) |
+| `gateway-section-names` | | `''` | **Per-hostname** section names, one line per hostname aligned with `gateway-hostnames`. Empty line = dedicated mode; non-empty = shared listener name. See [Mixed listener mode](#mixed-listener-mode) below. |
+| `gateway-paths` | | `/` | Route paths (comma or newline) |
+| `gateway-parent-name` | | `public-gateway` | Gateway resource name |
+| `gateway-parent-namespace` | | `s9-dev-edge` | Namespace of the Gateway resource |
+| `gateway-auto-onboarding` | | `true` | Set `false` to skip cert + listener provisioning |
+| `gateway-cert-issuer-name` | | `letsencrypt-production-gateway` | cert-manager ClusterIssuer name |
+| `gateway-cert-wait` | | `true` | Block the step until the certificate becomes `Ready` |
+| `gateway-cert-wait-timeout-seconds` | | `600` | Max seconds to wait for cert readiness |
+| `container-registry` | | `ghcr.io` | Docker registry URL |
+| `chart-name` | | `s9genericchart-v2` | Helm chart name |
+| `chart-repo` | | `https://charts.sf9.io` | Helm repository URL |
+| `helm-set-values` | | `''` | Extra non-sensitive `--set key=value` pairs |
+| `init-job-image` | | `''` | Optional pre-deploy DB migration Job image |
+| `environment` | | `Development` | Value set as `environment` in the chart |
+| `major-version` | | `1` | Semver major |
+| `minor-version` | | `0` | Semver minor |
+
+**Required secrets**
+
+| Secret | Description |
+|---|---|
+| `kubeconfig` | Base64-encoded kubeconfig (auto-onboarding + Helm deploy) |
+| `registry-username` | Container registry username |
+| `registry-password` | Container registry password / token |
+| `helm-set-secret-values` | Sensitive Helm values passed as `--set-string` (DB strings, API keys) |
+
+**Minimal example — dedicated hostname**
+
+```yaml
+jobs:
+  deploy:
+    uses: simplify9/.github/.github/workflows/generic-gateway-helm-template.yml@main
+    with:
+      app-name: my-api
+      namespace: my-api-dev
+      gateway-hostnames: api-stg.myapp.io
+    secrets:
+      kubeconfig: ${{ secrets.KUBECONFIG }}
+      registry-username: ${{ secrets.REGISTRY_USERNAME }}
+      registry-password: ${{ secrets.REGISTRY_PASSWORD }}
+      helm-set-secret-values: ${{ secrets.DEV_HELM_SECRET_VALUES }}
+```
+
+The onboarding step will create `http-api-stg-myapp-io` and `https-api-stg-myapp-io` listeners on the gateway, issue a cert via Let's Encrypt HTTP-01, and pin the HTTPRoute to `sectionName: https-api-stg-myapp-io`.
+
+**Shared wildcard example (e.g. `*.sf9.io`)**
+
+```yaml
+with:
+  app-name: my-api
+  namespace: my-api-dev
+  gateway-hostnames: my-api.sf9.io
+  gateway-section-name: https-wildcard-sf9-io
+```
+
+The onboarding step skips cert and listener creation entirely; it only validates that `https-wildcard-sf9-io` exists on the gateway. The wildcard cert covers `*.sf9.io` already.
+
+##### Mixed listener mode
+
+One release, two hostnames, different modes:
+
+```yaml
+with:
+  app-name: zeenah-api
+  namespace: zeenah-dev
+  gateway-hostnames: |
+    api-stg.zeenah.io
+    zeenah-api.sf9.io
+  gateway-section-names: |
+                          # blank  → dedicated for api-stg.zeenah.io
+    https-wildcard-sf9-io # shared → for zeenah-api.sf9.io
+```
+
+The Helm chart receives two `parentRefs` entries — one per hostname — so the single HTTPRoute attaches to both the dedicated `https-api-stg-zeenah-io` listener and the existing wildcard `https-wildcard-sf9-io` listener. The onboarding step creates listeners and a cert only for `api-stg.zeenah.io`; it validates `https-wildcard-sf9-io` exists for `zeenah-api.sf9.io`.
+
+> **DNS and Cloudflare proxy:** HTTP-01 ACME challenge requires the hostname to resolve directly to the gateway IP. If using Cloudflare, set the record to **DNS-only mode (grey cloud)** while the certificate is being issued. Once the certificate is `Ready`, you can re-enable the orange cloud — the pipeline detects an already-ready certificate and skips the DNS pre-flight check on subsequent runs.
 
 ---
 
@@ -958,6 +1061,19 @@ Confirm the provisioning profile UUID matches the bundle ID and team ID. Certifi
 ### Android versionCode conflicts on Play Console
 
 Increase `version-code-offset`. The default `80000` prevents collisions when migrating from another CI system with a lower run number sequence. Set it above your old system's last published versionCode.
+
+### Certificate issuance times out or stays pending (Gateway API)
+
+The pipeline includes a DNS pre-flight check and an ACME Order purge to handle the most common causes:
+
+**DNS not pointing to the gateway:**  
+The pre-flight runs `dig +short <hostname>` and fails fast with an actionable message if no A record exists or if the resolved IP does not match the gateway. Fix: create the A record before running the pipeline.
+
+**Cloudflare orange-cloud proxy:**  
+cert-manager's HTTP-01 self-check cannot traverse Cloudflare's proxy (hairpin NAT on DigitalOcean). The pre-flight detects this and prints the Cloudflare IPs vs the expected gateway IP. Fix: set the DNS record to **DNS-only (grey cloud)** for the initial certificate issuance. Once the cert is `Ready`, re-enable the orange cloud — the pre-flight is skipped when a valid cert already exists.
+
+**cert-manager backoff after a previously failed Order:**  
+If you fix DNS and re-run without deleting the failed cert-manager Order, cert-manager waits out exponential backoff (up to ~30 min). The pipeline automatically detects and deletes `errored` or `invalid` Orders so cert-manager retries immediately.
 
 ### kubeconfig not working
 
