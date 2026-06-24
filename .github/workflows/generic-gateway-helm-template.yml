@@ -1008,6 +1008,30 @@ jobs:
               "  dnsNames:" \
               "    - ${host}")
 
+            # Purge any failed ACME Orders so cert-manager retries immediately
+            # rather than waiting out exponential backoff. kubectl apply on an
+            # existing Certificate is a no-op when the spec is unchanged, so a
+            # re-run after a late DNS update leaves the cert stuck in backoff
+            # until the failed Orders are deleted. Only errored/invalid Orders
+            # are removed — pending Orders on a freshly created cert are untouched.
+            cert_ready_now=$(kubectl get certificate "${cert_name}" -n "${GATEWAY_NAMESPACE}" \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+            if [ "${cert_ready_now}" != "True" ]; then
+              orders_output=$(kubectl get orders -n "${GATEWAY_NAMESPACE}" \
+                -l "cert-manager.io/certificate-name=${cert_name}" \
+                -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.state}{"\n"}{end}' \
+                2>/dev/null || echo "")
+              while IFS=$'\t' read -r order_name order_state; do
+                [ -z "$order_name" ] && continue
+                case "$order_state" in
+                  errored|invalid)
+                    echo "⚠️  Purging failed ACME Order '${order_name}' (state: ${order_state}) — cert-manager will retry immediately."
+                    kubectl delete order "${order_name}" -n "${GATEWAY_NAMESPACE}" --ignore-not-found
+                    ;;
+                esac
+              done <<< "${orders_output}"
+            fi
+
             # Add HTTP listener, track whether it was newly created.
             _listener_was_added=false
             add_listener_if_missing "$http_listener" "HTTP" "$host" "$secret_name"
