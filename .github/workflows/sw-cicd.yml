@@ -179,7 +179,7 @@ jobs:
           echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history + all tags so determine-semver reads them locally
           # (no network fetch needed); persisted git token not required after.
@@ -234,7 +234,7 @@ jobs:
           echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Version: ${{ needs.version.outputs.version }} | Projects: ${{ inputs.nuget-projects }} | Triggered by: ${{ github.actor }}"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Dotnet Restore, Build, and Test
         uses: simplify9/.github/.github/actions/dotnet-build@main
@@ -294,7 +294,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Validate chart publish configuration
         run: |

@@ -399,7 +399,7 @@ jobs:
           echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history + all tags so determine-semver reads them locally
           # (no network fetch needed); persisted git token not required after.
@@ -459,7 +459,7 @@ jobs:
 
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history + all tags so determine-semver reads them locally
           # (no network fetch needed); persisted git token not required after.
@@ -552,7 +552,7 @@ jobs:
           echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Build and push Docker image
         id: docker

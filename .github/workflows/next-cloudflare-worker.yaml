@@ -80,7 +80,7 @@ jobs:
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Enable Corepack (pnpm)
         if: ${{ inputs.package_manager == 'pnpm' }}
