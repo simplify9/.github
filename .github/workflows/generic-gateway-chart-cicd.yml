@@ -182,7 +182,7 @@ jobs:
           echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
@@ -305,7 +305,7 @@ jobs:
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Helm
         uses: azure/setup-helm@v5

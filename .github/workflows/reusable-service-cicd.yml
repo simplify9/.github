@@ -218,7 +218,7 @@
 #     kubectl, jq              Pre-installed on ubuntu-latest; used to onboard
 #                              Gateway listeners + cert-manager Certificates.
 #   External actions:
-#     actions/checkout@v6      Standard repository checkout.
+#     actions/checkout@v7      Standard repository checkout.
 #     azure/setup-helm@v5      Installs the Helm CLI (latest stable).
 # =============================================================================
 
@@ -499,7 +499,7 @@ jobs:
       is-release: ${{ steps.semver.outputs.is-release }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history + all tags so determine-semver reads them locally; this
           # also lets us drop the persisted token (the later git fetch in
@@ -554,7 +554,7 @@ jobs:
       packages: write   # in case nuget-source targets a GitHub Packages feed
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -637,7 +637,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
