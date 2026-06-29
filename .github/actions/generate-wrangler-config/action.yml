@@ -15,8 +15,9 @@
 #     separated list to override, or an empty string to omit the line.
 #   - The [assets] block is emitted when assets-dir is non-empty (directory line)
 #     and/or when build-for-opennext=true or add-assets-binding=true (ASSETS
-#     binding line). Pass an empty assets-dir with no binding to omit it entirely
-#     (supports assets-less Workers).
+#     binding line) and/or when not-found-handling is set (not_found_handling
+#     line). Pass an empty assets-dir with no binding/handling to omit it
+#     entirely (supports assets-less Workers).
 #
 # Inputs (kebab-case):
 #   compatibility-date    (required)  Wrangler compatibility_date (e.g. 2024-10-20).
@@ -28,6 +29,8 @@
 #   main-entry            (optional)  Explicit Worker main entry; empty = none unless OpenNext.
 #   add-assets-binding    (optional)  Add binding = "ASSETS" under [assets] (default false).
 #   compatibility-flags   (optional)  Comma/space separated flags (default nodejs_compat).
+#   not-found-handling    (optional)  Assets not_found_handling mode (e.g.
+#                                     single-page-application); empty omits the line.
 #
 # Outputs:
 #   config-path  Path to the generated Wrangler config file (wrangler.toml).
@@ -84,6 +87,10 @@ inputs:
     description: "Comma/space separated Wrangler compatibility_flags (default nodejs_compat). Empty string omits the line."
     required: false
     default: "nodejs_compat"
+  not-found-handling:
+    description: "Assets not_found_handling mode (e.g. single-page-application or 404-page). Emitted inside [assets]. Empty string omits the line."
+    required: false
+    default: ""
 
 outputs:
   config-path:
@@ -106,6 +113,7 @@ runs:
         MAIN_ENTRY: ${{ inputs['main-entry'] }}
         ADD_ASSETS_BINDING: ${{ inputs['add-assets-binding'] }}
         COMPATIBILITY_FLAGS: ${{ inputs['compatibility-flags'] }}
+        NOT_FOUND_HANDLING: ${{ inputs['not-found-handling'] }}
       run: |
         set -euo pipefail
         echo "::group::⚡ Generate wrangler.toml"
@@ -183,20 +191,24 @@ runs:
         # Decide [assets] block:
         # - directory line is emitted when assets-dir is non-empty
         # - ASSETS binding line is emitted for OpenNext or when add-assets-binding=true
-        # - The whole block is omitted when neither applies (assets-less Worker)
+        # - not_found_handling line is emitted when not-found-handling is non-empty
+        # - The whole block is omitted when none apply (assets-less Worker)
         WANT_BINDING="false"
         if [ "$BUILD_FOR_OPENNEXT" = "true" ] || [ "$ADD_ASSETS_BINDING" = "true" ]; then
           WANT_BINDING="true"
         fi
 
         ASSETS_BLOCK=""
-        if [ -n "$ASSETS_DIR" ] || [ "$WANT_BINDING" = "true" ]; then
+        if [ -n "$ASSETS_DIR" ] || [ "$WANT_BINDING" = "true" ] || [ -n "$NOT_FOUND_HANDLING" ]; then
           ASSETS_BLOCK="[assets]"
           if [ -n "$ASSETS_DIR" ]; then
             ASSETS_BLOCK="${ASSETS_BLOCK}"$'\n'"directory = \"./${ASSETS_DIR}\""
           fi
           if [ "$WANT_BINDING" = "true" ]; then
             ASSETS_BLOCK="${ASSETS_BLOCK}"$'\n'"binding = \"ASSETS\""
+          fi
+          if [ -n "$NOT_FOUND_HANDLING" ]; then
+            ASSETS_BLOCK="${ASSETS_BLOCK}"$'\n'"not_found_handling = \"${NOT_FOUND_HANDLING}\""
           fi
         fi
 

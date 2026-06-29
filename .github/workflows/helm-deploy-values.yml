@@ -1,5 +1,36 @@
-name: Helm Deploy (values file) - reusable
+# =============================================================================
+# Deploy-only reusable workflow.
+#
+# Deploys an ALREADY-PUBLISHED Helm chart from a classic Helm chart repository
+# (e.g. ChartMuseum) to a Kubernetes cluster. It does not build, package, or
+# publish anything — for the full build→publish→deploy pipeline use one of the
+# *-cicd reusable workflows instead.
+#
+# The input contract mirrors the sibling templates (generic-chart-helm.yml et al)
+# so callers look consistent: `environment`, multi-line `ingress-hosts` /
+# `ingress-paths` / `ingress-tls-secrets`, `service-target-port`,
+# `helm-set-values`, and the `helm-set-secret-values` secret. It emits the same
+# chart value keys those templates use (the s9generic chart schema):
+#   environment=<env>
+#   ingress.hosts[i].host / ingress.hosts[i].tlsSecret   (zipped by index)
+#   ingress.paths[i]
+#   service.targetPort=<port>
+#
+# Deploy guardrails:
+#   - concurrency: serializes runs per namespace+release so two deploys can't
+#     race the same Helm release (cancel-in-progress: false — never cancel a
+#     half-applied upgrade).
+#   - timeout-minutes: bounds a hung run (helm-timeout only bounds the Helm call).
+#   - gh-environment: optional GitHub Environment for approvals / deployment
+#     history. NOTE: distinct from the `environment` input, which is a Helm value.
+#
+# The Helm logic is delegated to the shared composite action
+# `simplify9/.github/.github/actions/helm-deploy` (the same action used by the
+# full CI/CD pipelines), keeping deploy behaviour — Helm 3/4 atomic flag
+# selection, kubeconfig handling, verification and the job summary — consistent.
+# =============================================================================
 
+name: Helm Deploy (values file) - reusable
 on:
   workflow_call:
     inputs:
@@ -11,6 +42,7 @@ on:
         type: string
         required: true
 
+      # Classic Helm chart repository URL (ChartMuseum-style) to pull the chart from.
       chart-repo:
         type: string
         required: true
@@ -19,27 +51,54 @@ on:
         type: string
         required: true
 
+      # Path to a values file in the CALLER's repo. Applied with `--values` only
+      # when the file is actually present. A missing default (values.yaml) is
+      # skipped; an explicitly-set file that is missing fails fast.
       values-file:
         type: string
         required: false
         default: values.yaml
 
-      global-environment:
+      # Optional. Leave empty to deploy the latest version published in the repo;
+      # set it to pin a specific chart version.
+      chart-version:
         type: string
         required: false
         default: ""
 
-      ingress-host:
+      # Helm VALUE for the chart (set as `environment=<env>`). This is NOT the
+      # GitHub Environment — see `gh-environment` for that.
+      environment:
         type: string
         required: false
         default: ""
 
-      ingress-tls-secret:
+      # Optional GitHub Environment name for deployment protection rules,
+      # environment-scoped secrets and deployment history. Empty = none (the
+      # job simply runs with no environment binding).
+      gh-environment:
         type: string
         required: false
         default: ""
 
-      ingress-path:
+      service-target-port:
+        type: string
+        required: false
+        default: ""
+
+      # Multi-line (one per line) or comma-separated. Hosts are zipped with
+      # ingress-tls-secrets by index: host[i] <-> tls-secret[i].
+      ingress-hosts:
+        type: string
+        required: false
+        default: ""
+
+      ingress-paths:
+        type: string
+        required: false
+        default: ""
+
+      ingress-tls-secrets:
         type: string
         required: false
         default: ""
@@ -49,14 +108,8 @@ on:
         required: false
         default: ""
 
-      # Keep DB as a normal input (not a secret)
-      db-connection:
-        type: string
-        required: false
-        default: ""
-
-      # One key=value per line each becomes --set <line>
-      extra-set-values:
+      # Non-secret helm --set values, one key=value per line.
+      helm-set-values:
         type: string
         required: false
         default: ""
@@ -91,14 +144,28 @@ on:
         required: false
         default: true
 
-      verify-cluster:
-        type: boolean
+      # Upper bound for the whole job (checkout + setup + helm). The Helm call
+      # itself is bounded separately by helm-timeout.
+      job-timeout-minutes:
+        type: number
         required: false
-        default: true
+        default: 20
 
     secrets:
+      # Cluster access. Accepts either a base64-encoded kubeconfig or raw YAML
+      # (auto-detected). `kubeconfig` matches the sibling templates;
+      # `kubeconfig64` is kept for backward compatibility. Provide one.
+      kubeconfig:
+        required: false
       kubeconfig64:
-        required: true
+        required: false
+
+      # Comma-separated key=value pairs applied as masked helm --set-string
+      # values (e.g. "db=<connection>,apiKey=<token>"). Same contract as the
+      # *-cicd reusable workflows. Note: values are comma-separated, so a value
+      # containing a literal comma cannot be passed through this channel.
+      helm-set-secret-values:
+        required: false
 
 permissions:
   contents: read
@@ -106,190 +173,138 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.job-timeout-minutes }}
+    # Optional GitHub Environment. Empty string => no environment binding, so
+    # existing callers that don't pass gh-environment are unaffected.
+    environment: ${{ inputs.gh-environment }}
+    # Serialize deploys to the same release/namespace. Never cancel an in-flight
+    # deploy — a half-applied Helm upgrade is worse than a queued one.
+    concurrency:
+      group: helm-deploy-${{ inputs.namespace }}-${{ inputs.release-name }}
+      cancel-in-progress: false
 
     steps:
-      - name: Announce deploy job
-        run: |
-          echo "::notice title=☸️ [HELM] Helm Deploy — Job Started::Release: ${{ inputs.release-name }} | Chart: ${{ inputs.chart-name }} | Namespace: ${{ inputs.namespace }} | Triggered by: ${{ github.actor }}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏭️ Skipped" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v5
-        with:
-          version: ${{ inputs.kubectl-version }}
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v5
-        with:
-          version: ${{ inputs.helm-version }}
-
-      - name: Configure kubeconfig (from secret)
+      - name: Validate kubeconfig secret
         env:
-          KUBECONFIG_B64: ${{ secrets.kubeconfig64 }}
+          KUBECONFIG_PRIMARY: ${{ secrets.kubeconfig }}
+          KUBECONFIG_LEGACY: ${{ secrets.kubeconfig64 }}
         run: |
           set -euo pipefail
-          echo "::group::☸️ [CHECKPOINT 1/3] Configure kubeconfig"
-          echo "→ Writing kubeconfig to: ${HOME}/.kube/config"
-          mkdir -p "${HOME}/.kube"
-          echo "${KUBECONFIG_B64}" | base64 -d > "${HOME}/.kube/config"
-          chmod 600 "${HOME}/.kube/config"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/3] Kubeconfig configured — PASSED"
-          echo "::endgroup::"
-
-      - name: Verify cluster access
-        if: ${{ inputs.verify-cluster }}
-        run: |
-          set -euo pipefail
-          echo "::group::☸️ [CHECKPOINT 2/3] Verify cluster access"
-          echo "→ Target namespace: ${{ inputs.namespace }}"
-          kubectl version --client=true
-          kubectl cluster-info
-          kubectl get ns "${{ inputs.namespace }}" || true
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Cluster access verified — PASSED"
-          echo "::endgroup::"
-
-      - name: Deploy with Helm (upgrade/install)
-        env:
-          IMAGE_TAG_INPUT: ${{ inputs.image-tag }}
-          DB_CONNECTION: ${{ inputs.db-connection }}
-          EXTRA_SET_VALUES: ${{ inputs.extra-set-values }}
-          HELM_TIMEOUT: ${{ inputs.helm-timeout }}
-          ATOMIC: ${{ inputs.atomic }}
-          WAIT: ${{ inputs.wait }}
-          CREATE_NAMESPACE: ${{ inputs.create-namespace }}
-        run: |
-          set -euo pipefail
-
-          echo "::group::☸️ [CHECKPOINT 3/3] Helm upgrade/install: ${{ inputs.release-name }}"
-          echo "→ Chart: ${{ inputs.chart-name }}"
-          echo "→ Repo: ${{ inputs.chart-repo }}"
-          echo "→ Namespace: ${{ inputs.namespace }}"
-          echo "→ Timeout: ${HELM_TIMEOUT}"
-
-          # Build helm command safely using an array (prevents word splitting and ; command breaks)
-          ARGS=(
-            upgrade --install
-            "${{ inputs.release-name }}"
-            "${{ inputs.chart-name }}"
-            --repo "${{ inputs.chart-repo }}"
-            --namespace "${{ inputs.namespace }}"
-            --values "${{ inputs.values-file }}"
-            --timeout "${HELM_TIMEOUT}"
-          )
-
-          if [ "${CREATE_NAMESPACE}" = "true" ]; then
-            ARGS+=(--create-namespace)
+          if [ -z "${KUBECONFIG_PRIMARY}${KUBECONFIG_LEGACY}" ]; then
+            echo "::error title=Missing kubeconfig::Provide either the 'kubeconfig' or 'kubeconfig64' secret."
+            exit 1
           fi
-          if [ "${ATOMIC}" = "true" ]; then
-            HELM_MAJOR="$(helm version --template '{{.Version}}' 2>/dev/null | sed -E 's/^v?([0-9]+).*/\1/')"
-            if [ "${HELM_MAJOR:-3}" -ge 4 ]; then
-              ARGS+=(--rollback-on-failure)
+          echo "✅ Kubeconfig secret provided."
+
+      # Only the values file is needed from the caller repo (the chart is pulled
+      # remotely), so a sparse, shallow checkout keeps this fast on large repos.
+      # An empty values-file makes sparse-checkout a no-op (full checkout).
+      - name: Checkout (values file only)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: ${{ inputs.values-file }}
+          sparse-checkout-cone-mode: false
+
+      # Translate the friendly inputs into the s9generic chart value keys, as a
+      # comma-separated --set string for the helm-deploy action. Mirrors the
+      # ingress mapping used by generic-chart-helm.yml. Secret values go straight
+      # through to secret-set-string-values via the helm-set-secret-values secret.
+      - name: Build Helm --set values
+        id: prep
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          SERVICE_TARGET_PORT: ${{ inputs.service-target-port }}
+          INGRESS_HOSTS: ${{ inputs.ingress-hosts }}
+          INGRESS_PATHS: ${{ inputs.ingress-paths }}
+          INGRESS_TLS_SECRETS: ${{ inputs.ingress-tls-secrets }}
+          HELM_SET_VALUES: ${{ inputs.helm-set-values }}
+          VALUES_FILE: ${{ inputs.values-file }}
+        run: |
+          set -euo pipefail
+
+          CSV=""
+          add() { [ -z "$1" ] && return 0; if [ -z "$CSV" ]; then CSV="$1"; else CSV="${CSV},$1"; fi; }
+          # Trim leading/trailing whitespace using bash parameter expansion only
+          # (no subprocess per item); result returned in $REPLY.
+          trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; REPLY="$s"; }
+          # Split newline/comma-separated text into the named array. Reading into
+          # an array up front avoids running anything that consumes stdin inside a
+          # read loop (which would swallow the remaining lines).
+          split() { mapfile -t "$1" < <(printf '%s' "$2" | sed 's/\r//g' | tr ',' '\n'); }
+
+          [ -n "$ENVIRONMENT" ] && add "environment=${ENVIRONMENT}"
+          [ -n "$SERVICE_TARGET_PORT" ] && add "service.targetPort=${SERVICE_TARGET_PORT}"
+
+          # Ingress hosts, zipped with TLS secrets by index (host[i] <-> tls[i]).
+          split HOSTS "$INGRESS_HOSTS"
+          split TLS_LIST "$INGRESS_TLS_SECRETS"
+          idx=0
+          for raw in "${HOSTS[@]}"; do
+            trim "$raw"; host="$REPLY"
+            [ -z "$host" ] && continue
+            add "ingress.hosts[$idx].host=${host}"
+            if [ "$idx" -lt "${#TLS_LIST[@]}" ]; then
+              trim "${TLS_LIST[$idx]}"; tls="$REPLY"
+              [ -n "$tls" ] && add "ingress.hosts[$idx].tlsSecret=${tls}"
+            fi
+            idx=$((idx + 1))
+          done
+
+          # Ingress paths.
+          split PATHS "$INGRESS_PATHS"
+          pidx=0
+          for raw in "${PATHS[@]}"; do
+            trim "$raw"; path="$REPLY"
+            [ -z "$path" ] && continue
+            add "ingress.paths[$pidx]=${path}"
+            pidx=$((pidx + 1))
+          done
+
+          # Caller's extra non-secret --set values, one key=value per line.
+          split EXTRA "$HELM_SET_VALUES"
+          for raw in "${EXTRA[@]}"; do
+            trim "$raw"; kv="$REPLY"
+            [ -z "$kv" ] && continue
+            add "$kv"
+          done
+
+          echo "set-values=${CSV}" >> "$GITHUB_OUTPUT"
+          echo "Computed --set values: ${CSV:-<none>}"
+
+          # Resolve the values file: apply it only if present. A missing DEFAULT
+          # (values.yaml) is skipped; an explicitly-specified missing file fails.
+          RESOLVED=""
+          if [ -n "$VALUES_FILE" ]; then
+            if [ -f "$VALUES_FILE" ]; then
+              RESOLVED="$VALUES_FILE"
+              echo "Using values file: $VALUES_FILE"
+            elif [ "$VALUES_FILE" = "values.yaml" ]; then
+              echo "::notice title=No values file::Default 'values.yaml' not found in the repo; deploying without --values."
             else
-              ARGS+=(--atomic)
+              echo "::error title=values-file not found::'$VALUES_FILE' was specified but is not present in the checked-out repository."
+              exit 1
             fi
           fi
-          if [ "${WAIT}" = "true" ]; then
-            ARGS+=(--wait)
-          fi
+          echo "values-file=${RESOLVED}" >> "$GITHUB_OUTPUT"
 
-          if [ -n "${{ inputs.global-environment }}" ]; then
-            ARGS+=(--set "global.environment=${{ inputs.global-environment }}")
-          fi
-
-          if [ -n "${{ inputs.ingress-host }}" ]; then
-            ARGS+=(--set "ingress.hosts={${{ inputs.ingress-host }}}")
-          fi
-
-          if [ -n "${{ inputs.ingress-tls-secret }}" ]; then
-            ARGS+=(--set "ingress.tls[0].secretName=${{ inputs.ingress-tls-secret }}")
-          fi
-
-          if [ -n "${{ inputs.ingress-path }}" ]; then
-            ARGS+=(--set "ingress.path=${{ inputs.ingress-path }}")
-          fi
-
-          # Quote as one argument so spaces or semicolons don't break the command
-          if [ -n "${DB_CONNECTION}" ]; then
-            ARGS+=(--set-string "db=${DB_CONNECTION}")
-          fi
-
-          if [ -n "${IMAGE_TAG_INPUT}" ]; then
-            ARGS+=(--set "image.tag=${IMAGE_TAG_INPUT}")
-          fi
-
-          # extra-set-values: one key=value per line
-          if [ -n "${EXTRA_SET_VALUES// /}" ]; then
-            while IFS= read -r line; do
-              line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-              [ -z "$line" ] && continue
-              ARGS+=(--set "$line")
-            done <<< "${EXTRA_SET_VALUES}"
-          fi
-
-          helm "${ARGS[@]}"
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/3] Helm deploy completed — release: ${{ inputs.release-name }}"
-          echo "::endgroup::"
-
-      - name: Report deploy failure
-        if: failure()
-        run: |
-          echo "::error title=☸️ [HELM] Deploy Job Failed::Release '${{ inputs.release-name }}' failed | Chart: ${{ inputs.chart-name }} | Namespace: ${{ inputs.namespace }}"
-          echo "  Checkpoint 1 — Kubeconfig:     ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Cluster access:  ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — Helm deploy:     ${CHECKPOINT_3_STATUS:-❌ Not reached}"
-
-      - name: Show release status
-        if: always()
-        run: |
-          set -euo pipefail
-          echo "::group::☸️ Post-deploy release status: ${{ inputs.release-name }}"
-          helm status "${{ inputs.release-name }}" --namespace "${{ inputs.namespace }}" || true
-          kubectl get pods --namespace "${{ inputs.namespace }}" -l app.kubernetes.io/instance="${{ inputs.release-name }}" || true
-          kubectl get ingress --namespace "${{ inputs.namespace }}" || true
-          echo "::endgroup::"
-
-      - name: Write job summary
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          RELEASE_NAME: ${{ inputs.release-name }}
-          CHART_NAME: ${{ inputs.chart-name }}
-          NAMESPACE: ${{ inputs.namespace }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## ☸️ Helm Deploy — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Release | \`${RELEASE_NAME}\` |"
-            echo "| Chart | \`${CHART_NAME}\` |"
-            echo "| Namespace | \`${NAMESPACE}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Kubeconfig configured | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Cluster access verified | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-            echo "| 3 | Helm upgrade/install | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Deploy with Helm
+        uses: simplify9/.github/.github/actions/helm-deploy@main
+        with:
+          chart-source-type: chartmuseum
+          chart-repo-url: ${{ inputs.chart-repo }}
+          chart-name: ${{ inputs.chart-name }}
+          chart-version: ${{ inputs.chart-version }}
+          release-name: ${{ inputs.release-name }}
+          namespace: ${{ inputs.namespace }}
+          values-file: ${{ steps.prep.outputs.values-file }}
+          set-values: ${{ steps.prep.outputs.set-values }}
+          secret-set-string-values: ${{ secrets.helm-set-secret-values }}
+          image-tag: ${{ inputs.image-tag }}
+          create-namespace: ${{ inputs.create-namespace }}
+          atomic: ${{ inputs.atomic }}
+          wait: ${{ inputs.wait }}
+          timeout: ${{ inputs.helm-timeout }}
+          helm-version: ${{ inputs.helm-version }}
+          kubectl-version: ${{ inputs.kubectl-version }}
+          kubeconfig: ${{ secrets.kubeconfig || secrets.kubeconfig64 }}

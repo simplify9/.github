@@ -1,0 +1,77 @@
+# =============================================================================
+# Write Job Summary
+# =============================================================================
+# Appends a standardized, status-aware section to the GitHub Step Summary.
+# Centralizes the success/failure status derivation so callers do not each
+# duplicate the `STATUS=$( [ ... ] && ✅ || ❌ )` snippet.
+#
+# Inputs:
+#   title    (required)  Section heading text (without the status suffix),
+#                        e.g. "Helm Chart Package + Push".
+#   status   (required)  Job status — pass ${{ job.status }}. "success" renders
+#                        "✅ SUCCESS"; anything else renders "❌ FAILED".
+#   icon     (optional)  Emoji shown before the title.
+#   details  (optional)  Markdown body appended under the heading — typically
+#                        one or more tables.
+#
+# Usage:
+#   - name: Write summary
+#     if: always()
+#     uses: simplify9/.github/.github/actions/write-job-summary@main
+#     with:
+#       icon: '☸️'
+#       title: Helm Chart Validation
+#       status: ${{ job.status }}
+#       details: |
+#         | Field | Value |
+#         |-------|-------|
+#         | Version | `1.2.3` |
+# =============================================================================
+name: 'Write Job Summary'
+author: 'Simplify9'
+description: 'Append a standardized, status-aware section (heading + markdown body) to the GitHub Step Summary.'
+
+inputs:
+  title:
+    description: 'Section heading text (without the status suffix).'
+    required: true
+  status:
+    description: 'Job status — pass ${{ job.status }}. "success" => ✅ SUCCESS, otherwise ❌ FAILED.'
+    required: true
+  icon:
+    description: 'Optional emoji shown before the title.'
+    required: false
+    default: ''
+  details:
+    description: 'Markdown body appended under the heading (e.g. tables).'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Append summary section
+      shell: bash
+      env:
+        TITLE: ${{ inputs.title }}
+        STATUS_IN: ${{ inputs.status }}
+        ICON: ${{ inputs.icon }}
+        DETAILS: ${{ inputs.details }}
+      run: |
+        set -euo pipefail
+        if [ "${STATUS_IN}" = "success" ]; then
+          status_label="✅ SUCCESS"
+        else
+          status_label="❌ FAILED"
+        fi
+        heading="${TITLE}"
+        [ -n "${ICON}" ] && heading="${ICON} ${TITLE}"
+        {
+          echo "## ${heading} — ${status_label}"
+          echo ""
+          printf '%s\n' "${DETAILS}"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+branding:
+  icon: 'file-text'
+  color: 'blue'

@@ -1,0 +1,612 @@
+# =============================================================================
+# Generic Gateway Helm Chart CI/CD (reusable)
+# =============================================================================
+#
+# PURPOSE:
+#   Lint, validate, package and publish a Cilium Gateway API-aware Helm chart to
+#   a ChartMuseum repository. Stages:
+#     1. version         — compute the next SemVer from existing git tags
+#                          (determine-semver), not from the run number.
+#     2. validate-chart  — helm lint --strict, plus routing-mode and ConfigMap
+#                          render assertions parsed with yq (not raw grep).
+#     3. package-and-push— helm package + upload the .tgz to ChartMuseum.
+#     4. tag             — write the computed git tag back to origin so the
+#                          SemVer counter advances on the next run.
+#
+# REQUIRED SECRETS:
+#   registry-username   ChartMuseum username.
+#   registry-password   ChartMuseum password / token.
+#   github-token        (optional) Token used by the tag job to create the
+#                       release tag. Falls back to the built-in GITHUB_TOKEN.
+#
+# USAGE:
+#   jobs:
+#     publish:
+#       uses: simplify9/.github/.github/workflows/gateway-chart-cicd.yml@main
+#       with:
+#         chart-path: chart
+#         major-version: '1'
+#         minor-version: '2'
+#       secrets:
+#         registry-username: ${{ secrets.CHARTMUSEUM_USERNAME }}
+#         registry-password: ${{ secrets.CHARTMUSEUM_PASSWORD }}
+#
+# ROADMAP:
+#   Migrate publishing from ChartMuseum HTTP upload to an OCI registry
+#   (`helm push chart.tgz oci://...`) for immutable, digest-pinned, signable
+#   charts — mirroring reusable-service-cicd.yml. Tracked in the README TODO.
+# =============================================================================
+name: Generic Gateway Helm Chart CI/CD (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      # ⚠️ KEEP IN SYNC with the workflow_dispatch.inputs block below — GitHub
+      # Actions does not support YAML anchors in workflow files, so the two
+      # input blocks are duplicated by necessity and will silently drift if one
+      # side is edited without the other.
+      chart-path:
+        description: Path to the Helm chart directory
+        required: false
+        default: chart
+        type: string
+      chartmuseum-url:
+        description: ChartMuseum upload endpoint
+        required: false
+        default: https://charts.sf9.io/api/charts
+        type: string
+      helm-version:
+        description: Helm version to use for lint/template/package
+        required: false
+        default: "v4.2.2"
+        type: string
+      major-version:
+        description: SemVer major component (integer)
+        required: false
+        default: "1"
+        type: string
+      minor-version:
+        description: SemVer minor component (integer)
+        required: false
+        default: "0"
+        type: string
+      package-destination:
+        description: Directory where packaged chart artifacts are written
+        required: false
+        default: .helm-packages
+        type: string
+      update-dependencies:
+        description: Run helm package with --dependency-update
+        required: false
+        default: true
+        type: boolean
+      validate-routing:
+        description: Validate default/ingress/gateway/dual routing rendering modes
+        required: false
+        default: true
+        type: boolean
+      validate-configmap:
+        description: Validate ConfigMap gating and merged key rendering
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      registry-username:
+        description: ChartMuseum username
+        required: true
+      registry-password:
+        description: ChartMuseum password or token
+        required: true
+      github-token:
+        description: Token used by the tag job to create the release git tag. Falls back to the built-in GITHUB_TOKEN when omitted.
+        required: false
+    outputs:
+      version:
+        description: Generated chart semantic version
+        value: ${{ jobs.version.outputs.version }}
+      chart-name:
+        description: Helm chart name read from Chart.yaml
+        value: ${{ jobs.package-and-push.outputs.chart-name }}
+      chart-package:
+        description: Packaged chart path in the runner workspace
+        value: ${{ jobs.package-and-push.outputs.chart-package }}
+      chart-repo-url:
+        description: ChartMuseum endpoint the chart package was uploaded to (an upload API URL, not a fetch URL)
+        value: ${{ jobs.package-and-push.outputs.chart-repo-url }}
+
+  workflow_dispatch:
+    inputs:
+      # ⚠️ KEEP IN SYNC with the workflow_call.inputs block above (see note there).
+      chart-path:
+        description: Path to the Helm chart directory
+        required: false
+        default: chart
+        type: string
+      chartmuseum-url:
+        description: ChartMuseum upload endpoint
+        required: false
+        default: https://charts.sf9.io/api/charts
+        type: string
+      helm-version:
+        description: Helm version to use for lint/template/package
+        required: false
+        default: "v4.2.2"
+        type: string
+      major-version:
+        description: SemVer major component (integer)
+        required: false
+        default: "1"
+        type: string
+      minor-version:
+        description: SemVer minor component (integer)
+        required: false
+        default: "0"
+        type: string
+      package-destination:
+        description: Directory where packaged chart artifacts are written
+        required: false
+        default: .helm-packages
+        type: string
+      update-dependencies:
+        description: Run helm package with --dependency-update
+        required: false
+        default: true
+        type: boolean
+      validate-routing:
+        description: Validate default/ingress/gateway/dual routing rendering modes
+        required: false
+        default: true
+        type: boolean
+      validate-configmap:
+        description: Validate ConfigMap gating and merged key rendering
+        required: false
+        default: true
+        type: boolean
+
+# Least privilege by default; the tag job opts up to contents: write locally.
+permissions:
+  contents: read
+
+# Serialize runs per workflow+ref. Chart publishing must never be interrupted
+# mid-flight, and serializing closes the determine-semver read/modify/write
+# window so two runs cannot compute the same patch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Compute chart version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      git-tag: ${{ steps.semver.outputs.git-tag }}
+      is-release: ${{ steps.semver.outputs.is-release }}
+    steps:
+      - name: Announce version job
+        shell: bash
+        env:
+          MAJOR: ${{ inputs.major-version }}
+          MINOR: ${{ inputs.minor-version }}
+          RUN_NUMBER: ${{ github.run_number }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "::notice title=🏷️ [VERSION] Chart Semver — Job Started::Line: ${MAJOR}.${MINOR} | Run: ${RUN_NUMBER} | Triggered by: ${ACTOR}"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # Full history + tags so determine-semver reads them locally; no token
+          # is persisted because this job never writes to the repo.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: ${{ inputs.major-version }}
+          minor: ${{ inputs.minor-version }}
+          # Only the default branch produces a clean, taggable release version;
+          # other branches get an ephemeral prerelease (x.y.z-<branch>.<run>) so
+          # they never collide on the shared git-tag namespace.
+          release-branch: ${{ github.event.repository.default_branch }}
+          current-ref: ${{ github.ref_name }}
+          build-id: ${{ github.run_number }}
+
+      - name: Write version job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🏷️'
+          title: Chart Version Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Computed version | `${{ steps.semver.outputs.version }}` |
+            | Git tag | `${{ steps.semver.outputs.git-tag }}` |
+            | Release build | `${{ steps.semver.outputs.is-release }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | SHA | `${{ github.sha }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
+
+  validate-chart:
+    name: Validate Helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [version]
+    steps:
+      - name: Announce validate-chart job
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          VERSION: ${{ needs.version.outputs.version }}
+          ACTOR: ${{ github.actor }}
+          VALIDATE_ROUTING: ${{ inputs.validate-routing }}
+          VALIDATE_CONFIGMAP: ${{ inputs.validate-configmap }}
+        run: |
+          set -euo pipefail
+          echo "::notice title=☸️ [HELM] Chart Validation — Job Started::Chart: ${CHART_PATH} | Version: ${VERSION} | Triggered by: ${ACTOR}"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=$( [ "${VALIDATE_ROUTING}" = "true" ] && echo '⏳ Pending' || echo '⏭️ Skipped' )"
+            echo "CHECKPOINT_3_STATUS=$( [ "${VALIDATE_CONFIGMAP}" = "true" ] && echo '⏳ Pending' || echo '⏭️ Skipped' )"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Cache Helm dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/helm
+          key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path), format('{0}/Chart.yaml', inputs.chart-path)) }}
+          restore-keys: |
+            helm-${{ runner.os }}-
+
+      - name: Helm lint (strict)
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+        run: |
+          set -euo pipefail
+          echo "::group::☸️ [CHECKPOINT 1/3] Helm lint (strict)"
+          echo "→ Chart path: ${CHART_PATH}"
+          helm lint --strict "${CHART_PATH}"
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/3] Helm lint — PASSED"
+          echo "::endgroup::"
+
+      - name: Validate routing render modes
+        if: ${{ inputs.validate-routing }}
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+        run: |
+          set -euo pipefail
+          echo "::group::🧭 [CHECKPOINT 2/3] Routing render modes"
+
+          # Parse the rendered manifest with yq and assert on the SET of resource
+          # kinds. This is robust to indentation / field ordering, unlike grepping
+          # raw template text for '^kind: Ingress$'.
+          assert_kind() {
+            local label="$1" kind="$2" expected="$3" rendered="$4"
+            local present="false"
+            if printf '%s\n' "$rendered" | yq ea '.kind' - 2>/dev/null | grep -qx "$kind"; then
+              present="true"
+            fi
+            if [ "$present" != "$expected" ]; then
+              echo "::error::Mode '${label}': expected ${kind} present=${expected} but got present=${present}." >&2
+              exit 1
+            fi
+          }
+
+          check_mode() {
+            local label="$1" expect_ingress="$2" expect_httproute="$3"
+            shift 3
+            local rendered
+            rendered="$(helm template "$label" "$CHART_PATH" "$@")"
+            assert_kind "$label" "Ingress"   "$expect_ingress"   "$rendered"
+            assert_kind "$label" "HTTPRoute" "$expect_httproute" "$rendered"
+            echo "→ Mode '${label}' rendered as expected (Ingress=${expect_ingress}, HTTPRoute=${expect_httproute})."
+          }
+
+          check_mode default      false true
+          check_mode ingress-only true  false --set ingress.enabled=true  --set gateway.enabled=false
+          check_mode gateway-only false true  --set ingress.enabled=false --set gateway.enabled=true
+          check_mode dual         true  true  --set ingress.enabled=true  --set gateway.enabled=true
+
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/3] Routing render modes validated — PASSED"
+          echo "::endgroup::"
+
+      - name: Validate ConfigMap toggle behavior
+        if: ${{ inputs.validate-configmap }}
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+        run: |
+          set -euo pipefail
+          echo "::group::🗂️ [CHECKPOINT 3/3] ConfigMap toggle behavior"
+
+          # Select only the ConfigMap document from a rendered manifest stream.
+          configmap_doc() {
+            printf '%s\n' "$1" | yq ea 'select(.kind == "ConfigMap")' -
+          }
+
+          default_rendered="$(helm template cfg-default "$CHART_PATH")"
+          if [ -n "$(configmap_doc "$default_rendered")" ]; then
+            echo "::error::ConfigMap should not render by default when config.enabled=false." >&2
+            exit 1
+          fi
+          echo "→ ConfigMap disabled-by-default behavior is valid."
+
+          enabled_rendered="$(helm template cfg-enabled "$CHART_PATH" \
+            --set config.enabled=true \
+            --set-string environmentVariables.APP_ENV=development \
+            --set-string config.data.FEATURE_FLAG=on)"
+
+          cm="$(configmap_doc "$enabled_rendered")"
+          if [ -z "$cm" ]; then
+            echo "::error::ConfigMap should render when config.enabled=true." >&2
+            exit 1
+          fi
+
+          cm_name="$(printf '%s\n' "$cm" | yq '.metadata.name')"
+          if [[ "$cm_name" != *-config ]]; then
+            echo "::error::ConfigMap name '${cm_name}' did not match expected '<app>-config' pattern." >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$cm" | yq '.data.APP_ENV')" = "null" ]; then
+            echo "::error::APP_ENV key from environmentVariables was not found in ConfigMap data." >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$cm" | yq '.data.FEATURE_FLAG')" = "null" ]; then
+            echo "::error::FEATURE_FLAG key from config.data was not found in ConfigMap data." >&2
+            exit 1
+          fi
+
+          echo "→ ConfigMap enabled behavior and merged key rendering are valid."
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 3/3] ConfigMap behavior validated — PASSED"
+          echo "::endgroup::"
+
+      - name: Report validate-chart failure
+        if: failure()
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "::error title=☸️ [HELM] Chart Validation Failed::Chart: ${CHART_PATH} | Version: ${VERSION}"
+          echo "  Checkpoint 1 — Helm lint:        ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Routing modes:    ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — ConfigMap toggle: ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+
+      - name: Write validate-chart summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '☸️'
+          title: Helm Chart Validation
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Chart path | `${{ inputs.chart-path }}` |
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Helm lint (strict) | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Routing render modes | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | ConfigMap toggle behavior | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+
+  package-and-push:
+    name: Package and push chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [version, validate-chart]
+    outputs:
+      chart-name: ${{ steps.package.outputs.chart-name }}
+      chart-package: ${{ steps.package.outputs.chart-package }}
+      chart-repo-url: ${{ steps.upload.outputs.chart-repo-url }}
+    steps:
+      - name: Announce package-and-push job
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ inputs.chartmuseum-url }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "::notice title=☸️ [HELM] Package & Push — Job Started::Version: ${VERSION} | Target: ${TARGET} | Triggered by: ${ACTOR}"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ inputs.helm-version }}
+
+      - name: Cache Helm dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/helm
+          key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path), format('{0}/Chart.yaml', inputs.chart-path)) }}
+          restore-keys: |
+            helm-${{ runner.os }}-
+
+      - name: Package chart
+        id: package
+        shell: bash
+        env:
+          CHART_PATH: ${{ inputs.chart-path }}
+          DEST: ${{ inputs.package-destination }}
+          VERSION: ${{ needs.version.outputs.version }}
+          UPDATE_DEPS: ${{ inputs.update-dependencies }}
+        run: |
+          set -euo pipefail
+          echo "::group::📦 [CHECKPOINT 1/2] Package chart"
+          mkdir -p "$DEST"
+
+          CHART_NAME="$(helm show chart "$CHART_PATH" | awk '$1=="name:" { print $2; exit }')"
+          if [ -z "$CHART_NAME" ]; then
+            echo "::error::Failed to resolve chart name from ${CHART_PATH}/Chart.yaml." >&2
+            exit 1
+          fi
+
+          if [ "$UPDATE_DEPS" = "true" ]; then
+            helm package "$CHART_PATH" --dependency-update --version "$VERSION" --app-version "$VERSION" --destination "$DEST"
+          else
+            helm package "$CHART_PATH" --version "$VERSION" --app-version "$VERSION" --destination "$DEST"
+          fi
+
+          PACKAGE_FILE="${DEST}/${CHART_NAME}-${VERSION}.tgz"
+          if [ ! -f "$PACKAGE_FILE" ]; then
+            echo "::error::Expected package '${PACKAGE_FILE}' was not created." >&2
+            ls -la "$DEST" >&2
+            exit 1
+          fi
+
+          {
+            echo "chart-name=$CHART_NAME"
+            echo "chart-package=$PACKAGE_FILE"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "→ Packaged ${CHART_NAME} version ${VERSION} at ${PACKAGE_FILE}."
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/2] Chart packaged — PASSED: ${CHART_NAME}@${VERSION}"
+          echo "::endgroup::"
+
+      - name: Upload chart package(s) to ChartMuseum
+        id: upload
+        shell: bash
+        env:
+          CHARTMUSEUM_URL: ${{ inputs.chartmuseum-url }}
+          CHARTMUSEUM_USER: ${{ secrets.registry-username }}
+          CHARTMUSEUM_PASSWORD: ${{ secrets.registry-password }}
+          DEST: ${{ inputs.package-destination }}
+        run: |
+          set -euo pipefail
+          echo "::group::🚀 [CHECKPOINT 2/2] Upload to ChartMuseum"
+
+          if [ -z "${CHARTMUSEUM_URL}" ]; then
+            echo "::error::chartmuseum-url input is empty." >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          chart_packages=("${DEST}"/*.tgz)
+          if [ ${#chart_packages[@]} -eq 0 ]; then
+            echo "::error::No .tgz chart artifacts found in '${DEST}'." >&2
+            exit 1
+          fi
+
+          # Keep credentials OUT of the process argument list (visible via `ps`).
+          # Write them to a 0600 temp curl config consumed via --config, then drop
+          # it on exit. Mask the password from logs as a second layer of defense.
+          echo "::add-mask::${CHARTMUSEUM_PASSWORD}"
+          curl_config="$(mktemp)"
+          trap 'rm -f "${curl_config}"' EXIT
+          printf 'user = "%s:%s"\n' "${CHARTMUSEUM_USER}" "${CHARTMUSEUM_PASSWORD}" > "${curl_config}"
+
+          for package_file in "${chart_packages[@]}"; do
+            echo "→ Uploading '$(basename "${package_file}")' to ChartMuseum..."
+            curl --config "${curl_config}" \
+              --fail --show-error --silent \
+              --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \
+              --data-binary "@${package_file}" \
+              "${CHARTMUSEUM_URL}"
+            echo "✅ Package '$(basename "${package_file}")' uploaded successfully."
+          done
+
+          echo "chart-repo-url=${CHARTMUSEUM_URL}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/2] Chart uploaded to ChartMuseum — PASSED"
+          echo "::endgroup::"
+
+      - name: Report package-and-push failure
+        if: failure()
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ inputs.chartmuseum-url }}
+        run: |
+          set -euo pipefail
+          echo "::error title=☸️ [HELM] Package & Push Job Failed::Version: ${VERSION} | Target: ${TARGET}"
+          echo "  Checkpoint 1 — Chart packaged:     ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — ChartMuseum upload: ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+
+      - name: Write package-and-push summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '☸️'
+          title: Helm Chart Package + Push
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Chart Name | `${{ steps.package.outputs.chart-name }}` |
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Package | `${{ steps.package.outputs.chart-package }}` |
+            | Upload Endpoint | ${{ steps.upload.outputs.chart-repo-url }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Chart packaged | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Chart uploaded | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+
+  tag:
+    name: Tag release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [version, validate-chart, package-and-push]
+    # Tag only after a fully successful publish, so tags never reference an
+    # unshipped chart. Creating the tag is what advances the SemVer counter for
+    # the next run (determine-semver reads it).
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.validate-chart.result == 'success'
+          && needs.package-and-push.result == 'success' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.git-tag }}
+          sha: ${{ github.sha }}

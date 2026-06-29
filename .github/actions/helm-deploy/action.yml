@@ -68,8 +68,8 @@ inputs:
     description: 'Name of the Helm chart'
     required: true
   chart-version:
-    description: 'Version of the Helm chart to deploy'
-    required: true
+    description: "Version of the Helm chart to deploy. Required for OCI sources. For chartmuseum sources it is optional — leave empty to deploy the latest version published in the repository."
+    required: false
   registry:
     description: 'OCI registry URL where the chart is stored'
     required: false
@@ -222,6 +222,7 @@ runs:
         REGISTRY_USERNAME: ${{ inputs.registry-username }}
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
         CHART_REPO_URL: ${{ inputs.chart-repo-url }}
+        CHART_VERSION: ${{ inputs.chart-version }}
       run: |
         set -euo pipefail
         echo "::group::🔎 Validate chart source inputs"
@@ -229,6 +230,10 @@ runs:
           oci)
             if [ -z "$REPOSITORY" ]; then
               echo "Error: repository is required when chart-source-type is oci."
+              exit 1
+            fi
+            if [ -z "$CHART_VERSION" ]; then
+              echo "Error: chart-version is required when chart-source-type is oci."
               exit 1
             fi
             if [ -z "$REGISTRY_USERNAME" ]; then
@@ -385,7 +390,9 @@ runs:
           HELM_ARGS+=("--create-namespace")
         fi
 
-        if [ "$CHART_SOURCE_TYPE" = "chartmuseum" ]; then
+        # Pin the version only when one is supplied. An empty chart-version on a
+        # chartmuseum source means "deploy the latest published version".
+        if [ "$CHART_SOURCE_TYPE" = "chartmuseum" ] && [ -n "$CHART_VERSION" ]; then
           HELM_ARGS+=("--version" "$CHART_VERSION")
         fi
 

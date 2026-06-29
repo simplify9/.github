@@ -522,27 +522,19 @@ jobs:
 
       - name: Write version job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          SEMVER_VERSION: ${{ steps.semver.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-          COMMIT_SHA: ${{ github.sha }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🏷️ Version Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Computed version | \`${SEMVER_VERSION}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| SHA | \`${COMMIT_SHA}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🏷️'
+          title: Version Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Computed version | `${{ steps.semver.outputs.version }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | SHA | `${{ github.sha }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
 
   nuget:
     runs-on: ubuntu-latest
@@ -578,25 +570,18 @@ jobs:
 
       - name: Write nuget job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          VERSION: ${{ needs.version.outputs.version }}
-          NUGET_PROJECTS: ${{ inputs.nuget-projects }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🔷 NuGet Publish Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Projects | \`${NUGET_PROJECTS}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔷'
+          title: NuGet Publish Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Projects | `${{ inputs.nuget-projects }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
 
   ci:
     runs-on: ubuntu-latest
@@ -1056,22 +1041,20 @@ jobs:
           printf '%-26s%s\n' '4 — Helm chart pushed'   "${CHECKPOINT_4_STATUS:-❌ Not reached}"
           echo "::endgroup::"
 
-      - name: Write ci job summary
+      # Compute the dynamic summary pieces that cannot be expressed as static
+      # markdown (registry selection + conditional install block) into env vars,
+      # so the summary itself can use the shared write-job-summary action.
+      - name: Collect chart registry and install instructions
         if: always()
+        shell: bash
         env:
-          JOB_STATUS: ${{ job.status }}
           CHART_NAME: ${{ inputs.chart-name }}
           VERSION: ${{ needs.version.outputs.version }}
-          REGISTRY_INPUT: ${{ inputs.container-registry }}
           PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
           CHART_REPO_URL: ${{ inputs.chart-repo-url }}
           CHART_URL: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
         run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          # OWNER_LOWER is exported by the Initialize CI run step.
+          # OWNER_LOWER is exported to $GITHUB_ENV by the Initialize CI run step.
           OCI_REGISTRY="oci://ghcr.io/${OWNER_LOWER}/charts"
           CM_REGISTRY="${CHART_REPO_URL%/}"
           case "${PUBLISH_METHOD}" in
@@ -1079,31 +1062,16 @@ jobs:
             both)        CHART_REGISTRY="${OCI_REGISTRY} + ${CM_REGISTRY}" ;;
             *)           CHART_REGISTRY="${OCI_REGISTRY}" ;;
           esac
+          echo "CHART_REGISTRY=${CHART_REGISTRY}" >> "$GITHUB_ENV"
+
+          # Conditional install block — stays empty when no chart was published.
           {
-            echo "## 🐳 CI Build — ${CHART_NAME} — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Registry | \`${REGISTRY_INPUT}\` |"
-            echo "| Chart method | \`${PUBLISH_METHOD}\` |"
-            echo "| Chart registry | \`${CHART_REGISTRY}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Config validated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Docker image built | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-            echo "| 3 | Helm chart packaged | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
-            echo "| 4 | Helm chart pushed | ${CHECKPOINT_4_STATUS:-⏭️ Not reached} |"
+            echo "CHART_INSTALL_SUMMARY<<CHART_INSTALL_EOF"
             if [ -n "${CHART_URL}" ]; then
               echo ""
               echo "## ☸️ Install"
               echo ""
-              echo "\`\`\`bash"
+              echo '```bash'
               if [ "${PUBLISH_METHOD}" = "chartmuseum" ]; then
                 echo "helm repo add ${CHART_NAME} ${CM_REGISTRY}"
                 echo "helm repo update"
@@ -1117,13 +1085,41 @@ jobs:
                   echo "#   helm upgrade --install ${CHART_NAME} ${CHART_NAME}/${CHART_NAME} --version ${VERSION}"
                 fi
               fi
-              echo "\`\`\`"
+              echo '```'
               if [ "${PUBLISH_METHOD}" != "chartmuseum" ]; then
                 echo ""
                 echo "> **Note:** If this is the first time publishing this package to GHCR, verify the package visibility is set to **Public** in GitHub Packages settings. GHCR packages are not guaranteed to become public automatically on first push."
               fi
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "CHART_INSTALL_EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Write ci job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🐳'
+          title: CI Build — ${{ inputs.chart-name }}
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Registry | `${{ inputs.container-registry }}` |
+            | Chart method | `${{ inputs.chart-publish-method }}` |
+            | Chart registry | `${{ env.CHART_REGISTRY }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Config validated | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Docker image built | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | Helm chart packaged | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            | 4 | Helm chart pushed | ${{ env.CHECKPOINT_4_STATUS || '⏭️ Not reached' }} |
+            ${{ env.CHART_INSTALL_SUMMARY }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -1457,34 +1453,22 @@ jobs:
 
       - name: Write deploy job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          CHART_NAME: ${{ inputs.chart-name }}
-          VERSION: ${{ needs.version.outputs.version }}
-          NAMESPACE: ${{ inputs.deploy-namespace }}
-          RELEASE_NAME: ${{ steps.params.outputs.release-name }}
-          DEPLOY_SOURCE: ${{ steps.params.outputs.source-type }}
-          ROUTING_MODE: ${{ inputs.routing-mode }}
-          ENVIRONMENT: ${{ inputs.deploy-environment }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## ☸️ Deploy — ${CHART_NAME} — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Release | \`${RELEASE_NAME}\` |"
-            echo "| Namespace | \`${NAMESPACE}\` |"
-            echo "| Environment | \`${ENVIRONMENT}\` |"
-            echo "| Routing mode | \`${ROUTING_MODE}\` |"
-            echo "| Chart source | \`${DEPLOY_SOURCE}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '☸️'
+          title: Deploy — ${{ inputs.chart-name }}
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Release | `${{ steps.params.outputs.release-name }}` |
+            | Namespace | `${{ inputs.deploy-namespace }}` |
+            | Environment | `${{ inputs.deploy-environment }}` |
+            | Routing mode | `${{ inputs.routing-mode }}` |
+            | Chart source | `${{ steps.params.outputs.source-type }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
 
   tag:
     runs-on: ubuntu-latest

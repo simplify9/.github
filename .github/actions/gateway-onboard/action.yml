@@ -1,0 +1,103 @@
+# =============================================================================
+# Gateway Auto-Onboarding
+# =============================================================================
+# Ensures the Cilium Gateway has the HTTP/HTTPS listeners and cert-manager
+# Certificates needed for the requested hostnames, before the Helm deploy runs.
+#
+# The logic lives in onboard.sh. Listener mutation is race-safe against other
+# workflows touching the same shared gateway: it reads the gateway once
+# (capturing resourceVersion), capacity-checks that snapshot, and writes all
+# needed listeners in a single `kubectl replace`, retrying on 409 Conflict.
+#
+# Requires kubectl and jq on the runner (present on GitHub-hosted ubuntu-latest).
+# The DNS pre-flight uses dig/getent/nslookup if available, and is skipped
+# gracefully when none is present.
+# =============================================================================
+name: 'Gateway Auto-Onboarding'
+author: 'Simplify9'
+description: 'Ensure Gateway listeners and cert-manager Certificates exist for the requested hostnames'
+
+inputs:
+  # --- cluster access + target ---
+  kubeconfig:
+    description: 'Base64 or raw kubeconfig content (from a secret)'
+    required: true
+  namespace:
+    description: 'Application deploy namespace (created if missing)'
+    required: false
+    default: ''
+
+  # --- gateway identity ---
+  gateway-parent-name:
+    description: 'Gateway resource name'
+    required: true
+  gateway-parent-namespace:
+    description: 'Gateway resource namespace'
+    required: true
+  gateway-class-name:
+    description: 'GatewayClass used when creating a missing Gateway'
+    required: false
+    default: cilium
+
+  # --- cert-manager Certificate issuance (dedicated-listener mode) ---
+  gateway-cert-issuer-name:
+    description: 'cert-manager issuer name for gateway domains'
+    required: false
+    default: letsencrypt-production-gateway
+  gateway-cert-issuer-kind:
+    description: 'cert-manager issuer kind'
+    required: false
+    default: ClusterIssuer
+  gateway-cert-wait:
+    description: 'Wait for certificate readiness during onboarding'
+    required: false
+    default: 'true'
+  gateway-cert-wait-timeout-seconds:
+    description: 'Certificate wait timeout in seconds'
+    required: false
+    default: '600'
+
+  # --- hostnames + listener selection (produced by gateway-routing) ---
+  gateway-section-name:
+    description: 'Singular shared-listener section name (skips per-host provisioning)'
+    required: false
+    default: ''
+  gateway-host-list:
+    description: 'Newline-separated gateway hostnames (from gateway-routing)'
+    required: false
+    default: ''
+  gateway-section-names-list:
+    description: 'Newline-separated section names, position-aligned with gateway-host-list'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # Inputs are passed via env (never interpolated into the script body) so secret
+    # and hostname values can't break out into the shell. The cluster-mutating logic
+    # — kubeconfig decode, listener/cert provisioning, the race-safe replace loop —
+    # lives in onboard.sh; see that file for details.
+    - name: Onboard gateway hostnames
+      shell: bash
+      env:
+        # Raw kubeconfig secret; onboard.sh decodes it once to $RUNNER_TEMP and
+        # removes it on exit (trap) so the credential never lingers on the runner.
+        KUBECONFIG_DATA: ${{ inputs.kubeconfig }}
+        DEPLOY_NAMESPACE: ${{ inputs.namespace }}
+        GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
+        GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+        GATEWAY_CLASS_NAME: ${{ inputs.gateway-class-name }}
+        GATEWAY_CERT_ISSUER_NAME: ${{ inputs.gateway-cert-issuer-name }}
+        GATEWAY_CERT_ISSUER_KIND: ${{ inputs.gateway-cert-issuer-kind }}
+        GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
+        GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
+        GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
+        HOST_LIST: ${{ inputs.gateway-host-list }}
+        SECTION_NAMES_LIST: ${{ inputs.gateway-section-names-list }}
+      run: |
+        bash "${{ github.action_path }}/onboard.sh"
+
+branding:
+  icon: 'globe'
+  color: 'blue'
