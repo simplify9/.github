@@ -1,0 +1,10 @@
+{
+    "name": "Vite + Cloudflare Workers",
+    "description": "Builds a Vite single-page app and deploys it to Cloudflare Workers static assets (native SPA routing, no custom Worker script) using the Simplify9 reusable workflow.",
+    "iconName": "octicon-globe",
+    "categories": [
+        "Vite",
+        "Cloudflare",
+        "Workers"
+    ]
+}

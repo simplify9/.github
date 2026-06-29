@@ -1,0 +1,179 @@
+# =============================================================================
+# Generic Chart Helm CI/CD — Caller template for containerized service repos
+# =============================================================================
+#
+# USAGE:
+#   Copy this file to your service repo at:
+#     .github/workflows/{service-name}-cicd.yml
+#
+#   Replace all values marked with # REPLACE with your service-specific values.
+#
+# PREREQUISITES (this template assumes the repo already contains):
+#   - A Dockerfile (default path: ./Dockerfile)
+#   The Helm chart itself is the shared `s9genericchart` pulled from
+#   https://charts.sf9.io by the reusable workflow — you do NOT vendor a chart.
+#
+# WHAT IT DOES:
+#   Computes a semantic version from git tags → (optionally) publishes NuGet
+#   packages → builds & pushes a Docker image → deploys the s9generichart to
+#   Kubernetes via Helm (dynamic ingress hosts/paths/TLS, optional EF Core
+#   migration init-Job) → tags the commit on a successful deploy.
+#
+# BRANCHES:
+#   staging → deploy-staging job  → namespace "staging"     / GitHub env Staging
+#   main    → deploy-main job     → namespace "production"   / GitHub env Production
+#
+# TWO "environment" INPUTS — DON'T CONFUSE THEM:
+#   environment        → the app's RUNTIME environment name, injected as the
+#                        Helm value `environment=` (e.g. Staging, Production)
+#                        and into the app (ASPNETCORE_ENVIRONMENT, etc.).
+#   deploy-environment → the GITHUB Environment for the deploy job — activates
+#                        protection rules (required reviewers, wait timers) and
+#                        environment-scoped secrets. Best practice: set it per
+#                        branch so staging and production are gated separately.
+#
+# INPUTS (only the commonly-set values are declared here — see the reusable
+#   workflow for the full, documented input reference):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/generic-chart-helm.yml
+# =============================================================================
+name: Service CI/CD                          # REPLACE: e.g. "Mealivery API CI/CD"
+run-name: build-${{ github.ref_name }}-${{ github.run_number }}
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+# Least-privilege ceiling for the reusable workflow's jobs (they narrow further
+# per job): contents:write to push the git tag, packages:write to push the image
+# / NuGet packages to GHCR. The reusable can only use scopes the caller grants.
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: cicd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: ${{ github.ref_name == 'staging' }}
+    uses: simplify9/.github/.github/workflows/generic-chart-helm.yml@main
+    with:
+      # ── App & version ───────────────────────────────────────────────────────
+      app-name: "my-stg-api"                 # REPLACE: Helm app.name / image name
+      major-version: "1"                     # REPLACE: SemVer major
+      minor-version: "0"                     # REPLACE: SemVer minor
+
+      # ── Docker ──────────────────────────────────────────────────────────────
+      dockerfile-path: "./Dockerfile"
+      docker-context: "."
+      docker-platforms: "linux/amd64"
+      container-registry: "registry.digitalocean.com/myorgcr"   # REPLACE: image registry
+
+      # ── Kubernetes & deploy ─────────────────────────────────────────────────
+      namespace: "staging"
+      service-target-port: "80"              # REPLACE if your container listens elsewhere
+      environment: "Staging"                 # app runtime environment (Helm value)
+      deploy-environment: "Staging"          # GitHub Environment (protection rules + scoped secrets)
+      # atomic: true                         # roll back automatically on a failed deploy (default true)
+      # helm-timeout-minutes: "15"           # default 10
+
+      # ── Ingress (index-aligned: host[i] ↔ tls-secret[i]; paths apply to all) ─
+      ingress-hosts: |                       # REPLACE
+        api-stg.example.com
+        api-stg.example.me
+      ingress-tls-secrets: |                 # REPLACE: one TLS secret per host, by index
+        my-api-tls
+        my-api-alt-tls
+      ingress-paths: |                       # REPLACE
+        /api
+        /docs
+
+      # ── Extra Helm values (newline-separated key=value) ─────────────────────
+      helm-set-values: |
+        image.pullSecret=myorgcr            # REPLACE: imagePullSecret for your registry
+
+      # ── EF Core migration init-Job (optional — omit the block to skip) ──────
+      init-job-image: "registry.digitalocean.com/myorgcr/my-stg-api:latest"  # REPLACE
+      init-job-secret-name: "my-db-admin-secret"                              # REPLACE: K8s Secret with the conn string
+      # init-job-command: "dotnet My.Api.dll --migrate"   # default: dotnet SW.Shanap.Web.dll --migrate
+      # init-job-secret-key: "connection-string"
+      # init-job-connstring-env: "ConnectionStrings__MyDb"
+      # init-job-image-pull-secret: "myorgcr"             # default sf9cr; '' for public images
+
+      # ── NuGet publishing (optional — uncomment to enable) ───────────────────
+      # package-nuget: true
+      # nuget-projects: "src/**/*.csproj"
+      # dotnet-version: "8.0.x"
+      # run-tests: true
+      # test-projects: "**/*Tests/*.csproj"
+    secrets:
+      registry-username: ${{ secrets.MY_REGISTRY_USERNAME }}   # REPLACE secret name
+      registry-password: ${{ secrets.MY_REGISTRY_TOKEN }}      # REPLACE secret name
+      kubeconfig: ${{ secrets.MY_KUBECONFIG }}                 # REPLACE secret name
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      # helm-set-secret-values: ${{ secrets.HELM_SET_SECRET_VALUES }}  # masked --set-string pairs
+      # nuget-api-key: ${{ secrets.NUGET_API_KEY }}                    # only with package-nuget: true
+      # nuget-source: ${{ secrets.NUGET_SOURCE }}
+
+  deploy-main:
+    if: ${{ github.ref_name == 'main' }}
+    uses: simplify9/.github/.github/workflows/generic-chart-helm.yml@main
+    with:
+      # ── App & version ───────────────────────────────────────────────────────
+      app-name: "my-api"                     # REPLACE
+      major-version: "1"                     # REPLACE
+      minor-version: "0"                     # REPLACE
+
+      # ── Docker ──────────────────────────────────────────────────────────────
+      dockerfile-path: "./Dockerfile"
+      docker-context: "."
+      docker-platforms: "linux/amd64"
+      container-registry: "registry.digitalocean.com/myorgcr"   # REPLACE
+
+      # ── Kubernetes & deploy ─────────────────────────────────────────────────
+      namespace: "production"
+      service-target-port: "80"              # REPLACE if needed
+      environment: "Production"              # app runtime environment (Helm value)
+      deploy-environment: "Production"       # GitHub Environment (protection rules + scoped secrets)
+      # atomic: true
+      # helm-timeout-minutes: "15"
+
+      # ── Ingress (index-aligned: host[i] ↔ tls-secret[i]; paths apply to all) ─
+      ingress-hosts: |                       # REPLACE
+        api.example.com
+        api.example.me
+      ingress-tls-secrets: |                 # REPLACE
+        my-api-tls
+        my-api-alt-tls
+      ingress-paths: |                       # REPLACE
+        /api
+        /docs
+
+      # ── Extra Helm values (newline-separated key=value) ─────────────────────
+      helm-set-values: |
+        image.pullSecret=myorgcr            # REPLACE
+
+      # ── EF Core migration init-Job (optional — omit the block to skip) ──────
+      init-job-image: "registry.digitalocean.com/myorgcr/my-api:latest"   # REPLACE
+      init-job-secret-name: "my-db-admin-secret"                          # REPLACE
+      # init-job-command: "dotnet My.Api.dll --migrate"
+      # init-job-secret-key: "connection-string"
+      # init-job-connstring-env: "ConnectionStrings__MyDb"
+      # init-job-image-pull-secret: "myorgcr"
+
+      # ── NuGet publishing (optional — uncomment to enable) ───────────────────
+      # package-nuget: true
+      # nuget-projects: "src/**/*.csproj"
+      # dotnet-version: "8.0.x"
+      # run-tests: true
+      # test-projects: "**/*Tests/*.csproj"
+    secrets:
+      registry-username: ${{ secrets.MY_REGISTRY_USERNAME }}   # REPLACE
+      registry-password: ${{ secrets.MY_REGISTRY_TOKEN }}      # REPLACE
+      kubeconfig: ${{ secrets.MY_KUBECONFIG }}                 # REPLACE
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      # helm-set-secret-values: ${{ secrets.HELM_SET_SECRET_VALUES }}
+      # nuget-api-key: ${{ secrets.NUGET_API_KEY }}
+      # nuget-source: ${{ secrets.NUGET_SOURCE }}

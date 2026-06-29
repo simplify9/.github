@@ -1,0 +1,88 @@
+# =============================================================================
+# Next.js + Cloudflare Workers — Caller template for web app repositories
+# =============================================================================
+#
+# USAGE:
+#   Copy this file to your app repo at:
+#     .github/workflows/{app-name}-www.yml
+#
+#   Replace all values marked with # REPLACE with your app-specific values.
+#
+# WHAT IT DOES:
+#   Builds a Next.js application with the OpenNext.js Cloudflare adapter and
+#   deploys it to Cloudflare Workers. A project-provided open-next.config.* is
+#   respected; a minimal default is generated only when none exists.
+#
+# BRANCHES:
+#   staging → deploy-staging job    → environment "staging"    (Staging)
+#   main    → deploy-production job  → environment "production" (Production)
+#
+# ROUTE:
+#   `route` is optional — if omitted, the reusable workflow falls back to the
+#   repo variables CLOUDFLARE_ROUTE then ROUTE. Set it inline per env below for
+#   distinct staging/production domains.
+#
+# INPUTS (only the commonly-set values are declared below — see the reusable
+#   workflow for the full, documented input reference incl. node_version,
+#   package_manager, run_lint, opennextjs_version, assets_dir, etc.):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/next-cloudflare-worker.yaml
+# =============================================================================
+name: Deploy WWW                             # REPLACE: e.g. "Deploy StrandExpress WWW"
+run-name: Deploy WWW (${{ github.ref_name == 'staging' && 'Staging' || 'Production' }})
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+# The reusable workflow only checks out the repo and deploys via the Cloudflare
+# API token; no write scopes are needed.
+permissions:
+  contents: read
+
+concurrency:
+  group: next-cf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: github.ref == 'refs/heads/staging'
+    uses: simplify9/.github/.github/workflows/next-cloudflare-worker.yaml@main
+    with:
+      route: |                               # REPLACE: one route/custom domain per line (or omit to use repo vars)
+        stg.example.com
+        www-stg.example.com
+      project_name: "example-www"            # REPLACE: base Worker project name
+      environment: "staging"
+      # ── Optional overrides (uncomment to change defaults) ───────────────────
+      # node_version: "24"
+      # package_manager: "yarn"              # npm | yarn | pnpm
+      # run_lint: true
+      # build_script: "build"
+      # opennextjs_version: "1.20.1"         # @opennextjs/cloudflare adapter version
+      # assets_dir: ".open-next/assets"      # static assets directory
+      # compatibility_date: "2026-05-01"
+    secrets:
+      cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    uses: simplify9/.github/.github/workflows/next-cloudflare-worker.yaml@main
+    with:
+      route: |                               # REPLACE: one route/custom domain per line (or omit to use repo vars)
+        example.com
+        www.example.com
+      project_name: "example-www"            # REPLACE: base Worker project name
+      environment: "production"
+      # ── Optional overrides (uncomment to change defaults) ───────────────────
+      # node_version: "24"
+      # package_manager: "yarn"              # npm | yarn | pnpm
+      # run_lint: true
+      # build_script: "build"
+      # opennextjs_version: "1.20.1"         # @opennextjs/cloudflare adapter version
+      # assets_dir: ".open-next/assets"      # static assets directory
+      # compatibility_date: "2026-05-01"
+    secrets:
+      cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

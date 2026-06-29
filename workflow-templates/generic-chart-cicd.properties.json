@@ -1,0 +1,10 @@
+{
+    "name": "Generic Chart Helm CI/CD",
+    "description": "End-to-end CI/CD for a containerized service — versions from git tags, builds and pushes a Docker image, optionally publishes NuGet packages, deploys the shared s9genericchart to Kubernetes via Helm (dynamic ingress + optional EF Core migration Job), and tags the release — via the Simplify9 reusable workflow.",
+    "iconName": "octicon-package",
+    "categories": [
+        "Helm",
+        "Kubernetes",
+        "Docker"
+    ]
+}
