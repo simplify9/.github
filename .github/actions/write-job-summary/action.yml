@@ -36,7 +36,7 @@ inputs:
     description: 'Section heading text (without the status suffix).'
     required: true
   status:
-    description: 'Job status — pass ${{ job.status }}. "success" => ✅ SUCCESS, otherwise ❌ FAILED.'
+    description: 'Job status — pass the job.status context. "success" => ✅ SUCCESS, otherwise ❌ FAILED.'
     required: true
   icon:
     description: 'Optional emoji shown before the title.'
