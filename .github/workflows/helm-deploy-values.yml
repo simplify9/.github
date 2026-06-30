@@ -35,118 +35,136 @@ on:
   workflow_call:
     inputs:
       release-name:
+        description: Helm release name to upgrade/install.
         type: string
         required: true
 
       chart-name:
+        description: Name of the chart to pull from the chart repository.
         type: string
         required: true
 
-      # Classic Helm chart repository URL (ChartMuseum-style) to pull the chart from.
       chart-repo:
+        description: Classic Helm chart repository URL (ChartMuseum-style) to pull the chart from.
         type: string
         required: true
 
       namespace:
+        description: Kubernetes namespace to deploy the release into.
         type: string
         required: true
 
-      # Path to a values file in the CALLER's repo. Applied with `--values` only
-      # when the file is actually present. A missing default (values.yaml) is
-      # skipped; an explicitly-set file that is missing fails fast.
       values-file:
+        description: >-
+          Path to a values file in the caller's repo, applied with `--values` only
+          when present. A missing default (values.yaml) is skipped; an explicitly-set
+          file that is missing fails fast.
         type: string
         required: false
         default: values.yaml
 
-      # Optional. Leave empty to deploy the latest version published in the repo;
-      # set it to pin a specific chart version.
       chart-version:
+        description: >-
+          Chart version to deploy. Leave empty to deploy the latest version published
+          in the repo; set it to pin a specific chart version.
         type: string
         required: false
         default: ""
 
-      # Helm VALUE for the chart (set as `environment=<env>`). This is NOT the
-      # GitHub Environment — see `gh-environment` for that.
       environment:
+        description: >-
+          Helm VALUE for the chart (set as `environment=<env>`). This is NOT the GitHub
+          Environment — see `gh-environment` for that.
         type: string
         required: false
         default: ""
 
-      # Optional GitHub Environment name for deployment protection rules,
-      # environment-scoped secrets and deployment history. Empty = none (the
-      # job simply runs with no environment binding).
       gh-environment:
+        description: >-
+          Optional GitHub Environment name for deployment protection rules,
+          environment-scoped secrets and deployment history. Empty = no environment binding.
         type: string
         required: false
         default: ""
 
       service-target-port:
+        description: Optional service target port to set on the chart (empty = chart default).
         type: string
         required: false
         default: ""
 
-      # Multi-line (one per line) or comma-separated. Hosts are zipped with
-      # ingress-tls-secrets by index: host[i] <-> tls-secret[i].
       ingress-hosts:
+        description: >-
+          Ingress hosts, one per line or comma-separated. Zipped with ingress-tls-secrets
+          by index: host[i] <-> tls-secret[i].
         type: string
         required: false
         default: ""
 
       ingress-paths:
+        description: Ingress paths, one per line or comma-separated (empty = chart default).
         type: string
         required: false
         default: ""
 
       ingress-tls-secrets:
+        description: TLS secret names, position-aligned with ingress-hosts.
         type: string
         required: false
         default: ""
 
       image-tag:
+        description: Optional image tag to set on the chart (empty = chart default).
         type: string
         required: false
         default: ""
 
-      # Non-secret helm --set values, one key=value per line.
       helm-set-values:
+        description: Non-secret helm --set values, one key=value per line.
         type: string
         required: false
         default: ""
 
       helm-version:
+        description: Helm CLI version to install for the deploy.
         type: string
         required: false
         default: v4.2.0
 
       kubectl-version:
+        description: kubectl CLI version to install for the deploy.
         type: string
         required: false
         default: v1.33.0
 
       helm-timeout:
+        description: Timeout passed to the Helm upgrade/install call.
         type: string
         required: false
         default: 10m
 
       atomic:
+        description: Use Helm's atomic flag so a failed upgrade rolls back automatically.
         type: boolean
         required: false
         default: true
 
       wait:
+        description: Wait for resources to become ready before reporting success.
         type: boolean
         required: false
         default: true
 
       create-namespace:
+        description: Create the target namespace if it does not already exist.
         type: boolean
         required: false
         default: true
 
-      # Upper bound for the whole job (checkout + setup + helm). The Helm call
-      # itself is bounded separately by helm-timeout.
       job-timeout-minutes:
+        description: >-
+          Upper bound for the whole job (checkout + setup + helm). The Helm call itself
+          is bounded separately by helm-timeout.
         type: number
         required: false
         default: 20
@@ -205,6 +223,9 @@ jobs:
           fetch-depth: 1
           sparse-checkout: ${{ inputs.values-file }}
           sparse-checkout-cone-mode: false
+          # Only the values file is read; no git writes happen, so don't leave the
+          # workflow token persisted in .git/config for later steps.
+          persist-credentials: false
 
       # Translate the friendly inputs into the s9generic chart value keys, as a
       # comma-separated --set string for the helm-deploy action. Mirrors the

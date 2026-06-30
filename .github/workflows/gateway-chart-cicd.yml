@@ -535,14 +535,33 @@ jobs:
           trap 'rm -f "${curl_config}"' EXIT
           printf 'user = "%s:%s"\n' "${CHARTMUSEUM_USER}" "${CHARTMUSEUM_PASSWORD}" > "${curl_config}"
 
+          upload_body="$(mktemp)"
+          trap 'rm -f "${curl_config}" "${upload_body}"' EXIT
           for package_file in "${chart_packages[@]}"; do
             echo "→ Uploading '$(basename "${package_file}")' to ChartMuseum..."
-            curl --config "${curl_config}" \
-              --fail --show-error --silent \
+            # Capture the HTTP status (instead of --fail) so a retried upload that the
+            # server already stored — e.g. the original 201 response was lost and
+            # `--retry` re-POSTed, getting a 409 "already exists" — is treated as
+            # success. Otherwise that 409 fails the job, the tag is never created, and
+            # every future SemVer run recomputes and collides on the same version.
+            http_code="$(curl --config "${curl_config}" \
+              --show-error --silent --output "${upload_body}" --write-out '%{http_code}' \
               --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \
               --data-binary "@${package_file}" \
-              "${CHARTMUSEUM_URL}"
-            echo "✅ Package '$(basename "${package_file}")' uploaded successfully."
+              "${CHARTMUSEUM_URL}")"
+            case "${http_code}" in
+              2??)
+                echo "✅ Package '$(basename "${package_file}")' uploaded successfully (HTTP ${http_code})."
+                ;;
+              409)
+                echo "::notice::Package '$(basename "${package_file}")' already present in ChartMuseum (HTTP 409) — treating as success (idempotent re-upload)."
+                ;;
+              *)
+                echo "::error::Upload of '$(basename "${package_file}")' failed (HTTP ${http_code})." >&2
+                cat "${upload_body}" >&2 || true
+                exit 1
+                ;;
+            esac
           done
 
           echo "chart-repo-url=${CHARTMUSEUM_URL}" >> "$GITHUB_OUTPUT"

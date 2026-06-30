@@ -59,6 +59,10 @@ runs:
         DETAILS: ${{ inputs.details }}
       run: |
         set -euo pipefail
+        # Context-aware notice + namespaced checkpoint (this action IS the shared
+        # summary writer, so it appends the section itself rather than delegating).
+        echo "JOB_SUMMARY_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "::notice title=📝 [SUMMARY] ${TITLE}::status: ${STATUS_IN}"
         if [ "${STATUS_IN}" = "success" ]; then
           status_label="✅ SUCCESS"
         else
@@ -71,6 +75,7 @@ runs:
           echo ""
           printf '%s\n' "${DETAILS}"
         } >> "$GITHUB_STEP_SUMMARY"
+        echo "JOB_SUMMARY_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
 branding:
   icon: 'file-text'

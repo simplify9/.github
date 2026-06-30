@@ -102,8 +102,8 @@ case "$mode" in
   ingress) ingress_enabled=true ;;
   dual)    gateway_enabled=true; ingress_enabled=true ;;
   *)
-    echo "Unknown routing-mode '$ROUTING_MODE'. Falling back to gateway." >&2
-    gateway_enabled=true
+    echo "Unknown routing-mode '$ROUTING_MODE'. Expected one of: gateway, ingress, dual." >&2
+    exit 1
     ;;
 esac
 
@@ -146,6 +146,14 @@ ingress_annotations_yaml=""
 section_names_list=""
 
 if [ "$gateway_enabled" = "true" ]; then
+  # The singular gateway-section-name and the plural gateway-section-names drive
+  # mutually exclusive listener-selection paths (onboard.sh short-circuits on the
+  # singular). If both are set, the rendered Helm values can reference per-host
+  # listeners that onboarding never creates — fail loudly instead.
+  if ! is_blank "${GATEWAY_SECTION_NAME:-}" && ! is_blank "${GATEWAY_SECTION_NAMES_RAW:-}"; then
+    echo "gateway-section-name and gateway-section-names are mutually exclusive." >&2
+    exit 1
+  fi
   if ! is_blank "${GATEWAY_SECTION_NAMES_RAW:-}"; then
     # Per-hostname mode: one parentRef per host, section name resolved from
     # gateway-section-names by position (empty entry = auto-slug for dedicated).
@@ -298,16 +306,20 @@ fi
 # ----- emit step outputs -----------------------------------------------------
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  # Randomized heredoc delimiters so host/section values can never collide with a
+  # literal "EOF" and truncate or inject step output (repo convention).
+  host_delim=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+  section_delim=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
   {
     echo "values-file=${ROUTING_VALUES_FILE}"
-    echo "gateway-host-list<<EOF"
+    echo "gateway-host-list<<${host_delim}"
     printf "%s" "$host_list"
     echo
-    echo "EOF"
-    echo "gateway-section-names-list<<EOF"
+    echo "${host_delim}"
+    echo "gateway-section-names-list<<${section_delim}"
     printf "%s" "$section_names_list"
     echo
-    echo "EOF"
+    echo "${section_delim}"
   } >> "$GITHUB_OUTPUT"
 fi
 

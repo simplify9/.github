@@ -463,8 +463,10 @@ jobs:
           && needs.version.result == 'success'
           && needs.build.result == 'success' }}
     environment: ${{ inputs.deploy-environment }}
-    permissions:
-      contents: read
+    # Deny-all: this job only runs helm-generic against the cluster (kubeconfig
+    # secret) — it never checks out code or calls the GitHub API, so it needs no
+    # GITHUB_TOKEN scopes.
+    permissions: {}
     steps:
       - name: Announce deploy job
         env:

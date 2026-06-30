@@ -69,7 +69,7 @@ jobs:
       dockerfile-path: "./Dockerfile"
       docker-context: "."
       docker-platforms: "linux/amd64"
-      container-registry: "registry.digitalocean.com/myorgcr"   # REPLACE: image registry
+      container-registry: "registry.digitalocean.com/sf9cr"   # REPLACE: image registry if different
 
       # ── Kubernetes & deploy ─────────────────────────────────────────────────
       namespace: "staging"
@@ -90,13 +90,13 @@ jobs:
         /api
         /docs
 
-      # ── Extra Helm values (newline-separated key=value) ─────────────────────
+      # ── Extra Helm values (newline-separated key=value) REPLACE: imagePullSecret for your registry ─────────────────────
       helm-set-values: |
-        image.pullSecret=myorgcr            # REPLACE: imagePullSecret for your registry
+        image.pullSecret=sf9cr
 
       # ── EF Core migration init-Job (optional — omit the block to skip) ──────
-      init-job-image: "registry.digitalocean.com/myorgcr/my-stg-api:latest"  # REPLACE
-      init-job-secret-name: "my-db-admin-secret"                              # REPLACE: K8s Secret with the conn string
+      #init-job-image: "registry.digitalocean.com/myorgcr/my-stg-api:latest"  # REPLACE
+      #init-job-secret-name: "my-db-admin-secret"                              # REPLACE: K8s Secret with the conn string
       # init-job-command: "dotnet My.Api.dll --migrate"   # default: dotnet SW.Shanap.Web.dll --migrate
       # init-job-secret-key: "connection-string"
       # init-job-connstring-env: "ConnectionStrings__MyDb"
@@ -130,7 +130,7 @@ jobs:
       dockerfile-path: "./Dockerfile"
       docker-context: "."
       docker-platforms: "linux/amd64"
-      container-registry: "registry.digitalocean.com/myorgcr"   # REPLACE
+      container-registry: "registry.digitalocean.com/sf9cr"   # REPLACE: image registry if different
 
       # ── Kubernetes & deploy ─────────────────────────────────────────────────
       namespace: "production"
@@ -151,13 +151,13 @@ jobs:
         /api
         /docs
 
-      # ── Extra Helm values (newline-separated key=value) ─────────────────────
+      # ── Extra Helm values (newline-separated key=value) REPLACE: imagePullSecret for your registry ─────────────────────
       helm-set-values: |
-        image.pullSecret=myorgcr            # REPLACE
+        image.pullSecret=sf9cr
 
       # ── EF Core migration init-Job (optional — omit the block to skip) ──────
-      init-job-image: "registry.digitalocean.com/myorgcr/my-api:latest"   # REPLACE
-      init-job-secret-name: "my-db-admin-secret"                          # REPLACE
+      #init-job-image: "registry.digitalocean.com/myorgcr/my-api:latest"   # REPLACE
+      # init-job-secret-name: "my-db-admin-secret"                          # REPLACE
       # init-job-command: "dotnet My.Api.dll --migrate"
       # init-job-secret-key: "connection-string"
       # init-job-connstring-env: "ConnectionStrings__MyDb"

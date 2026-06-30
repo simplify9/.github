@@ -135,6 +135,10 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # No git writes after checkout; don't leave the token in .git/config for
+          # later install/build steps.
+          persist-credentials: false
 
       # Enable Corepack BEFORE setup-node so its pnpm cache can resolve the
       # pnpm binary. (Only needed for pnpm.)
@@ -154,21 +158,22 @@ jobs:
       - name: Resolve package manager commands
         env:
           PKG_MGR: ${{ inputs.package_manager }}
-          INSTALL_ARGS: ${{ inputs.install_args }}
         run: |
           set -euo pipefail
+          # Only record the resolved tool name — install_args is NEVER baked into a
+          # command string here (that would let a caller inject shell metacharacters
+          # or newlines into GITHUB_ENV). It is passed as a quoted array at install time.
           case "$PKG_MGR" in
             yarn)
-              echo "PM_INSTALL=yarn install $INSTALL_ARGS" >> "$GITHUB_ENV"
+              echo "PM_TOOL=yarn" >> "$GITHUB_ENV"
               echo "PM_RUN=yarn" >> "$GITHUB_ENV"
               ;;
             pnpm)
-              echo "PM_INSTALL=pnpm install $INSTALL_ARGS" >> "$GITHUB_ENV"
+              echo "PM_TOOL=pnpm" >> "$GITHUB_ENV"
               echo "PM_RUN=pnpm" >> "$GITHUB_ENV"
               ;;
             npm)
-              # npm ci already enforces a frozen lockfile; install_args not applied.
-              echo "PM_INSTALL=npm ci" >> "$GITHUB_ENV"
+              echo "PM_TOOL=npm" >> "$GITHUB_ENV"
               echo "PM_RUN=npm run" >> "$GITHUB_ENV"
               ;;
             *)
@@ -178,11 +183,20 @@ jobs:
           esac
 
       - name: Install dependencies
+        env:
+          INSTALL_ARGS: ${{ inputs.install_args }}
         run: |
           set -euo pipefail
           echo "::group::⚡ [CHECKPOINT 1/4] Install dependencies"
-          echo "→ Install command: $PM_INSTALL"
-          $PM_INSTALL
+          # Split install_args into a word array and pass each as a separate quoted
+          # argument so it can never break out into the shell. npm ci enforces a
+          # frozen lockfile, so extra args are intentionally not applied there.
+          read -r -a EXTRA_ARGS <<< "$INSTALL_ARGS"
+          case "$PM_TOOL" in
+            yarn) echo "→ Install command: yarn install"; yarn install "${EXTRA_ARGS[@]}" ;;
+            pnpm) echo "→ Install command: pnpm install"; pnpm install "${EXTRA_ARGS[@]}" ;;
+            npm)  echo "→ Install command: npm ci"; npm ci ;;
+          esac
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/4] Dependencies installed — PASSED"
           echo "::endgroup::"

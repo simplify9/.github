@@ -74,6 +74,13 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    # 1. Announce (always runs first) — context-aware notice + namespaced checkpoint.
+    - name: Announce gateway onboarding
+      shell: bash
+      run: |
+        echo "::notice title=🚪 [GATEWAY] Auto-Onboarding::gateway: ${{ inputs.gateway-parent-namespace }}/${{ inputs.gateway-parent-name }} | namespace: ${{ inputs.namespace }}"
+        echo "GATEWAY_ONBOARD_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
     # Inputs are passed via env (never interpolated into the script body) so secret
     # and hostname values can't break out into the shell. The cluster-mutating logic
     # — kubeconfig decode, listener/cert provisioning, the race-safe replace loop —
@@ -97,6 +104,36 @@ runs:
         SECTION_NAMES_LIST: ${{ inputs.gateway-section-names-list }}
       run: |
         bash "${{ github.action_path }}/onboard.sh"
+        echo "GATEWAY_ONBOARD_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+    # 4. Failure report (before summary).
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        echo "::error title=❌ [GATEWAY] Onboarding failed::gateway '${{ inputs.gateway-parent-namespace }}/${{ inputs.gateway-parent-name }}'. Checkpoint — 1) Onboard listeners/certs: ${GATEWAY_ONBOARD_CP1_STATUS:-⏭️ Not reached}. Check gateway capacity, kubeconfig access, and DNS for the requested hostnames."
+
+    # 5. Summary (always last, always runs).
+    - name: Write onboarding summary
+      if: always()
+      shell: bash
+      env:
+        GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
+        GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+        DEPLOY_NAMESPACE: ${{ inputs.namespace }}
+        CERT_ISSUER: ${{ inputs.gateway-cert-issuer-name }}
+      run: |
+        set -euo pipefail
+        {
+          echo "## 🚪 Gateway Auto-Onboarding"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Gateway | \`${GATEWAY_NAMESPACE}/${GATEWAY_NAME}\` |"
+          echo "| Deploy namespace | \`${DEPLOY_NAMESPACE:-n/a}\` |"
+          echo "| Cert issuer | \`${CERT_ISSUER}\` |"
+          echo "| Onboard listeners/certs | ${GATEWAY_ONBOARD_CP1_STATUS:-⏭️ Not reached} |"
+        } >> "$GITHUB_STEP_SUMMARY"
 
 branding:
   icon: 'globe'

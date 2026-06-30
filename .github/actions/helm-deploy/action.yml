@@ -70,6 +70,7 @@ inputs:
   chart-version:
     description: "Version of the Helm chart to deploy. Required for OCI sources. For chartmuseum sources it is optional — leave empty to deploy the latest version published in the repository."
     required: false
+    default: ''
   registry:
     description: 'OCI registry URL where the chart is stored'
     required: false
