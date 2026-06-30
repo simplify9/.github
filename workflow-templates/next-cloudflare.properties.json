@@ -1,0 +1,10 @@
+{
+    "name": "Next.js + Cloudflare Workers",
+    "description": "Builds a Next.js app with the OpenNext.js Cloudflare adapter and deploys it to Cloudflare Workers using the Simplify9 reusable workflow.",
+    "iconName": "octicon-globe",
+    "categories": [
+        "Next.js",
+        "Cloudflare",
+        "Workers"
+    ]
+}

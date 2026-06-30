@@ -88,6 +88,14 @@ inputs:
       Applied after extra_set_values, so secrets take precedence over same-keyed non-secret values.
     required: false
     default: ''
+  values_file:
+    description: |-
+      Optional path to a Helm values YAML file passed via `-f`. Use for structured
+      values (arrays/maps) that are awkward to express as `--set` pairs. Helm applies
+      `-f` files BEFORE `--set`, so extra_set_values / secret_set_values still override
+      any colliding key. Leave empty (default) to pass no values file.
+    required: false
+    default: ''
   extra_args:
     description: "Raw extra args appended to helm upgrade (e.g. --debug)"
     required: false
@@ -357,6 +365,7 @@ runs:
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
         SECRET_SET_VALUES: ${{ inputs.secret_set_values }}
+        VALUES_FILE: ${{ inputs.values_file }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
         ATOMIC: ${{ inputs.atomic }}
       run: |
@@ -419,6 +428,19 @@ runs:
           SECRET_SET_ARGS=( ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} )
         fi
 
+        # Optional structured values file (-f). Applied BEFORE --set so the
+        # --set pairs above still win on any colliding key (Helm precedence).
+        VALUES_FILE_ARGS=()
+        if [ -n "${VALUES_FILE:-}" ]; then
+          if [ -f "$VALUES_FILE" ]; then
+            VALUES_FILE_ARGS=( -f "$VALUES_FILE" )
+            echo "Using values file: $VALUES_FILE"
+          else
+            echo "values_file '$VALUES_FILE' was provided but does not exist." >&2
+            exit 1
+          fi
+        fi
+
         # extra_args is raw CLI text (e.g. "--debug --wait=legacy"); split into argv tokens.
         read -ra EXTRA_ARGS_ARR <<< "${EXTRA_ARGS:-}"
 
@@ -434,6 +456,7 @@ runs:
           --install \
           --namespace "${NAMESPACE}" \
           --create-namespace \
+          ${VALUES_FILE_ARGS[@]+"${VALUES_FILE_ARGS[@]}"} \
           "${BASE_SET_ARGS[@]}" \
           ${EXTRA_SET_ARGS[@]+"${EXTRA_SET_ARGS[@]}"} \
           ${SECRET_SET_ARGS[@]+"${SECRET_SET_ARGS[@]}"} \

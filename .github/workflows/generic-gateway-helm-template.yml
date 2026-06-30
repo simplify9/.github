@@ -1,3 +1,57 @@
+# =============================================================================
+# API CI/CD Pipeline (Gateway-First Reusable)
+# =============================================================================
+#
+# PURPOSE:
+#   Build, (optionally) pack NuGet, containerize, and deploy a service to
+#   Kubernetes behind a Cilium Gateway API gateway (or an nginx Ingress, or
+#   both). Gateway listeners and cert-manager Certificates for each hostname are
+#   provisioned automatically. SemVer is computed from git tags, and a tag is
+#   written back only after a successful deploy.
+#
+# JOB PIPELINE (each job is gated so a disabled NuGet job never blocks deploy):
+#   version  — compute the next SemVer from existing tags (determine-semver).
+#   nuget    — (only when package-nuget=true) build/test, pack, push packages.
+#   build    — build & push the Docker image to the container registry.
+#   deploy   — render routing values, onboard gateway hostnames, `helm upgrade`.
+#   tag      — write the computed git tag(s) back to origin.
+#
+# ORCHESTRATED ACTIONS (simplify9/.github/.github/actions/*):
+#   determine-semver, dotnet-build, dotnet-pack-push, docker-build-push,
+#   gateway-routing (renders the Helm values file + host/section lists),
+#   gateway-onboard (race-safe listener + Certificate provisioning),
+#   helm-generic (helm upgrade --install, optional pre-deploy migration Job),
+#   tag-github-origin, write-job-summary.
+#
+# ROUTING MODES (routing-mode input):
+#   gateway — HTTPRoute attached to a Gateway (default).
+#   ingress — classic nginx Ingress.
+#   dual    — both, sharing the same hostnames.
+#   Per host, a section name selects SHARED-listener mode (attach to an existing
+#   wildcard listener; no cert/listener created) vs DEDICATED mode (auto-slugged
+#   listener + cert-manager Certificate provisioned). See gateway-section-name /
+#   gateway-section-names below.
+#
+# SECRETS (all optional; see the `secrets:` block for the full list):
+#   kubeconfig             cluster access for deploy + gateway onboarding.
+#   registry-username/-password   container registry push creds (fall back to
+#                          github.actor / GITHUB_TOKEN for GHCR).
+#   github-token           tagging (falls back to the built-in GITHUB_TOKEN).
+#   nuget-api-key/-source, NUGET_PACKAGE_PAT, helm-set-secret-values   as needed.
+#
+# USAGE:
+#   jobs:
+#     ship:
+#       uses: simplify9/.github/.github/workflows/generic-gateway-helm-template.yml@main
+#       with:
+#         app-name: my-api
+#         namespace: production
+#         routing-mode: gateway
+#         gateway-hostnames: api.example.com
+#       secrets:
+#         kubeconfig: ${{ secrets.KUBECONFIG }}
+#         registry-password: ${{ secrets.GHCR_TOKEN }}
+# =============================================================================
 name: API CI/CD Pipeline (Gateway-First Reusable)
 
 on:
@@ -46,8 +100,8 @@ on:
       run-tests:
         description: Whether to run tests before packing
         required: false
-        default: 'false'
-        type: string
+        default: false
+        type: boolean
 
       dockerfile-path:
         description: Path to Dockerfile
@@ -116,10 +170,10 @@ on:
         default: ''
         type: string
       atomic:
-        description: "If 'true', pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        description: "If true, pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
         required: false
-        default: 'true'
-        type: string
+        default: true
+        type: boolean
       helm-set-values:
         description: Additional Helm set values line or comma separated
         required: false
@@ -379,6 +433,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# Least-privilege default for every job (most just check out code). Jobs that
+# need more (build pushes images; tag writes tags) widen this explicitly below.
+permissions:
+  contents: read
+
 env:
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.app-name || github.repository }}
@@ -421,30 +480,25 @@ jobs:
 
       - name: Write version job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          SEMVER_VERSION: ${{ steps.semver.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🏷️ Version Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Computed version | \`${SEMVER_VERSION}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🏷️'
+          title: Version Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Computed version | `${{ steps.semver.outputs.version }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
 
   nuget:
     runs-on: ubuntu-latest
     if: ${{ inputs.package-nuget }}
     timeout-minutes: 30
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
       git-tag: ${{ steps.nuget-semver.outputs.git-tag }}
@@ -457,8 +511,10 @@ jobs:
         run: |
           echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Enabled: ${{ inputs.package-nuget }} | Triggered by: ${{ github.actor }}"
 
+      # NOTE: the per-step `if: inputs.package-nuget` guards were removed — the
+      # whole job is already gated by the job-level `if` above, so the steps
+      # cannot run when packaging is disabled.
       - name: Checkout code
-        if: ${{ inputs.package-nuget }}
         uses: actions/checkout@v7
         with:
           # Full history + all tags so determine-semver reads them locally
@@ -467,12 +523,17 @@ jobs:
           persist-credentials: false
 
       - name: Configure GitHub Packages feed
-        if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
+        if: ${{ env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
         env:
           FEED_URL: ${{ env.NUGET_SOURCE }}
           FEED_USERNAME: ${{ github.actor }}
           FEED_PASSWORD: ${{ secrets.nuget-api-key }}
         run: |
+          # --store-password-in-clear-text writes the PAT into the repo-local
+          # nuget.config. This is a Linux limitation (no OS credential store) and is
+          # fine on ephemeral GitHub-hosted runners. On SELF-HOSTED / reused runners
+          # the file lingers in the workspace — scrub it (e.g. `dotnet nuget remove
+          # source github` in an always() post-step) if self-hosted runners are used.
           dotnet nuget remove source github || true
           dotnet nuget add source "$FEED_URL" \
             --name github \
@@ -481,7 +542,6 @@ jobs:
             --store-password-in-clear-text
 
       - name: Determine NuGet semantic version
-        if: ${{ inputs.package-nuget }}
         id: nuget-semver
         uses: simplify9/.github/.github/actions/determine-semver@main
         with:
@@ -495,7 +555,6 @@ jobs:
           build-id: ${{ github.run_number }}
 
       - name: Dotnet Restore Build and Test
-        if: ${{ inputs.package-nuget }}
         uses: simplify9/.github/.github/actions/dotnet-build@main
         with:
           projects: '**/*.csproj'
@@ -505,7 +564,6 @@ jobs:
           run-tests: ${{ inputs.run-tests }}
 
       - name: Pack and Push NuGet Package
-        if: ${{ inputs.package-nuget }}
         uses: simplify9/.github/.github/actions/dotnet-pack-push@main
         with:
           projects: ${{ inputs.nuget-projects }}
@@ -516,30 +574,28 @@ jobs:
 
       - name: Write nuget job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          NUGET_ENABLED: ${{ inputs.package-nuget }}
-          NUGET_VERSION: ${{ steps.nuget-semver.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🔷 NuGet Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Enabled | ${NUGET_ENABLED} |"
-            echo "| Version | \`${NUGET_VERSION}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔷'
+          title: NuGet Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Enabled | ${{ inputs.package-nuget }} |
+            | Version | `${{ steps.nuget-semver.outputs.version }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
 
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, nuget]
+    # packages: write covers the registry-password fallback to GITHUB_TOKEN when
+    # pushing the image to GHCR; contents: read is for checkout.
+    permissions:
+      contents: read
+      packages: write
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
@@ -553,6 +609,10 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # The Docker build authenticates with its own registry credentials, so the
+          # job never needs the persisted git token — drop it for hardening/parity.
+          persist-credentials: false
 
       - name: Build and push Docker image
         id: docker
@@ -576,30 +636,27 @@ jobs:
 
       - name: Write build job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          VERSION: ${{ needs.version.outputs.version }}
-          REGISTRY_INPUT: ${{ inputs.container-registry }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🐳 Build Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Registry | \`${REGISTRY_INPUT}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🐳'
+          title: Build Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Registry | `${{ inputs.container-registry }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
 
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, build]
+    # Cluster access is via the kubeconfig secret, not GITHUB_TOKEN — only
+    # checkout needs the token.
+    permissions:
+      contents: read
     # Explicit guard required: without an `if`, the implicit success() evaluates the
     # whole dependency chain (deploy -> build -> nuget). A disabled nuget job
     # (package-nuget=false, result: skipped) poisons that chain and silently skips
@@ -617,608 +674,56 @@ jobs:
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
+      # Routing/config values are rendered by a dedicated, unit-tested action that
+      # emits a Helm values file (passed to helm-generic via values_file) plus the
+      # host/section lists the onboarding step consumes. (Previously ~140 lines of
+      # inline bash; see .github/actions/gateway-routing.)
       - name: Generate routing and config values
         id: routing
-        shell: bash
-        env:
-          ROUTING_MODE: ${{ inputs.routing-mode }}
-          CONFIGMAP_ENABLED: ${{ inputs.configmap-enabled }}
-          GATEWAY_PARENT_NAME: ${{ inputs.gateway-parent-name }}
-          GATEWAY_PARENT_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
-          GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
-          GATEWAY_SECTION_NAMES_RAW: ${{ inputs.gateway-section-names }}
-          GATEWAY_HOSTNAMES_RAW: ${{ inputs.gateway-hostnames }}
-          GATEWAY_PATHS_RAW: ${{ inputs.gateway-paths }}
-          GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
-          GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name }}
-          GATEWAY_BACKEND_PORT: ${{ inputs.gateway-backend-port }}
-          INGRESS_HOSTS: ${{ inputs.ingress-hosts }}
-          INGRESS_PATHS: ${{ inputs.ingress-paths }}
-          INGRESS_TLS_SECRETS: ${{ inputs.ingress-tls-secrets }}
-          INGRESS_CLASS_NAME: ${{ inputs.ingress-class-name }}
-          INGRESS_PATH_TYPE: ${{ inputs.ingress-path-type }}
-          INGRESS_TLS_ENABLED: ${{ inputs.ingress-tls-enabled }}
-          INGRESS_CLUSTER_ISSUER: ${{ inputs.ingress-cluster-issuer }}
-          INGRESS_PROXY_BODY_SIZE: ${{ inputs.ingress-proxy-body-size }}
-        run: |
-          set -euo pipefail
+        uses: simplify9/.github/.github/actions/gateway-routing@main
+        with:
+          routing-mode: ${{ inputs.routing-mode }}
+          configmap-enabled: ${{ inputs.configmap-enabled }}
+          gateway-parent-name: ${{ inputs.gateway-parent-name }}
+          gateway-parent-namespace: ${{ inputs.gateway-parent-namespace }}
+          gateway-section-name: ${{ inputs.gateway-section-name }}
+          gateway-section-names: ${{ inputs.gateway-section-names }}
+          gateway-hostnames: ${{ inputs.gateway-hostnames }}
+          gateway-paths: ${{ inputs.gateway-paths }}
+          gateway-path-type: ${{ inputs.gateway-path-type }}
+          gateway-backend-service-name: ${{ inputs.gateway-backend-service-name }}
+          gateway-backend-port: ${{ inputs.gateway-backend-port }}
+          ingress-hosts: ${{ inputs.ingress-hosts }}
+          ingress-paths: ${{ inputs.ingress-paths }}
+          ingress-tls-secrets: ${{ inputs.ingress-tls-secrets }}
+          ingress-class-name: ${{ inputs.ingress-class-name }}
+          ingress-path-type: ${{ inputs.ingress-path-type }}
+          ingress-tls-enabled: ${{ inputs.ingress-tls-enabled }}
+          ingress-cluster-issuer: ${{ inputs.ingress-cluster-issuer }}
+          ingress-proxy-body-size: ${{ inputs.ingress-proxy-body-size }}
 
-          mode=$(echo "$ROUTING_MODE" | tr '[:upper:]' '[:lower:]')
-          gateway_enabled=false
-          ingress_enabled=false
+      - name: Mark routing checkpoint
+        run: echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
-          case "$mode" in
-            gateway)
-              gateway_enabled=true
-              ;;
-            ingress)
-              ingress_enabled=true
-              ;;
-            dual)
-              gateway_enabled=true
-              ingress_enabled=true
-              ;;
-            *)
-              echo "Unknown routing-mode '$ROUTING_MODE'. Falling back to gateway."
-              gateway_enabled=true
-              ;;
-          esac
-
-          gateway_hosts_input="$GATEWAY_HOSTNAMES_RAW"
-          gateway_paths_input="$GATEWAY_PATHS_RAW"
-
-          # Backward compatibility: when gateway host/path are omitted, fall back to ingress-style inputs.
-          if [ -z "$(echo "$gateway_hosts_input" | tr -d '[:space:],\r\n')" ] && [ -n "$(echo "$INGRESS_HOSTS" | tr -d '[:space:],\r\n')" ]; then
-            gateway_hosts_input="$INGRESS_HOSTS"
-          fi
-          if [ -z "$(echo "$gateway_paths_input" | tr -d '[:space:],\r\n')" ] && [ -n "$(echo "$INGRESS_PATHS" | tr -d '[:space:],\r\n')" ]; then
-            gateway_paths_input="$INGRESS_PATHS"
-          fi
-          if [ -z "$(echo "$gateway_paths_input" | tr -d '[:space:],\r\n')" ]; then
-            gateway_paths_input='/'
-          fi
-
-          host_list=""
-          host_count=0
-          while IFS= read -r host; do
-            host=$(echo "$host" | xargs)
-            [ -z "$host" ] && continue
-            host_list+="$host"$'\n'
-            host_count=$((host_count + 1))
-          done < <(echo "$gateway_hosts_input" | sed 's/\r//g' | tr ',' '\n')
-
-          output=""
-          output+="gateway.enabled=${gateway_enabled}\\n"
-          output+="ingress.enabled=${ingress_enabled}\\n"
-          output+="config.enabled=${CONFIGMAP_ENABLED}\\n"
-
-          # Per-hostname section names list — populated only when gateway-section-names
-          # (plural) is used; remains empty in legacy mode. Passed to the onboarding
-          # step so it knows which hosts need dedicated provisioning vs shared listeners.
-          section_names_list=""
-
-          if [ "$gateway_enabled" = "true" ]; then
-            if [ -n "$(echo "${GATEWAY_SECTION_NAMES_RAW:-}" | tr -d '[:space:]\r\n')" ]; then
-              # Per-hostname mode: one parentRef per host, section name resolved from
-              # gateway-section-names by position (empty entry = auto-slug for dedicated).
-              mapfile -t _raw_sections < <(echo "${GATEWAY_SECTION_NAMES_RAW}" | sed 's/\r//g')
-              _pref_idx=0
-              _sn_pos=0
-              _emitted_sections=""
-              while IFS= read -r _h; do
-                _h=$(echo "$_h" | xargs)
-                [ -z "$_h" ] && continue
-                _sn=""
-                if [ "$_sn_pos" -lt "${#_raw_sections[@]}" ]; then
-                  # Strip shell-style comments so callers can annotate lines
-                  # (e.g. "  # blank → dedicated" or "https-wildcard-sf9-io # shared").
-                  _sn=$(echo "${_raw_sections[$_sn_pos]}" | xargs | sed 's/#.*//' | xargs)
-                fi
-                _sn_pos=$((_sn_pos + 1))
-                if [ -n "$_sn" ]; then
-                  # Shared mode — always record in section_names_list so the onboarding
-                  # step can validate the listener for every host that uses it.
-                  # Only emit one parentRef per unique sectionName: the Gateway API spec
-                  # forbids duplicate (name, namespace, sectionName) tuples in parentRefs,
-                  # so two sf9.io hosts sharing the same wildcard listener must produce a
-                  # single parentRef entry, not two identical ones.
-                  section_names_list+="${_sn}"$'\n'
-                  if ! echo "$_emitted_sections" | grep -Fxq "$_sn"; then
-                    _emitted_sections+="${_sn}"$'\n'
-                    output+="gateway.parentRefs[$_pref_idx].name=${GATEWAY_PARENT_NAME}\\n"
-                    output+="gateway.parentRefs[$_pref_idx].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
-                    output+="gateway.parentRefs[$_pref_idx].sectionName=${_sn}\\n"
-                    _pref_idx=$((_pref_idx + 1))
-                  fi
-                else
-                  # Dedicated mode: each host gets its own unique parentRef
-                  # (auto-slugged sectionName is guaranteed unique per hostname).
-                  _slug=$(echo "$_h" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
-                  _auto_sn=$(echo "https-${_slug}" | cut -c1-63 | sed 's/-$//')
-                  output+="gateway.parentRefs[$_pref_idx].name=${GATEWAY_PARENT_NAME}\\n"
-                  output+="gateway.parentRefs[$_pref_idx].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
-                  output+="gateway.parentRefs[$_pref_idx].sectionName=${_auto_sn}\\n"
-                  section_names_list+=''$'\n'
-                  _pref_idx=$((_pref_idx + 1))
-                fi
-              done < <(echo "$gateway_hosts_input" | sed 's/\r//g' | tr ',' '\n')
-            else
-              # Legacy single-parentRef mode — fully backwards compatible.
-              output+="gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}\\n"
-              output+="gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}\\n"
-              effective_section="${GATEWAY_SECTION_NAME}"
-              if [ -z "$effective_section" ] && [ "$host_count" -eq 1 ]; then
-                first_host=$(echo "$host_list" | head -n1)
-                slug=$(echo "$first_host" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//')
-                effective_section=$(echo "https-${slug}" | cut -c1-63 | sed 's/-$//')
-              fi
-              if [ -n "$effective_section" ]; then
-                output+="gateway.parentRefs[0].sectionName=${effective_section}\\n"
-              fi
-            fi
-
-            hidx=0
-            while IFS= read -r host; do
-              host=$(echo "$host" | xargs)
-              [ -z "$host" ] && continue
-              output+="gateway.hostnames[$hidx]=$host\\n"
-              hidx=$((hidx + 1))
-            done < <(printf "%s" "$host_list")
-
-            pidx=0
-            while IFS= read -r path; do
-              path=$(echo "$path" | xargs)
-              [ -z "$path" ] && continue
-              output+="gateway.routes[$pidx].path=$path\\n"
-              output+="gateway.routes[$pidx].pathType=${GATEWAY_PATH_TYPE}\\n"
-              if [ -n "$GATEWAY_BACKEND_SERVICE_NAME" ]; then
-                output+="gateway.routes[$pidx].backendRef.name=${GATEWAY_BACKEND_SERVICE_NAME}\\n"
-              fi
-              if [ -n "$GATEWAY_BACKEND_PORT" ]; then
-                output+="gateway.routes[$pidx].backendRef.port=${GATEWAY_BACKEND_PORT}\\n"
-              fi
-              pidx=$((pidx + 1))
-            done < <(echo "$gateway_paths_input" | sed 's/\r//g' | tr ',' '\n')
-          fi
-
-          if [ "$ingress_enabled" = "true" ]; then
-            output+="ingress.ingressClassName=${INGRESS_CLASS_NAME}\\n"
-            output+="ingress.pathType=${INGRESS_PATH_TYPE}\\n"
-            output+="ingress.tlsEnabled=${INGRESS_TLS_ENABLED}\\n"
-
-            if [ -n "$INGRESS_CLUSTER_ISSUER" ]; then
-              output+="ingress.annotations.cert-manager\\.io/cluster-issuer=${INGRESS_CLUSTER_ISSUER}\\n"
-            fi
-            if [ -n "$INGRESS_PROXY_BODY_SIZE" ]; then
-              output+="ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/proxy-body-size=${INGRESS_PROXY_BODY_SIZE}\\n"
-            fi
-
-            tls_input=$(echo "$INGRESS_TLS_SECRETS" | sed 's/\r//g' | tr ',' '\n')
-            mapfile -t tls_list < <(echo "$tls_input" | grep -v '^[[:space:]]*$' || true)
-
-            iidx=0
-            while IFS= read -r host; do
-              host=$(echo "$host" | xargs)
-              [ -z "$host" ] && continue
-              output+="ingress.hosts[$iidx].host=$host\\n"
-
-              tls_secret=""
-              if [ ${#tls_list[@]} -gt $iidx ]; then
-                tls_secret=$(echo "${tls_list[$iidx]}" | xargs)
-              fi
-              if [ -n "$tls_secret" ]; then
-                output+="ingress.hosts[$iidx].tlsSecret=$tls_secret\\n"
-              fi
-              iidx=$((iidx + 1))
-            done < <(echo "$INGRESS_HOSTS" | sed 's/\r//g' | tr ',' '\n')
-
-            pidx=0
-            while IFS= read -r path; do
-              path=$(echo "$path" | xargs)
-              [ -z "$path" ] && continue
-              output+="ingress.paths[$pidx]=$path\\n"
-              pidx=$((pidx + 1))
-            done < <(echo "$INGRESS_PATHS" | sed 's/\r//g' | tr ',' '\n')
-          fi
-
-          {
-            echo "routing-values<<EOF"
-            echo -e "$output"
-            echo "EOF"
-            echo "gateway-host-list<<EOF"
-            printf "%s" "$host_list"
-            echo
-            echo "EOF"
-            echo "gateway-section-names-list<<EOF"
-            printf "%s" "$section_names_list"
-            echo
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/2] Routing values generated — mode: ${mode}"
+      # Gateway listener + cert onboarding is race-safe against the shared gateway
+      # (single optimistic-locked kubectl replace, retried on conflict). Previously
+      # ~380 lines of inline bash; see .github/actions/gateway-onboard.
       - name: Auto-onboard gateway hostnames
         if: ${{ (inputs.routing-mode == 'gateway' || inputs.routing-mode == 'dual') && inputs.gateway-auto-onboarding }}
-        shell: bash
-        env:
-          KUBECONFIG_DATA: ${{ secrets.kubeconfig }}
-          DEPLOY_NAMESPACE: ${{ inputs.namespace }}
-          GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
-          GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
-          GATEWAY_CLASS_NAME: ${{ inputs.gateway-class-name }}
-          GATEWAY_CERT_ISSUER_NAME: ${{ inputs.gateway-cert-issuer-name }}
-          GATEWAY_CERT_ISSUER_KIND: ${{ inputs.gateway-cert-issuer-kind }}
-          GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
-          GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
-          HOST_LIST: ${{ steps.routing.outputs.gateway-host-list }}
-          GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
-          SECTION_NAMES_LIST: ${{ steps.routing.outputs.gateway-section-names-list }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${KUBECONFIG_DATA}" ]; then
-            echo "kubeconfig secret is required for gateway auto-onboarding"
-            exit 1
-          fi
-
-          KCFG_PATH="$RUNNER_TEMP/kubeconfig"
-          # Remove the decoded kubeconfig when this step exits so the credential does not linger
-          # (matters on self-hosted/reused runners).
-          trap 'rm -f "$KCFG_PATH"' EXIT
-          if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
-            printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
-          else
-            if printf "%s" "$KUBECONFIG_DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
-              true
-            else
-              printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
-            fi
-          fi
-          export KUBECONFIG="$KCFG_PATH"
-
-          if [ -z "$(echo "$HOST_LIST" | tr -d '[:space:]\r\n')" ]; then
-            echo "No gateway hosts were provided. Skipping gateway auto-onboarding."
-            exit 0
-          fi
-
-          # ---------------------------------------------------------------------------
-          # Shared listener mode: when gateway-section-name is explicitly provided,
-          # the app is attaching to a pre-existing shared/wildcard listener.
-          # Skip all per-host listener and cert provisioning — just validate that
-          # the named listener exists on the gateway, then exit cleanly.
-          # ---------------------------------------------------------------------------
-          if [ -n "${GATEWAY_SECTION_NAME:-}" ]; then
-            echo "Shared listener mode: gateway-section-name='${GATEWAY_SECTION_NAME}' is set."
-            echo "Skipping per-host listener and cert provisioning."
-
-            KCFG_PATH="$RUNNER_TEMP/kubeconfig"
-            if echo "$KUBECONFIG_DATA" | grep -q 'apiVersion:'; then
-              printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
-            else
-              if printf "%s" "$KUBECONFIG_DATA" | base64 -d > "$KCFG_PATH" 2>/dev/null; then
-                true
-              else
-                printf "%s" "$KUBECONFIG_DATA" > "$KCFG_PATH"
-              fi
-            fi
-            export KUBECONFIG="$KCFG_PATH"
-
-            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
-              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}' 2>/dev/null || true)
-            if ! echo "$existing" | grep -Fxq "${GATEWAY_SECTION_NAME}"; then
-              echo "❌ Shared listener '${GATEWAY_SECTION_NAME}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}'."
-              echo "   Available listeners:"
-              echo "$existing" | sed 's/^/     /'
-              exit 1
-            fi
-            echo "✅ Shared listener '${GATEWAY_SECTION_NAME}' confirmed present on gateway. Onboarding complete."
-            exit 0
-          fi
-
-          kubectl create namespace "$GATEWAY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create namespace "$DEPLOY_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-
-          to_slug() {
-            echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//'
-          }
-
-          trim63() {
-            echo "$1" | cut -c1-63 | sed 's/-$//'
-          }
-
-          ensure_gateway_exists() {
-            local host="$1"
-            local slug http_listener https_listener secret_name
-            slug=$(to_slug "$host")
-            http_listener=$(trim63 "http-${slug}")
-            https_listener=$(trim63 "https-${slug}")
-            secret_name="$slug"
-
-            if kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" >/dev/null 2>&1; then
-              return 0
-            fi
-
-            kubectl apply -f <(printf '%s\n' \
-              "apiVersion: gateway.networking.k8s.io/v1" \
-              "kind: Gateway" \
-              "metadata:" \
-              "  name: ${GATEWAY_NAME}" \
-              "  namespace: ${GATEWAY_NAMESPACE}" \
-              "spec:" \
-              "  gatewayClassName: ${GATEWAY_CLASS_NAME}" \
-              "  listeners:" \
-              "    - name: ${http_listener}" \
-              "      protocol: HTTP" \
-              "      port: 80" \
-              "      hostname: ${host}" \
-              "      allowedRoutes:" \
-              "        namespaces:" \
-              "          from: All" \
-              "    - name: ${https_listener}" \
-              "      protocol: HTTPS" \
-              "      port: 443" \
-              "      hostname: ${host}" \
-              "      tls:" \
-              "        mode: Terminate" \
-              "        certificateRefs:" \
-              "          - kind: Secret" \
-              "            name: ${secret_name}" \
-              "      allowedRoutes:" \
-              "        namespaces:" \
-              "          from: All")
-          }
-
-          # ---------------------------------------------------------------------------
-          # Pre-flight: check gateway listener capacity before touching anything.
-          # The Gateway API hard limit is 64 listeners. Each new hostname needs 2
-          # (HTTP + HTTPS). If adding the next host would exceed 64 we abort with a
-          # clear, actionable message — no partial state is ever written.
-          # ---------------------------------------------------------------------------
-          preflight_capacity_check() {
-            local current_count needed="$1"
-            current_count=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
-              -o jsonpath='{.spec.listeners}' 2>/dev/null \
-              | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
-            if (( current_count + needed > 64 )); then
-              echo "❌ GATEWAY CAPACITY ERROR: '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' currently has ${current_count}/64 listeners."
-              echo "   Adding ${needed} listener(s) for this host would reach $((current_count + needed)) — exceeding the hard Gateway API limit of 64."
-              echo "   ACTION REQUIRED: Prune stale listeners from the gateway before redeploying."
-              echo "   Run: kubectl get gateway ${GATEWAY_NAME} -n ${GATEWAY_NAMESPACE} -o jsonpath='{range .status.listeners[*]}{.name}: attachedRoutes={.attachedRoutes}{\"\\n\"}{end}'"
-              echo "   Remove any listener with attachedRoutes=0 that has no active HTTPRoute."
-              exit 1
-            fi
-            echo "Capacity check passed: ${current_count}/64 listeners in use, ${needed} needed."
-          }
-
-          # ---------------------------------------------------------------------------
-          # add_listener_if_missing: adds a single listener to the gateway.
-          # Returns exit code 0 on success or skip, non-zero on patch failure.
-          # Sets the caller-scoped variable _listener_was_added=true when a NEW
-          # listener is actually patched in (not when skipped). Used for rollback.
-          # ---------------------------------------------------------------------------
-          _listener_was_added=false
-
-          add_listener_if_missing() {
-            local listener_name="$1"
-            local listener_protocol="$2"
-            local listener_host="$3"
-            local listener_secret="$4"
-            local listener_port existing conflict
-
-            if [ "$listener_protocol" = "HTTP" ]; then
-              listener_port=80
-            else
-              listener_port=443
-            fi
-
-            # Guard 1: listener with this exact name already registered
-            existing=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
-              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')
-            if echo "$existing" | grep -Fxq "$listener_name"; then
-              echo "Listener '${listener_name}' already exists by name; skipping."
-              _listener_was_added=false
-              return 0
-            fi
-
-            # Guard 2: any listener with the same hostname+port+protocol triplet
-            # (the Gateway API uniqueness constraint — different name, same triplet still fails)
-            conflict=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" -o json \
-              | jq -r --arg host "$listener_host" --arg proto "$listener_protocol" \
-                       --argjson port "$listener_port" \
-                '.spec.listeners[]
-                 | select(.hostname == $host and .protocol == $proto and .port == $port)
-                 | .name' 2>/dev/null || true)
-            if [ -n "$conflict" ]; then
-              echo "A ${listener_protocol} listener for '${listener_host}:${listener_port}' already exists (name: '${conflict}'); skipping."
-              _listener_was_added=false
-              return 0
-            fi
-
-            if [ "$listener_protocol" = "HTTP" ]; then
-              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[
-                {\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{
-                  \"name\":\"${listener_name}\",
-                  \"protocol\":\"HTTP\",
-                  \"port\":80,
-                  \"hostname\":\"${listener_host}\",
-                  \"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}
-                }}
-              ]"
-            else
-              kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' -p="[
-                {\"op\":\"add\",\"path\":\"/spec/listeners/-\",\"value\":{
-                  \"name\":\"${listener_name}\",
-                  \"protocol\":\"HTTPS\",
-                  \"port\":443,
-                  \"hostname\":\"${listener_host}\",
-                  \"tls\":{\"mode\":\"Terminate\",\"certificateRefs\":[{\"kind\":\"Secret\",\"name\":\"${listener_secret}\"}]},
-                  \"allowedRoutes\":{\"namespaces\":{\"from\":\"All\"}}
-                }}
-              ]"
-            fi
-            _listener_was_added=true
-          }
-
-          # ---------------------------------------------------------------------------
-          # remove_listener_by_name: removes a listener from the gateway by name.
-          # Used for atomic rollback: if HTTP was added but HTTPS fails, the HTTP
-          # listener is removed so no half-baked state is left behind.
-          # ---------------------------------------------------------------------------
-          remove_listener_by_name() {
-            local target_name="$1" idx
-            idx=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
-              -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}' \
-              | grep -n "^${target_name}$" | cut -d: -f1)
-            if [ -z "$idx" ]; then
-              echo "Rollback: listener '${target_name}' not found — nothing to remove."
-              return 0
-            fi
-            local zero_idx=$(( idx - 1 ))
-            kubectl -n "$GATEWAY_NAMESPACE" patch gateway "$GATEWAY_NAME" --type='json' \
-              -p="[{\"op\":\"remove\",\"path\":\"/spec/listeners/${zero_idx}\"}]"
-            echo "Rollback: removed listener '${target_name}' (index ${zero_idx})."
-          }
-
-          # Parse per-hostname section names aligned with HOST_LIST.
-          # Empty array (legacy mode) means every host runs in dedicated mode.
-          mapfile -t _per_host_sections < <(printf "%s" "${SECTION_NAMES_LIST:-}")
-          _host_idx=0
-
-          while IFS= read -r host; do
-            host=$(echo "$host" | xargs)
-            [ -z "$host" ] && continue
-
-            # Resolve the section name for this specific host position.
-            _per_host_sn=""
-            if [ "${#_per_host_sections[@]}" -gt 0 ] && [ "$_host_idx" -lt "${#_per_host_sections[@]}" ]; then
-              _per_host_sn=$(echo "${_per_host_sections[$_host_idx]}" | xargs)
-            fi
-            _host_idx=$((_host_idx + 1))
-
-            if [ -n "$_per_host_sn" ]; then
-              # Shared listener mode for this specific host: validate the named
-              # listener exists on the gateway; no cert or listener is created.
-              echo "Shared listener mode for '${host}': section-name='${_per_host_sn}'."
-              _existing_listeners=$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
-                -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}' 2>/dev/null || true)
-              if ! echo "$_existing_listeners" | grep -Fxq "${_per_host_sn}"; then
-                echo "❌ Shared listener '${_per_host_sn}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' for host '${host}'."
-                echo "   Available listeners:"
-                echo "$_existing_listeners" | sed 's/^/     /'
-                exit 1
-              fi
-              echo "✅ Shared listener '${_per_host_sn}' confirmed for '${host}'."
-              continue
-            fi
-
-            slug=$(to_slug "$host")
-            cert_name="$slug"
-            secret_name="$slug"
-            http_listener=$(trim63 "http-${slug}")
-            https_listener=$(trim63 "https-${slug}")
-
-            ensure_gateway_exists "$host"
-
-            # Pre-flight capacity check: count how many listeners this host actually
-            # needs to add (0, 1, or 2 — guards may skip some). We conservatively
-            # check for 2 slots needed regardless of guard outcomes, since we cannot
-            # know which guards will fire without querying the live state twice.
-            preflight_capacity_check 2
-
-            # Read cert readiness once — shared by the DNS pre-flight and the
-            # Order purge below so both conditions pay one kubectl call.
-            cert_ready_now=$(kubectl get certificate "${cert_name}" -n "${GATEWAY_NAMESPACE}" \
-              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
-
-            # ---------------------------------------------------------------------------
-            # DNS pre-flight: only runs when the cert is not already Ready.
-            # A valid cert means no issuance is needed this run, so DNS reachability
-            # is irrelevant — orange-cloud Cloudflare proxy is fine in that case.
-            # When the cert IS absent or stuck, a proxy or wrong A record causes
-            # cert-manager's HTTP-01 self-check to time out (600s hang); fail fast.
-            # ---------------------------------------------------------------------------
-            if [ "${cert_ready_now}" != "True" ]; then
-              gateway_ip=$(kubectl -n "${GATEWAY_NAMESPACE}" get gateway "${GATEWAY_NAME}" \
-                -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || echo "")
-              if [ -n "${gateway_ip}" ]; then
-                resolved=$(dig +short "${host}" 2>/dev/null \
-                  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
-                  | head -5 || echo "")
-                if [ -z "${resolved}" ]; then
-                  echo "❌ DNS pre-flight failed: '${host}' has no A record."
-                  echo "   Create an A record: ${host} → ${gateway_ip}"
-                  exit 1
-                fi
-                if ! echo "${resolved}" | grep -Fxq "${gateway_ip}"; then
-                  echo "❌ DNS pre-flight failed: '${host}' does not resolve to the gateway IP."
-                  echo "   Resolved to: $(echo "${resolved}" | tr '\n' ' ')"
-                  echo "   Gateway IP:  ${gateway_ip} (${GATEWAY_NAME} in ${GATEWAY_NAMESPACE})"
-                  echo "   HTTP-01 ACME requires DNS to point directly to the gateway — not through a proxy."
-                  echo "   If using Cloudflare: set the record to DNS-only mode (grey cloud) for this hostname."
-                  exit 1
-                fi
-                echo "✅ DNS pre-flight passed: '${host}' → ${gateway_ip}"
-              fi
-            fi
-
-            kubectl apply -f <(printf '%s\n' \
-              "apiVersion: cert-manager.io/v1" \
-              "kind: Certificate" \
-              "metadata:" \
-              "  name: ${cert_name}" \
-              "  namespace: ${GATEWAY_NAMESPACE}" \
-              "spec:" \
-              "  secretName: ${secret_name}" \
-              "  issuerRef:" \
-              "    name: ${GATEWAY_CERT_ISSUER_NAME}" \
-              "    kind: ${GATEWAY_CERT_ISSUER_KIND}" \
-              "  dnsNames:" \
-              "    - ${host}")
-
-            # Purge any failed ACME Orders so cert-manager retries immediately
-            # rather than waiting out exponential backoff. kubectl apply on an
-            # existing Certificate is a no-op when the spec is unchanged, so a
-            # re-run after a late DNS update leaves the cert stuck in backoff
-            # until the failed Orders are deleted. Only errored/invalid Orders
-            # are removed — pending Orders on a freshly created cert are untouched.
-            if [ "${cert_ready_now}" != "True" ]; then
-              orders_output=$(kubectl get orders -n "${GATEWAY_NAMESPACE}" \
-                -l "cert-manager.io/certificate-name=${cert_name}" \
-                -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.state}{"\n"}{end}' \
-                2>/dev/null || echo "")
-              while IFS=$'\t' read -r order_name order_state; do
-                [ -z "$order_name" ] && continue
-                case "$order_state" in
-                  errored|invalid)
-                    echo "⚠️  Purging failed ACME Order '${order_name}' (state: ${order_state}) — cert-manager will retry immediately."
-                    kubectl delete order "${order_name}" -n "${GATEWAY_NAMESPACE}" --ignore-not-found
-                    ;;
-                esac
-              done <<< "${orders_output}"
-            fi
-
-            # Add HTTP listener, track whether it was newly created.
-            _listener_was_added=false
-            add_listener_if_missing "$http_listener" "HTTP" "$host" "$secret_name"
-            http_was_new="$_listener_was_added"
-
-            # Add HTTPS listener. On failure, atomically roll back the HTTP listener
-            # if we added it in this run — prevents the half-baked HTTP-only state
-            # that caused the original overflow incident.
-            _listener_was_added=false
-            if ! add_listener_if_missing "$https_listener" "HTTPS" "$host" "$secret_name"; then
-              if [ "$http_was_new" = "true" ]; then
-                echo "⚠️  HTTPS listener patch failed. Rolling back HTTP listener '${http_listener}' added in this run..."
-                remove_listener_by_name "$http_listener"
-              fi
-              echo "❌ Failed to add HTTPS listener for host '${host}'. Aborting."
-              exit 1
-            fi
-
-            if [ "$GATEWAY_CERT_WAIT" = "true" ]; then
-              kubectl wait --for=condition=Ready=True "certificate/${cert_name}" -n "$GATEWAY_NAMESPACE" --timeout="${GATEWAY_CERT_WAIT_TIMEOUT}s"
-            fi
-          done < <(printf "%s" "$HOST_LIST")
-          echo "✅ Gateway hostnames onboarded — PASSED"
+        uses: simplify9/.github/.github/actions/gateway-onboard@main
+        with:
+          kubeconfig: ${{ secrets.kubeconfig }}
+          namespace: ${{ inputs.namespace }}
+          gateway-parent-name: ${{ inputs.gateway-parent-name }}
+          gateway-parent-namespace: ${{ inputs.gateway-parent-namespace }}
+          gateway-class-name: ${{ inputs.gateway-class-name }}
+          gateway-cert-issuer-name: ${{ inputs.gateway-cert-issuer-name }}
+          gateway-cert-issuer-kind: ${{ inputs.gateway-cert-issuer-kind }}
+          gateway-cert-wait: ${{ inputs.gateway-cert-wait }}
+          gateway-cert-wait-timeout-seconds: ${{ inputs.gateway-cert-wait-timeout-seconds }}
+          gateway-section-name: ${{ inputs.gateway-section-name }}
+          gateway-host-list: ${{ steps.routing.outputs.gateway-host-list }}
+          gateway-section-names-list: ${{ steps.routing.outputs.gateway-section-names-list }}
 
       - name: Deploy with Helm gateway-first chart
         uses: simplify9/.github/.github/actions/helm-generic@main
@@ -1232,6 +737,10 @@ jobs:
           # startupProbe, so it is not subject to the liveness-without-startup hang (helm/helm#31526).
           extra_args: --wait
           atomic: ${{ inputs.atomic }}
+          # Structured gateway/ingress routing values come from the rendered YAML
+          # file (values_file). The --set values below still override it on any
+          # colliding key (Helm applies -f before --set).
+          values_file: ${{ steps.routing.outputs.values-file }}
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
             app.version=${{ needs.version.outputs.version }}
@@ -1241,7 +750,6 @@ jobs:
             environment=${{ inputs.environment }}
             service.targetPort=${{ inputs.service-target-port }}
             service.port=${{ inputs.service-port }}
-            ${{ steps.routing.outputs.routing-values }}
             ${{ inputs.helm-set-values }}
           # Sensitive values: applied as masked --set-string (no type coercion), not --set.
           secret_set_values: ${{ secrets.helm-set-secret-values }}
@@ -1276,40 +784,29 @@ jobs:
 
       - name: Write deploy job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          APP_NAME: ${{ inputs.app-name }}
-          VERSION: ${{ needs.version.outputs.version }}
-          NAMESPACE: ${{ inputs.namespace }}
-          ROUTING_MODE: ${{ inputs.routing-mode }}
-          CHART_NAME: ${{ inputs.chart-name }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## ☸️ Gateway Deploy — ${APP_NAME} — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| App | \`${APP_NAME}\` |"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Namespace | \`${NAMESPACE}\` |"
-            echo "| Routing mode | ${ROUTING_MODE} |"
-            echo "| Chart | ${CHART_NAME} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Routing values generated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Helm deployment | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '☸️'
+          title: Gateway Deploy — ${{ inputs.app-name }}
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | App | `${{ inputs.app-name }}` |
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Namespace | `${{ inputs.namespace }}` |
+            | Routing mode | ${{ inputs.routing-mode }} |
+            | Chart | ${{ inputs.chart-name }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Routing values generated | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
 
   tag:
     runs-on: ubuntu-latest

@@ -1,6 +1,6 @@
 # Simplify9 Reusable CI/CD Library
 
-> Organization-wide shared GitHub Actions workflows and composite actions for Simplify9 projects.  
+> Organization-wide shared GitHub Actions workflows, composite actions, and starter templates for Simplify9 projects.
 > Callers reference this repo with `@main` — no versioned tags exist.
 
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=githubactions&logoColor=white)
@@ -20,15 +20,15 @@
 
 ## Table of Contents
 
-- [Which Template Should I Use?](#which-template-should-i-use)
-- [Prerequisites — Organization Secrets](#prerequisites--organization-secrets)
+- [Which Workflow Should I Use?](#which-workflow-should-i-use)
+- [Starter Templates](#starter-templates)
+- [Prerequisites — Secrets](#prerequisites--secrets)
 - [Repository Structure](#repository-structure)
 - [Workflow Reference](#workflow-reference)
-  - [Frontend · Cloudflare Pages](#frontend--cloudflare-pages)
   - [Frontend · Cloudflare Workers](#frontend--cloudflare-workers)
-  - [API & Backend · Kubernetes](#api--backend--kubernetes)
-  - [Mobile · iOS & Android](#mobile--ios--android)
+  - [Service & Backend · Kubernetes](#service--backend--kubernetes)
   - [Helm Chart CI/CD](#helm-chart-cicd)
+  - [Mobile · iOS & Android](#mobile--ios--android)
 - [Composite Action Reference](#composite-action-reference)
 - [Core Architecture & Conventions](#core-architecture--conventions)
 - [Troubleshooting](#troubleshooting)
@@ -36,129 +36,21 @@
 
 ---
 
-## Which Template Should I Use?
+## Which Workflow Should I Use?
 
 | Stack | Deployment target | Use this workflow |
 |---|---|---|
-| React / Vue / Svelte / Vite (static) | Cloudflare Pages | [`vite-ci.yml`](#vite-ciyml) |
-| Next.js with SSR | Cloudflare Workers (OpenNext) | [`next-cloudflare-worker.yaml`](#next-cloudflare-workeryaml) |
-| Next.js static export | Cloudflare Workers | [`next-static-cloudflare-worker.yaml`](#next-static-cloudflare-workeryaml) |
-| Vite (Workers edge deploy) | Cloudflare Workers | [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml) |
-| REST API / microservice | Docker + Kubernetes | [`api-cicd.yml`](#api-cicdyml) |
-| REST API / microservice | Docker + Kubernetes (Gateway API) | [`generic-gateway-helm-template.yml`](#generic-gateway-helm-templateyml) |
-| .NET application | NuGet + Docker + Kubernetes | [`sw-cicd.yml`](#sw-cicdyml) |
-| Docker image only (no deploy) | Container registry | [`ci-docker.yaml`](#ci-dockeryaml) |
-| Helm deploy only (no Docker) | Kubernetes via Helm | [`ci-helm.yaml`](#ci-helmyaml) |
-| Helm deploy from a values file | Kubernetes via Helm | [`helm-deploy-values.yml`](#helm-deploy-valuesyml) |
-| iOS app | TestFlight | [`ios-build.yml`](#ios-buildyml) |
-| Android app | Google Play | [`generic-android-google-play.yml`](#generic-android-google-playyml) |
-| Helm chart development | ChartMuseum / OCI | [`generic-chart-helm.yml`](#generic-chart-helmyml) |
-| Helm chart with Gateway API | ChartMuseum | [`generic-gateway-chart-cicd.yml`](#generic-gateway-chart-cicdyml) |
+| Next.js (SSR, OpenNext adapter) | Cloudflare Workers | [`next-cloudflare-worker.yaml`](#next-cloudflare-workeryaml) |
+| Vite single-page app | Cloudflare Workers (static assets) | [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml) |
+| Containerized service (any stack, .NET-friendly) | Docker + Helm (GHCR OCI / ChartMuseum), optional K8s deploy | [`reusable-service-cicd.yml`](#reusable-service-cicdyml) |
+| Service deployed over ingress-nginx | Docker + `s9genericchart` → Kubernetes | [`generic-chart-helm.yml`](#generic-chart-helmyml) |
+| Service deployed behind the Cilium Gateway API | Docker + `s9genericchart-v2` → Kubernetes | [`generic-gateway-helm-template.yml`](#generic-gateway-helm-templateyml) |
+| Deploy an already-published chart from a values file | Kubernetes via Helm | [`helm-deploy-values.yml`](#helm-deploy-valuesyml) |
+| Cilium Gateway API-aware Helm chart (chart dev) | ChartMuseum | [`gateway-chart-cicd.yml`](#gateway-chart-cicdyml) |
+| iOS app (React Native or native) | TestFlight | [`ios-build.yml`](#ios-buildyml) |
+| Android app (React Native) | Google Play | [`android-build.yml`](#android-buildyml) |
 
----
-
-## Prerequisites — Organization Secrets
-
-Set these secrets once at the **Organization** level so every repo inherits them automatically.
-
-### Frontend (Cloudflare)
-
-```
-CLOUDFLARE_API_TOKEN     # API token with Pages:Edit and Workers:Edit permissions
-CLOUDFLARE_ACCOUNT_ID    # Your Cloudflare account ID
-```
-
-### API / Backend (Kubernetes + Container Registry)
-
-```
-KUBECONFIG               # Base64-encoded kubeconfig  →  base64 -w 0 ~/.kube/config
-```
-
-Container registry credentials are resolved dynamically from org/repo variables by profile (see [`ci-docker.yaml`](#ci-dockeryaml)).  
-The default profile is `S9`, so set:
-
-```
-S9_REGISTRY_USERNAME     # Registry username
-S9_REGISTRY_TOKEN        # Registry password / token
-S9_KUBECONFIG            # (used by ci-helm.yaml)  base64-encoded kubeconfig
-```
-
-### .NET / NuGet
-
-```
-NUGET_API_KEY            # NuGet.org API key (only if publishing packages)
-```
-
-### Mobile — iOS
-
-```
-IOS_P12_BASE64                       # Base64-encoded .p12 signing certificate
-IOS_P12_PASSWORD                     # Password for the .p12
-IOS_PROVISIONING_PROFILE_BASE64      # Base64-encoded .mobileprovision
-APPSTORE_API_KEY_ID                  # App Store Connect API Key ID
-APPSTORE_ISSUER_ID                   # App Store Connect Issuer ID
-APPSTORE_API_KEY_BASE64              # Base64-encoded App Store Connect .p8 private key
-```
-
-### Mobile — Android
-
-```
-ANDROID_KEYSTORE_BASE64              # Base64-encoded .jks or .keystore file
-ANDROID_KEYSTORE_PASSWORD            # Keystore password
-ANDROID_KEY_ALIAS                    # Key alias
-ANDROID_KEY_PASSWORD                 # Key password
-GOOGLE_PLAY_SERVICE_ACCOUNT_JSON     # Google Play service account JSON
-```
-
----
-
-## Repository Structure
-
-```
-.github/                        ← workspace root
-└── .github/
-    ├── workflows/              ← reusable workflows  (workflow_call triggers only)
-    │   ├── vite-ci.yml
-    │   ├── next-cloudflare-worker.yaml
-    │   ├── next-static-cloudflare-worker.yaml
-    │   ├── vite-cloudflare-worker.yml
-    │   ├── api-cicd.yml
-    │   ├── sw-cicd.yml
-    │   ├── ci-docker.yaml
-    │   ├── ci-helm.yaml
-    │   ├── helm-deploy-values.yml
-    │   ├── ios-build.yml
-    │   ├── generic-android-google-play.yml
-    │   ├── ios-testflight-dispatch-template.yml
-    │   ├── android-google-play-dispatch-template.yml
-    │   ├── generic-chart-helm.yml
-    │   ├── generic-gateway-chart-cicd.yml
-    │   └── generic-gateway-helm-template.yml
-    └── actions/                ← composite actions
-        ├── determine-semver/
-        ├── tag-github-origin/
-        ├── docker-build-push/
-        ├── helm-deploy/
-        ├── helm-deploy-s9generic/
-        ├── helm-generic/
-        ├── helm-package-push/
-        ├── dotnet-build/
-        ├── dotnet-pack-push/
-        ├── generate-wrangler-config/
-        ├── setup-cloudflare-domain/
-        ├── ios-install-cert/
-        ├── ios-install-profile/
-        ├── xcode-setup/
-        ├── xcode-build/
-        ├── xcode-export/
-        └── upload-google-play-release/
-```
-
----
-
-## Workflow Reference
-
-All workflows are **reusable** — they have `on: workflow_call:` only. Call them from your repo:
+All workflows are **reusable** (`on: workflow_call:`). Call them from your repo:
 
 ```yaml
 uses: simplify9/.github/.github/workflows/<name>.yml@main
@@ -166,56 +58,112 @@ uses: simplify9/.github/.github/workflows/<name>.yml@main
 
 ---
 
-### Frontend · Cloudflare Pages
+## Starter Templates
+
+This repo also ships **org workflow templates** (`workflow-templates/`) that appear in GitHub's **Actions → New workflow** picker for any `simplify9` repo. Each template is a thin caller wired to a reusable workflow with example inputs pre-filled — start from one and edit.
+
+| Template (in "New workflow") | Wraps | Default triggers |
+|---|---|---|
+| Service CI/CD Pipeline | `reusable-service-cicd.yml` | `push` → `main`, `workflow_dispatch` |
+| Generic Chart Helm CI/CD | `generic-chart-helm.yml` | `push` → `staging`/`main`, `workflow_dispatch` |
+| Next.js + Cloudflare Workers | `next-cloudflare-worker.yaml` | `push` → `staging`/`main`, `workflow_dispatch` |
+| Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` → `staging`/`main`, `workflow_dispatch` |
+| Android App CI/CD | `android-build.yml` | `workflow_dispatch` |
+| iOS App CI/CD | `ios-build.yml` | `workflow_dispatch` |
 
 ---
 
-#### `vite-ci.yml`
+## Prerequisites — Secrets
 
-Deploys any Vite-based application (React, Vue, Svelte, vanilla JS) to Cloudflare Pages with automatic project creation and optional custom domain.
+Set these as **Organization** or repository secrets. Names below are the secret keys the workflows expect under `secrets:` (some workflows accept `secrets: inherit`).
 
-**Key inputs**
+### Frontend (Cloudflare Workers)
 
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `project-name` | ✅ | — | Cloudflare Pages project base name |
-| `environment` | | `development` | Environment name |
-| `build-directory` | | `build` | Build output directory (`dist` for Vite, `build` for CRA) |
-| `package-manager` | | `npm` | `npm`, `yarn`, or `pnpm` |
-| `build-command` | | `npm run build` | Build command |
-| `project-name-suffix` | | `''` | Append `-dev`, `-staging`, etc. |
-| `custom-domain` | | `''` | Custom domain to configure |
-| `fail-on-domain-error` | | `false` | Fail the run if domain setup fails |
-| `run-tests` | | `true` | Run tests before deploy |
-| `node-version` | | `24` | Node.js version |
-
-**Required secrets:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
-
-**Minimal example**
-
-```yaml
-jobs:
-  deploy-dev:
-    if: github.ref == 'refs/heads/development'
-    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-    with:
-      project-name: my-app
-      environment: development
-      build-directory: dist
-      project-name-suffix: -dev
-      custom-domain: dev.mysite.com
-    # secrets inherited from org
-
-  deploy-prod:
-    if: github.ref == 'refs/heads/main'
-    uses: simplify9/.github/.github/workflows/vite-ci.yml@main
-    with:
-      project-name: my-app
-      environment: production
-      build-directory: dist
-      custom-domain: mysite.com
-      fail-on-domain-error: true
+```text
+cloudflare_api_token     # API token with Workers + DNS permissions
+cloudflare_account_id    # Cloudflare account ID
 ```
+
+### Service / Backend (Kubernetes + Container Registry + Helm)
+
+```text
+registry-username        # Container registry username (GHCR: github.actor)
+registry-password        # Container registry password/token (GHCR: GITHUB_TOKEN)
+kubeconfig               # Base64-encoded (or raw YAML) kubeconfig — ingress-nginx deploys
+kubeconfig-gateway       # Base64 kubeconfig for the gateway-api routing mode (reusable-service-cicd)
+chartmuseum-username     # ChartMuseum username (when publishing/pulling via ChartMuseum)
+chartmuseum-password     # ChartMuseum password/token
+helm-set-secret-values   # Sensitive Helm values, applied with --set-string
+github-token             # Token for tagging the origin (falls back to built-in GITHUB_TOKEN)
+nuget-api-key            # NuGet API key (only if publishing packages)
+```
+
+### Mobile — iOS
+
+```text
+ios-p12-base64                    # Base64-encoded .p12 signing certificate
+ios-p12-password                  # Password for the .p12
+ios-mobileprovision-base64        # Base64-encoded .mobileprovision
+ios-team-id                       # (optional) explicit Apple Team ID
+appstore-api-key-id               # App Store Connect API Key ID
+appstore-issuer-id                # App Store Connect Issuer ID
+appstore-api-private-key-base64   # Base64-encoded App Store Connect .p8 private key
+```
+
+### Mobile — Android
+
+```text
+android-keystore-base64           # Base64-encoded .jks / .keystore
+android-keystore-password         # Keystore password
+android-key-alias                 # Key alias
+android-key-password              # Key password
+google-play-service-account-json  # Google Play service account JSON
+```
+
+---
+
+## Repository Structure
+
+```text
+.github/                          ← workspace root (README.md, AGENTS.md, CLAUDE.md)
+├── .github/
+│   ├── workflows/                ← reusable workflows (workflow_call)
+│   │   ├── next-cloudflare-worker.yaml
+│   │   ├── vite-cloudflare-worker.yml
+│   │   ├── reusable-service-cicd.yml
+│   │   ├── generic-chart-helm.yml
+│   │   ├── generic-gateway-helm-template.yml
+│   │   ├── helm-deploy-values.yml
+│   │   ├── gateway-chart-cicd.yml
+│   │   ├── ios-build.yml
+│   │   └── android-build.yml
+│   └── actions/                  ← composite actions
+│       ├── determine-semver/
+│       ├── tag-github-origin/
+│       ├── docker-build-push/
+│       ├── helm-deploy/
+│       ├── helm-deploy-s9generic/
+│       ├── helm-generic/
+│       ├── helm-package-push/
+│       ├── gateway-routing/      (render.sh)
+│       ├── gateway-onboard/      (onboard.sh)
+│       ├── dotnet-build/
+│       ├── dotnet-pack-push/
+│       ├── generate-wrangler-config/
+│       ├── setup-cloudflare-domain/
+│       ├── ios-install-cert/
+│       ├── ios-install-profile/
+│       ├── xcode-build/
+│       ├── xcode-export/
+│       └── write-job-summary/
+└── workflow-templates/           ← org starter templates (*.yml + *.properties.json)
+```
+
+---
+
+## Workflow Reference
+
+> Big workflows (the gateway/service pipelines) expose dozens of inputs. The tables below cover the **commonly used** ones; the workflow file itself is the complete, authoritative input list.
 
 ---
 
@@ -225,24 +173,22 @@ jobs:
 
 #### `next-cloudflare-worker.yaml`
 
-Deploys Next.js applications with full SSR to Cloudflare Workers using **OpenNext.js**. Compatible with Next.js 15.
-
-**Key inputs**
+Builds a Next.js app with the **OpenNext.js** Cloudflare adapter and deploys it to Cloudflare Workers.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `project_name` | ✅ | — | Worker project base name |
+| `project_name` | ✅ | — | Base Worker project name (without env suffix) |
 | `environment` | ✅ | — | Wrangler environment (`staging`, `production`) |
-| `route` | | `''` | Custom domain / route (falls back to repo var `CLOUDFLARE_ROUTE`) |
+| `route` | | `''` | Route / custom domain (falls back to repo var `CLOUDFLARE_ROUTE` then `ROUTE`) |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
 | `node_version` | | `24` | Node.js version |
+| `opennextjs_version` | | `1.20.1` | `@opennextjs/cloudflare` adapter version |
 | `compatibility_date` | | `2026-05-01` | Cloudflare compatibility date |
-| `build_script` | | `build` | npm script to run for build |
+| `assets_dir` | | `.open-next/assets` | Static assets directory |
+| `build_script` | | `build` | Build npm script |
 | `run_lint` | | `true` | Run lint step |
 
 **Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`
-
-**Example**
 
 ```yaml
 jobs:
@@ -252,7 +198,6 @@ jobs:
       project_name: my-nextjs-app
       environment: production
       route: myapp.com
-      package_manager: yarn
     secrets:
       cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -260,526 +205,144 @@ jobs:
 
 ---
 
-#### `next-static-cloudflare-worker.yaml`
-
-Deploys Next.js **static export** (`output: 'export'`) to Cloudflare Workers. Same interface as `next-cloudflare-worker.yaml` but for static-only builds.
-
----
-
 #### `vite-cloudflare-worker.yml`
 
-Deploys Vite apps to Cloudflare Workers (edge). Uses the `generate-wrangler-config` action to produce `wrangler.toml` dynamically.
-
-**Key inputs**
+Builds a Vite single-page app and deploys it to Cloudflare Workers **static assets** — SPA routing is handled natively by Cloudflare (`not_found_handling = "single-page-application"`); no custom Worker script is generated.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `project_name` | ✅ | — | Worker project name |
+| `project_name` | ✅ | — | Base Worker project name |
 | `environment` | ✅ | — | Wrangler environment |
-| `route` | ✅ | — | Route pattern (e.g. `mysite.com/*`) |
-| `assets_dir` | | `dist` | Static assets directory |
-| `node_version` | | `24` | Node.js version |
+| `route` | ✅ | — | Route / custom domain |
+| `assets_dir` | | `dist` | Vite build output directory |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
+| `node_version` | | `24` | Node.js version |
 | `compatibility_date` | | `2026-05-01` | Cloudflare compatibility date |
+| `pre_build_commands` | | `''` | Optional shell commands run before the build |
+| `run_lint` | | `true` | Run lint step |
 
 **Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`
 
----
-
-### API & Backend · Kubernetes
+> Unlike the Next.js workflow, `route` is **required** here.
 
 ---
 
-#### `api-cicd.yml`
+### Service & Backend · Kubernetes
 
-Full CI/CD pipeline: builds a Docker image, packages a Helm chart, and deploys to Kubernetes across up to three environments. Supports both **local charts** (checked in to the repo) and **external charts** (pulled from `https://charts.sf9.io`).
+---
 
-**All deploy jobs are disabled by default.** Set `deploy-to-<env>: true` to enable.
+#### `reusable-service-cicd.yml`
 
-**Key inputs**
+The consolidated service pipeline: compute semver → optionally publish NuGet → build & push a Docker image → package and publish the Helm chart (GHCR OCI, ChartMuseum, or **both**) → optionally deploy to Kubernetes (ingress-nginx or gateway-api) → tag the git origin.
+
+**Publishing is always on; deploying is opt-in (`deploy: false` by default).**
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `chart-name` | ✅ | — | Your app name in Kubernetes (release name, image name) |
-| `container-registry` | | `ghcr.io` | Container registry URL |
-| `image-name` | | (repo name) | Docker image name |
-| `helm-image-repo` | | (registry/image) | Value for `image.repo` in Helm chart |
-| `chart-path` | | `./chart` | Local chart dir or external repo URL (e.g. `https://charts.sf9.io`) |
-| `source-chart-name` | | `s9genericchart` | Chart to pull when using an external repo |
-| `chart-version` | | `latest` | External chart version to pull |
-| `deploy-to-development` | | `false` | Enable dev deploy (triggers on `development` branch) |
-| `deploy-to-staging` | | `false` | Enable staging deploy (triggers on `staging` branch) |
-| `deploy-to-production` | | `false` | Enable prod deploy (triggers on `main`/`master`) |
-| `development-namespace` | | `development` | Kubernetes namespace for dev |
-| `development-helm-set-values` | | — | Extra `--set` values for dev |
-| `major-version` | | `1` | Semver major |
-| `minor-version` | | `0` | Semver minor |
-
-**Secrets**
-
-| Secret | Description |
-|---|---|
-| `kubeconfig` | Base64-encoded kubeconfig |
-| `registry-username` | Container registry username |
-| `registry-password` | Container registry password/token |
-| `development-helm-set-secret-values` | `--set-string` values for dev (DB strings, API keys) |
-| `staging-helm-set-secret-values` | `--set-string` values for staging |
-| `production-helm-set-secret-values` | `--set-string` values for production |
-
-**Example — ghcr.io with local chart**
-
-```yaml
-jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/api-cicd.yml@main
-    with:
-      chart-name: my-api
-      container-registry: ghcr.io
-      image-name: simplify9/my-api
-      deploy-to-development: true
-      deploy-to-production: true
-      development-namespace: my-api-dev
-      production-namespace: my-api
-      development-helm-set-values: >-
-        ingress.enabled=true,
-        ingress.hosts={dev.myapi.com},
-        replicas=1
-      production-helm-set-values: >-
-        ingress.enabled=true,
-        ingress.hosts={myapi.com},
-        replicas=3
-    secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-      registry-username: ${{ github.actor }}
-      registry-password: ${{ secrets.GITHUB_TOKEN }}
-      production-helm-set-secret-values: ${{ secrets.PROD_HELM_SECRETS }}
-```
-
-**Example — external SF9 generic chart**
-
-```yaml
-with:
-  chart-name: my-api
-  chart-path: https://charts.sf9.io
-  source-chart-name: s9genericchart
-  chart-version: latest
-```
-
----
-
-#### `sw-cicd.yml`
-
-Full CI/CD pipeline for **.NET applications**: semantic versioning → .NET build/test → optional NuGet publish → Docker build/push → Helm chart package/push → Kubernetes deploy.
-
-**Key inputs**
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `chart-name` | ✅ | — | Helm chart / app name |
-| `dotnet-version` | | `8.0.x` | .NET SDK version |
-| `nuget-projects` | | `''` | Glob for projects to publish as NuGet (empty = skip) |
-| `test-projects` | | `**/*UnitTests/*.csproj` | Test projects glob |
-| `run-tests` | | `false` | Run tests |
+| `chart-name` | ✅ | — | Helm chart name (must match `Chart.yaml` `name:`) |
+| `chart-publish-method` | | `both` | `github-oci`, `chartmuseum`, or `both` (empty/unknown hard-fails) |
+| `chart-repo-url` | | — | ChartMuseum base URL (required for `chartmuseum`/`both`) |
 | `chart-path` | | `./chart` | Helm chart directory |
-| `chart-publish-method` | | `oci` | `oci` or `chartmuseum` |
 | `container-registry` | | `ghcr.io` | Container registry |
-| `deploy-to-development` | | `false` | Enable dev deploy |
-| `development-namespace` | | `development` | Dev namespace |
-| `helm-set-values` | | — | Non-sensitive `--set` config values |
-| `major-version` | | `1` | Semver major |
-| `minor-version` | | `0` | Semver minor |
+| `image-name` | | (repo name) | Docker image name |
+| `dotnet-version` | | `8.0.x` | .NET SDK (for NuGet/tests) |
+| `nuget-projects` | | `''` | NuGet projects glob (empty = skip NuGet) |
+| `deploy` | | `false` | Deploy the published chart after publishing |
+| `routing-mode` | | `ingress-nginx` | `ingress-nginx` or `gateway-api` |
+| `deploy-namespace` | | `playground` | Kubernetes namespace |
+| `deploy-environment` | | `Development` | GitHub Environment for the deploy job |
+| `helm-set-values` | | `''` | Non-secret `--set` values |
+| `gateway-hostnames` | | `''` | Hostnames for the HTTPRoute (gateway-api) |
+| `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
-**Secrets**
+**Secrets** (conditionally required): `registry-username`, `registry-password`, `chartmuseum-username` + `chartmuseum-password` (for `chartmuseum`/`both`), `kubeconfig` (deploy + ingress-nginx) or `kubeconfig-gateway` (deploy + gateway-api), `helm-set-secret-values`, `nuget-api-key`, `github-token`.
 
-| Secret | Description |
-|---|---|
-| `kubeconfig` | Base64-encoded kubeconfig |
-| `nuget-api-key` | NuGet API key (if publishing) |
-| `registry-username` | Container registry username |
-| `registry-password` | Registry password/token |
-| `helm-set-secret-values` | Sensitive Helm values via `--set-string` (DB strings, API keys) |
-
-**Critical:** Pass secrets through `helm-set-secret-values`, never through `helm-set-values`. See [Helm Values vs Secrets](#helm-values-vs-helm-secret-values).
-
-**Example**
+**Outputs:** `version`, `docker-image`, `helm-chart`.
 
 ```yaml
 jobs:
-  deploy:
-    uses: simplify9/.github/.github/workflows/sw-cicd.yml@main
+  publish:
+    uses: simplify9/.github/.github/workflows/reusable-service-cicd.yml@main
     with:
-      chart-name: my-dotnet-api
-      dotnet-version: 8.0.x
-      nuget-projects: src/MyApp.Sdk/MyApp.Sdk.csproj
-      run-tests: 'true'
-      deploy-to-development: true
-      development-namespace: my-api-dev
-      helm-set-values: >-
-        ingress.enabled=true,
-        ingress.hosts={dev.myapi.com},
-        replicas=1,
-        environment=Development
+      chart-name: my-service
+      chart-publish-method: both
+      chart-repo-url: https://charts.sf9.io
+      major-version: '2'
+      minor-version: '1'
     secrets:
-      kubeconfig: ${{ secrets.KUBECONFIG }}
-      nuget-api-key: ${{ secrets.NUGET_API_KEY }}
-      helm-set-secret-values: ${{ secrets.DEV_HELM_SECRET_VALUES }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      chartmuseum-username: ${{ secrets.CM_USER }}
+      chartmuseum-password: ${{ secrets.CM_PASSWORD }}
+      nuget-api-key: ${{ secrets.NUGET_API_KEY }}   # omit to skip NuGet
 ```
 
----
-
-#### `ci-docker.yaml`
-
-Builds and pushes a Docker image only — no Helm, no Kubernetes. Uses a **profile-based credential resolver** so the same workflow works across registries (DigitalOcean, Docker Hub, GHCR) without code changes.
-
-**Credential resolution** for registry base URL (first match wins):
-1. Org/repo variable `<PROFILE>_DOCKER_REGISTRY`
-2. Variable `DOCKER_REGISTRY`
-3. Input `docker_registry` (default: `registry.digitalocean.com/sf9cr`)
-
-**Key inputs**
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `app_name` | ✅ | — | Image name (also Helm release name if used with `ci-helm.yaml`) |
-| `registry_profile` | | `S9` | Profile prefix for credential vars/secrets |
-| `version` | | `staging` | Label embedded in image tag |
-| `docker_registry` | | `registry.digitalocean.com/sf9cr` | Fallback registry |
-| `dockerfile` | | `Dockerfile` | Path to Dockerfile |
-| `build_context` | | `.` | Docker build context |
-
-**Required secrets (profile-scoped):** `<PROFILE>_REGISTRY_USERNAME`, `<PROFILE>_REGISTRY_TOKEN`
-
-**Image tags produced:**  
-`<registry>/<app_name>:github-<branch>-<version>`  
-`<registry>/<app_name>:github-<branch>-<run_number>`
-
-**Docker layer caching:** Registry-backed BuildKit cache is enabled using a dedicated `:buildcache` tag (`type=registry,mode=max`). On warm runs, unchanged layers are restored from the registry and show as `CACHED` in the build log. The `:buildcache` tag is written to the same registry using the existing credentials — no additional auth is required.
-
-**Example**
-
-```yaml
-jobs:
-  build:
-    uses: simplify9/.github/.github/workflows/ci-docker.yaml@main
-    with:
-      app_name: my-service
-      version: prod
-```
-
----
-
-#### `ci-helm.yaml`
-
-Deploys a Helm chart to Kubernetes. Typically called after `ci-docker.yaml` in a two-job pipeline. Resolves kubeconfig from `<PROFILE>_KUBECONFIG` secret automatically.
-
-**Key inputs**
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `app_name` | ✅ | — | Helm release name |
-| `namespace` | ✅ | — | Target Kubernetes namespace |
-| `ingress_host` | ✅ | — | Primary ingress hostname |
-| `ingress_tls_secret` | ✅ | — | TLS secret name for ingress |
-| `registry_profile` | | `S9` | Profile prefix for kubeconfig secret |
-| `chart` | | `s9genericchart` | Chart name |
-| `chart_repo` | | `https://charts.sf9.io` | Helm repo URL |
-| `environment_label` | | `Staging` | Value for `--set environment=` |
-| `service_target_port` | | `5000` | Service target port |
-| `image_repo` | | `registry.digitalocean.com/sf9cr` | Container image repo (no tag) |
-| `helm_timeout` | | `15m` | Helm deploy timeout |
-| `ingress_paths` | | `- /` | YAML list of ingress paths |
-| `extra_set_values` | | `''` | Newline-separated extra `--set key=value` pairs |
-
-**Required secret:** `<PROFILE>_KUBECONFIG`
-
-**Ingress path configuration**
-
-```yaml
-ingress_paths: |
-  - /
-  - /api
-  - /docs
-```
-
-**Example — combined build + deploy pipeline**
-
-```yaml
-jobs:
-  build:
-    uses: simplify9/.github/.github/workflows/ci-docker.yaml@main
-    with:
-      app_name: my-service
-
-  deploy:
-    needs: build
-    uses: simplify9/.github/.github/workflows/ci-helm.yaml@main
-    with:
-      app_name: my-service
-      namespace: my-namespace
-      ingress_host: myservice.example.com
-      ingress_tls_secret: myservice-tls
-      ingress_paths: |
-        - /
-        - /api
-```
-
----
-
-#### `helm-deploy-values.yml`
-
-Deploys a Helm chart using a **values file** from the calling repository. Useful when charts have complex configurations that do not fit `--set` flags.
-
-**Key inputs**
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `release-name` | ✅ | — | Helm release name |
-| `chart-name` | ✅ | — | Chart name in the repo |
-| `chart-repo` | ✅ | — | Helm chart repo URL |
-| `namespace` | ✅ | — | Kubernetes namespace |
-| `values-file` | | `values.yaml` | Path to values file in the calling repo |
-| `image-tag` | | `''` | Image tag to set |
-| `global-environment` | | `''` | Value for `global.environment` |
-| `ingress-host` | | `''` | Ingress hostname |
-| `ingress-tls-secret` | | `''` | TLS secret name |
-| `helm-version` | | `v4.2.0` | Helm CLI version |
-| `kubectl-version` | | `v1.33.0` | kubectl CLI version |
-
-**Required secret:** `kubeconfig`
-
----
-
-### Mobile · iOS & Android
-
----
-
-#### `ios-build`
-
-Builds an iOS application and uploads it to TestFlight. Supports React Native and native Swift/ObjC projects. Uses **manual signing only** in CI.
-
-**Key inputs**
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `bundle-id` | ✅ | — | App bundle identifier |
-| `scheme` | ✅ | — | Xcode scheme to build |
-| `workspace` | ✅ | — | Path to `.xcworkspace` |
-| `configuration` | | `Release` | Build configuration |
-| `xcode-version` | | `''` | Xcode major or major.minor (e.g. `16.4`) |
-| `development-team` | ✅ | — | Apple Developer Team ID |
-| `macos-runner` | | `macos-latest` | macOS runner label |
-| `node-version` | | `24` | Node.js version (for React Native) |
-| `package-manager` | | `yarn` | `yarn` or `npm` |
-| `ios-dir` | | `ios` | iOS directory for pod operations |
-| `artifact-name` | | `app` | Artifact name for IPA transfer between jobs |
-| `release-environment` | | `''` | GitHub environment for release job (optional) |
-| `disable-release` | | `false` | Build only, skip TestFlight upload |
-
-**Required secrets**
-
-| Secret | Description |
-|---|---|
-| `p12-base64` | Base64-encoded `.p12` signing certificate |
-| `p12-password` | `.p12` password |
-| `provisioning-profile-base64` | Base64-encoded `.mobileprovision` |
-| `appstore-api-key-id` | App Store Connect API Key ID |
-| `appstore-issuer-id` | App Store Connect Issuer ID |
-| `appstore-api-key-base64` | Base64-encoded `.p8` private key |
-
-**Example**
-
-```yaml
-jobs:
-  build-and-release:
-    uses: simplify9/.github/.github/workflows/ios-build.yml@main
-    with:
-      bundle-id: com.mycompany.myapp
-      scheme: MyApp
-      workspace: MyApp.xcworkspace
-      xcode-version: "16"
-      development-team: ABCDE12345
-      package-manager: yarn
-    secrets:
-      p12-base64: ${{ secrets.IOS_P12_BASE64 }}
-      p12-password: ${{ secrets.IOS_P12_PASSWORD }}
-      provisioning-profile-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
-      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-      appstore-api-key-base64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
-```
-
-**Notes:**
-- Always uses **manual signing** (`signingStyle: manual`) — automatic signing requires an interactive Xcode session unavailable in CI.
-- Certificate and profile installation uses `ios-install-cert` and `ios-install-profile` composite actions internally.
-- **CocoaPods caching:** The `~/.cocoapods/repos` spec repository and `ios/Pods` directory are cached between runs, keyed on `Podfile.lock`. This eliminates the spec repo re-download on warm runs (typically the largest time sink). The cache is bypassed automatically when `clean-reinstall-pods: true` is set.
-- Release runs in the `release_with_environment` job, protected by an approval gate via the `release-environment` input.
-- Use `ios-testflight-dispatch-template.yml` to add a manual `workflow_dispatch` trigger to your repo.
-
----
-
-#### `generic-android-google-play.yml`
-
-Builds a signed Android App Bundle (AAB) and publishes it to Google Play.
-
-**Key inputs**
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `app-id` | ✅ | — | Android applicationId (package name) |
-| `gradle-task` | ✅ | — | Gradle task (e.g. `bundleRelease`) |
-| `keystore-output-path` | ✅ | — | Path where keystore is written |
-| `app-slug` | | `app` | Output AAB file name slug |
-| `version-prefix` | | `1.0.0` | Base version (X.Y.Z) |
-| `version-code-offset` | | `80000` | Added to `github.run_number` for versionCode. Set high when migrating from another CI system to avoid Play Console collisions. |
-| `version-name-offset` | | `0` | Added to `github.run_number` for versionName |
-| `java-version` | | `17` | Java version (temurin) |
-| `node-version` | | `24` | Node.js version (for React Native) |
-| `package-manager` | | `yarn` | `yarn` or `npm` |
-| `build-root-directory` | | `.` | Gradle project root |
-| `release-environment` | | `''` | GitHub environment name for release job |
-| `disable-release` | | `false` | Build only, skip Play Store upload |
-| `artifact-name` | | `app` | Artifact name for AAB transfer between jobs |
-
-**Required secrets**
-
-| Secret | Description |
-|---|---|
-| `keystore-base64` | Base64-encoded keystore (`.jks` / `.keystore`) |
-| `keystore-password` | Keystore password |
-| `key-alias` | Key alias |
-| `key-password` | Key password |
-| `service-account-json` | Google Play service account JSON |
-
-**Example**
-
-```yaml
-jobs:
-  build-and-release:
-    uses: simplify9/.github/.github/workflows/generic-android-google-play.yml@main
-    with:
-      app-id: com.mycompany.myapp
-      gradle-task: bundleRelease
-      keystore-output-path: /tmp/my-app.keystore
-      version-prefix: "2.0.0"
-      version-code-offset: "80000"
-      package-manager: yarn
-    secrets:
-      keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
-      key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-```
-
-**Notes:**
-- Uses `gradle/actions/setup-gradle@v5` with Gradle home caching enabled (`caches`, `notifications`, `wrapper` directories). Do not use `gradle/gradle-build-action` — that repo is archived. Do not add `cache: gradle` to `actions/setup-java` — it conflicts with `setup-gradle` caching.
-- **Caller repo requirement for task-output caching:** Add the following to `android/gradle.properties` (or your `build-root-directory`) to enable task-level output reuse (`FROM-CACHE`). Without this, Gradle home caching still works but individual task outputs are not reused:
-  ```properties
-  org.gradle.caching=true
-  org.gradle.parallel=true
-  org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
-  ```
-- **Android NDK pre-install:** NDK versions are installed via `sdkmanager` before the Gradle build. `actions/cache` cannot be used for `/usr/local/lib/android/sdk/` on GitHub-hosted runners — that directory is root-owned and `tar` extraction fails with permission errors. `sdkmanager` has the correct elevated permissions and installs both required NDK versions directly.
-- **Metro transform cache:** The Metro JS transform cache is stored in `.metro-cache` at the workspace root (set via `METRO_CACHE_DIR` env on the build step) and persisted between runs via `actions/cache@v5`, keyed on the lockfile hash. This eliminates the `WARN the transform cache was reset` message that caused Metro to retranspile all JS from scratch on every run.
-- **Node.js 24 opt-in:** All three jobs set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` at job level, opting in early ahead of GitHub's Node.js 20 retirement on September 16th 2026.
-- The `upload-google-play-release` action is **Docker-based** — it calls the Google Play Android Publisher API via Python. Modifying `play_upload.py` takes effect immediately (Docker image rebuilt per run).
-- Use `android-google-play-dispatch-template.yml` to add a `workflow_dispatch` trigger to your repo.
-
----
-
-### Helm Chart CI/CD
+Set `chart-publish-method: github-oci` to publish only to GHCR OCI (no ChartMuseum secrets needed — the OCI push uses the built-in `GITHUB_TOKEN`).
 
 ---
 
 #### `generic-chart-helm.yml`
 
-Full CI/CD pipeline for developing a **Helm chart**: lint → template render → package → push to ChartMuseum at `https://charts.sf9.io`.
-
-**Key inputs**
+Full CI/CD that builds a Docker image and deploys the shared **`s9genericchart`** over **ingress-nginx**, with optional pre-deploy EF Core migration Job, then tags the version after a successful deploy.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `chart-path` | | `chart` | Path to chart directory |
-| `chartmuseum-url` | | `https://charts.sf9.io/api/charts` | ChartMuseum upload endpoint |
-| `version-prefix` | | `1.0` | Semver `major.minor` prefix |
-| `helm-version` | | `v4.2.0` | Helm CLI version |
-| `update-dependencies` | | `true` | Run `helm package --dependency-update` |
+| `app-name` | | — | Application name (`app.name` Helm value) |
+| `namespace` | | `development` | Kubernetes namespace |
+| `deploy-environment` | | `development` | GitHub Environment for the deploy job |
+| `container-registry` | | `ghcr.io` | Container registry |
+| `ingress-hosts` | | — | Comma-separated ingress hosts |
+| `ingress-paths` | | — | Comma-separated ingress paths |
+| `ingress-tls-secrets` | | — | TLS secrets matching hosts by index |
+| `service-target-port` | | — | Service `targetPort` |
+| `environment` | | — | `environment` Helm value (e.g. `Development`) |
+| `helm-set-values` | | — | Extra non-secret `--set` values |
+| `package-nuget` | | `false` | Build & publish NuGet packages |
+| `init-job-image` | | `''` | If set, runs a K8s migration Job before deploy |
+| `init-job-secret-name` | | `''` | Secret holding the migration connection string |
+| `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
-**Required secrets:** `registry-username`, `registry-password`
+**Secrets:** `registry-username`, `registry-password`, `kubeconfig`, `github-token`, `helm-set-secret-values`, `nuget-api-key`, `nuget-source`, `NUGET_PACKAGE_PAT`.
 
----
-
-#### `generic-gateway-chart-cicd.yml`
-
-CI/CD for **Cilium Gateway API-aware** Helm charts. Extends `generic-chart-helm.yml` with routing mode validation (default / ingress / gateway / dual) and ConfigMap gating tests.
-
-**Key inputs** — same as `generic-chart-helm.yml`, plus:
-
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `validate-routing` | | `true` | Validate all four routing rendering modes |
-| `validate-configmap` | | `true` | Validate ConfigMap gating and merged key rendering |
-
-**Outputs:** `version`, `chart-name`, `chart-package`, `helm-chart` (ChartMuseum URL)
+**Outputs:** `version`, `docker-image`, `nuget-version`.
 
 ---
 
 #### `generic-gateway-helm-template.yml`
 
-Full CI/CD pipeline for APIs and microservices using the **Kubernetes Gateway API** (Cilium). Covers semantic versioning → Docker build/push → Gateway listener + TLS certificate auto-onboarding → Helm deploy. This is the standard pipeline for any service that needs its own hostname on the cluster.
+Gateway-first CI/CD: semver → Docker build/push → Gateway listener + TLS certificate auto-onboarding → Helm deploy of **`s9genericchart-v2`** → tag. The standard pipeline for any service that needs its own hostname on the cluster via the **Cilium Gateway API**.
 
-**Pipeline stages**
-
-1. **Version** — `determine-semver` computes the next `major.minor.patch` from git tags.
-2. **Build** — Docker image built and pushed to the container registry.
-3. **Routing values** — generates `gateway.*` Helm `--set` values from the hostname and path inputs; handles per-hostname listener mode selection.
-4. **Auto-onboard** — for each dedicated hostname: DNS pre-flight check, cert-manager `Certificate` CR apply, failed ACME Order purge, HTTP + HTTPS listener patch; for shared hostnames: named listener validation only.
-5. **Helm deploy** — `helm upgrade --install` against `s9genericchart-v2` (or a custom chart).
-6. **Tag** — writes the new semver tag back to the calling repo.
-
-**Listener modes**
-
-| Mode | When to use | What the onboarding step does |
-|---|---|---|
-| **Dedicated** (default) | Custom domains (`api-stg.zeenah.io`) | Creates HTTP + HTTPS listeners, issues a TLS certificate via cert-manager HTTP-01 |
-| **Shared / wildcard** | Internal subdomains (`myapp.sf9.io`, `myapp.talmaro.com`) | Validates the named shared listener exists; skips cert and listener creation entirely |
-
-**Key inputs**
+**Pipeline:** version → (optional NuGet) → build → deploy (`gateway-routing` renders values, `gateway-onboard` provisions listeners + cert, `helm-generic` deploys) → tag.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `app-name` | | (repo name) | Helm release name and Docker image name |
-| `namespace` | | `development` | Kubernetes deployment namespace |
+| `app-name` | | — | Helm release / image name |
+| `namespace` | | `development` | Kubernetes namespace |
 | `routing-mode` | | `gateway` | `gateway`, `ingress`, or `dual` |
-| `gateway-hostnames` | | `''` | Comma- or newline-separated hostnames for the HTTPRoute |
-| `gateway-section-name` | | `''` | **Global** shared listener name — all hosts attach to this one listener (legacy; use `gateway-section-names` for mixed deployments) |
-| `gateway-section-names` | | `''` | **Per-hostname** section names, one line per hostname aligned with `gateway-hostnames`. **Blank line** (no characters) = dedicated mode; non-empty line = shared listener name. All non-empty lines must be at the same indent level — see [Mixed listener mode](#mixed-listener-mode). |
-| `gateway-paths` | | `/` | Route paths (comma or newline) |
+| `gateway-hostnames` | | `''` | Comma/newline hostnames for the HTTPRoute |
+| `gateway-section-name` | | `''` | Single shared-listener name (all hosts attach to it) |
+| `gateway-section-names` | | `''` | Per-hostname section names, one line per hostname (blank line = dedicated mode) |
+| `gateway-paths` | | `''` | Route paths |
 | `gateway-parent-name` | | `public-gateway` | Gateway resource name |
-| `gateway-parent-namespace` | | `s9-dev-edge` | Namespace of the Gateway resource |
-| `gateway-auto-onboarding` | | `true` | Set `false` to skip cert + listener provisioning |
-| `gateway-cert-issuer-name` | | `letsencrypt-production-gateway` | cert-manager ClusterIssuer name |
-| `gateway-cert-wait` | | `true` | Block the step until the certificate becomes `Ready` |
-| `gateway-cert-wait-timeout-seconds` | | `600` | Max seconds to wait for cert readiness |
-| `container-registry` | | `ghcr.io` | Docker registry URL |
+| `gateway-parent-namespace` | | `s9-dev-edge` | Gateway resource namespace |
+| `gateway-auto-onboarding` | | `true` | Provision listeners + cert for dedicated hosts |
+| `gateway-cert-issuer-name` | | `letsencrypt-production-gateway` | cert-manager issuer |
+| `gateway-cert-wait` | | `true` | Wait for the certificate to become `Ready` |
 | `chart-name` | | `s9genericchart-v2` | Helm chart name |
-| `chart-repo` | | `https://charts.sf9.io` | Helm repository URL |
-| `helm-set-values` | | `''` | Extra non-sensitive `--set key=value` pairs |
-| `init-job-image` | | `''` | Optional pre-deploy DB migration Job image |
-| `environment` | | `Development` | Value set as `environment` in the chart |
-| `major-version` | | `1` | Semver major |
-| `minor-version` | | `0` | Semver minor |
+| `chart-repo` | | `https://charts.sf9.io` | Helm repo URL |
+| `init-job-image` | | `''` | Optional pre-deploy migration Job |
+| `helm-set-values` | | — | Extra non-secret `--set` values |
+| `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
-**Required secrets**
+**Secrets:** `registry-username`, `registry-password`, `kubeconfig`, `github-token`, `helm-set-secret-values`, `nuget-api-key`, `nuget-source`, `NUGET_PACKAGE_PAT`.
 
-| Secret | Description |
-|---|---|
-| `kubeconfig` | Base64-encoded kubeconfig (auto-onboarding + Helm deploy) |
-| `registry-username` | Container registry username |
-| `registry-password` | Container registry password / token |
-| `helm-set-secret-values` | Sensitive Helm values passed as `--set-string` (DB strings, API keys) |
+**Outputs:** `version`, `docker-image`, `helm-chart`, `nuget-version`.
 
-**Minimal example — dedicated hostname**
+**Listener modes**
+
+| Mode | When to use | What onboarding does |
+|---|---|---|
+| **Dedicated** (default) | Custom domains (`api-stg.zeenah.io`) | Creates HTTP + HTTPS listeners, issues a TLS cert via cert-manager HTTP-01 |
+| **Shared / wildcard** | Internal subdomains (`myapp.sf9.io`) | Validates the named shared listener exists; skips cert + listener creation |
 
 ```yaml
 jobs:
@@ -796,9 +359,7 @@ jobs:
       helm-set-secret-values: ${{ secrets.DEV_HELM_SECRET_VALUES }}
 ```
 
-The onboarding step will create `http-api-stg-myapp-io` and `https-api-stg-myapp-io` listeners on the gateway, issue a cert via Let's Encrypt HTTP-01, and pin the HTTPRoute to `sectionName: https-api-stg-myapp-io`.
-
-**Shared wildcard example (e.g. `*.sf9.io`)**
+**Shared wildcard (e.g. `*.sf9.io`):**
 
 ```yaml
 with:
@@ -808,18 +369,12 @@ with:
   gateway-section-name: https-wildcard-sf9-io
 ```
 
-The onboarding step skips cert and listener creation entirely; it only validates that `https-wildcard-sf9-io` exists on the gateway. The wildcard cert covers `*.sf9.io` already.
-
 ##### Mixed listener mode
 
-One release, two hostnames, different modes.
-
-**Option A — blank line for dedicated (simplest, always safe):**
+One release, two hostnames, different modes. A **blank line** in `gateway-section-names` means dedicated; a non-empty line names a shared listener. Keep every non-empty line at the same indentation (YAML sets block-scalar indent from the first non-empty line).
 
 ```yaml
 with:
-  app-name: zeenah-api
-  namespace: zeenah-dev
   gateway-hostnames: |
     api-stg.zeenah.io
     zeenah-api.sf9.io
@@ -828,38 +383,160 @@ with:
     https-wildcard-sf9-io
 ```
 
-The first line is completely empty → dedicated for `api-stg.zeenah.io`. The second line → shared listener for `zeenah-api.sf9.io`.
+The first (blank) line → dedicated for `api-stg.zeenah.io` (gets its own listeners + cert); the second → shared listener for `zeenah-api.sf9.io` (validated only). When two hosts share one section name the pipeline emits a single `parentRefs` entry (the Gateway API forbids duplicate `(name, namespace, sectionName)` tuples).
 
-**Option B — comment-as-entry (annotated, same indentation required):**
+> **DNS / Cloudflare proxy:** HTTP-01 needs the hostname to resolve directly to the gateway IP. With Cloudflare, set the record to **DNS-only (grey cloud)** while the cert is issued; re-enable the orange cloud once it is `Ready` (the pipeline skips the DNS pre-flight when a valid cert already exists).
+
+---
+
+#### `helm-deploy-values.yml`
+
+Deploy-only: deploys an already-published chart from a ChartMuseum-style repo using a caller-supplied values file plus friendly ingress/service inputs. Does not build, package, or tag.
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `release-name` | ✅ | — | Helm release name |
+| `chart-name` | ✅ | — | Chart name |
+| `chart-repo` | ✅ | — | Classic (ChartMuseum-style) Helm repo URL |
+| `namespace` | ✅ | — | Kubernetes namespace |
+| `values-file` | | `values.yaml` | Values file in the caller repo (applied if present) |
+| `chart-version` | | `''` | Empty = latest published; set to pin |
+| `environment` | | `''` | Helm `environment=` value (not the GitHub Environment) |
+| `gh-environment` | | `''` | Optional GitHub Environment for protection/secrets |
+| `ingress-hosts` / `ingress-paths` / `ingress-tls-secrets` | | `''` | Ingress config (hosts zipped with TLS secrets by index) |
+| `image-tag` | | `''` | Image tag |
+| `helm-version` | | `v4.2.0` | Helm CLI version |
+| `kubectl-version` | | `v1.33.0` | kubectl CLI version |
+
+**Secrets:** `kubeconfig` (or `kubeconfig64` alias), `helm-set-secret-values`.
+
+---
+
+### Helm Chart CI/CD
+
+---
+
+#### `gateway-chart-cicd.yml`
+
+CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git tags) → `helm lint --strict` + routing/ConfigMap render assertions (parsed with `yq`) → package → push to ChartMuseum → tag origin. The version comes from `determine-semver`, not the run number.
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `chart-path` | | `chart` | Chart directory |
+| `chartmuseum-url` | | `https://charts.sf9.io/api/charts` | ChartMuseum upload endpoint |
+| `helm-version` | | `v4.2.2` | Helm CLI version |
+| `major-version` / `minor-version` | | `1` / `0` | SemVer components |
+| `update-dependencies` | | `true` | `helm package --dependency-update` |
+| `validate-routing` | | `true` | Validate default/ingress/gateway/dual rendering |
+| `validate-configmap` | | `true` | Validate ConfigMap gating + merged keys |
+
+**Secrets:** `registry-username`, `registry-password` (required); `github-token` (optional — used by the tag job, falls back to `GITHUB_TOKEN`).
+
+**Outputs:** `version`, `chart-name`, `chart-package`, `chart-repo-url`.
+
+> **TODO — migrate to OCI.** ChartMuseum HTTP upload is the legacy distribution path. Publishing via an OCI registry (`helm push chart.tgz oci://...`), as `reusable-service-cicd.yml` already supports, gives immutable, digest-pinned, signable charts and removes the standalone ChartMuseum dependency.
+
+---
+
+### Mobile · iOS & Android
+
+Both mobile workflows have a **build** job (runs unconditionally) and a **release** job (`release_with_environment`) gated by `if: release-environment != '' && !disable-release` and bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the Android/iOS starter templates).
+
+---
+
+#### `ios-build.yml`
+
+Builds, signs, and archives a React Native / native iOS app on a macOS runner, exports an IPA, and uploads it to TestFlight from `ubuntu-latest` via the App Store Connect API (`apple-actions/upload-testflight-build@v5`).
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `workspace` | ✅ | — | Path to `.xcworkspace` |
+| `scheme` | ✅ | — | Xcode scheme to archive |
+| `configuration` | | `Release` | Build configuration |
+| `xcode-version` | | `''` | Xcode major or major.minor (e.g. `16.4`) |
+| `macos-runner` | | `macos-latest` | macOS runner label |
+| `node-version` | | `24` | Node.js version (React Native) |
+| `package-manager` | | `yarn` | `yarn` or `npm` |
+| `ios-dir` | | `ios` | iOS directory for pod operations |
+| `clean-reinstall-pods` | | `false` | `pod deintegrate` + `pod install --repo-update` |
+| `enable-ccache` | | `true` | ccache for ObjC/C++ pod compilation |
+| `ruby-version` | | `''` | Ruby version (empty disables Ruby setup) |
+| `use-bundler` | | `false` | Install gems via Bundler (needs `ruby-version`) |
+| `marketing-prefix` | | `1.0` | Marketing version start (X.Y or X.Y.Z) |
+| `release-environment` | | `ios-staging` | GitHub Environment for the release job |
+| `disable-release` | | `false` | Build only; skip TestFlight upload |
+
+**Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64`, `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` (and optional `ios-team-id`).
+
+**Outputs:** `version`, `build-number`, `ipa-file`.
 
 ```yaml
-  gateway-section-names: |
-    # api-stg.zeenah.io -> dedicated
-    https-wildcard-sf9-io # zeenah-api.sf9.io -> shared
+jobs:
+   build-and-release:
+    uses: simplify9/.github/.github/workflows/ios-build.yml@main
+    with:
+      workspace: ios/App.xcworkspace
+      scheme: App
+      xcode-version: "26"
+      release-environment: ios-production
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
 ```
 
-The comment line strips to `""` → dedicated. Both lines are at the **same indentation level** — this is required.
+**Notes:** manual signing only (automatic signing needs an interactive Xcode session); CocoaPods spec repo + Pods dir are cached on `Podfile.lock`; ccache speeds ObjC/C++ rebuilds (no Swift benefit). Use the **iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
 
-> **YAML indentation gotcha:** YAML sets block scalar indentation from the **first non-empty line**. Every non-empty line after it must be at the same or greater indentation. If you put a deeply-indented comment above a less-indented section name, YAML treats the second line as outside the block and raises a parse error. Keep all non-empty lines at a consistent depth. When in doubt, use blank lines (Option A).
+---
 
-The Helm chart receives two `parentRefs` entries so the single HTTPRoute attaches to both the dedicated `https-api-stg-zeenah-io` listener and the wildcard `https-wildcard-sf9-io` listener. The onboarding step creates listeners and a cert only for `api-stg.zeenah.io`; it validates `https-wildcard-sf9-io` exists for `zeenah-api.sf9.io`.
+#### `android-build.yml`
 
-**Three hostnames — first dedicated, two on the same wildcard:**
+Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishes it to Google Play (`r0adkll/upload-google-play@v1`).
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `app-id` | ✅ | — | Android `applicationId` (package name) |
+| `app-slug` | | `app` | Output AAB filename slug |
+| `gradle-task` | | `bundleRelease` | Gradle task |
+| `version-prefix` | | `1.0.0` | Base version (X.Y or X.Y.Z) |
+| `version-code-offset` | | `80000` | Added to `github.run_number` for versionCode |
+| `java-version` | | `17` | Java version (temurin) |
+| `node-version` | | `24` | Node.js version (React Native) |
+| `package-manager` | | `yarn` | `yarn` or `npm` |
+| `build-root-directory` | | `android` | Gradle project root |
+| `use-jetifier` | | `true` | Run `npx jetify` (AndroidX migration) |
+| `play-track` | | `internal` | `internal`, `alpha`, `beta`, `production` |
+| `changes-not-sent-for-review` | | `false` | Use `changesNotSentForReview` (internal tracks) |
+| `release-environment` | | `android-staging` | GitHub Environment for the release job |
+| `disable-release` | | `false` | Build only; skip Play upload |
+
+**Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
+
+**Outputs:** `version-name`, `version-code`, `aab-file`.
 
 ```yaml
-gateway-hostnames: |
-  api-stg.zeenah.io
-  zeenah-api.sf9.io
-  api-stglol.sf9.io
-gateway-section-names: |
-  # dedicated
-  https-wildcard-sf9-io
-  https-wildcard-sf9-io
+jobs:
+  build-and-release:
+    uses: simplify9/.github/.github/workflows/android-build.yml@main
+    with:
+      app-id: com.mycompany.myapp
+      gradle-task: bundleRelease
+      version-prefix: "2.0.0"
+      version-code-offset: "80000"
+      release-environment: android-production
+      play-track: production
+    secrets:
+      android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      android-keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
 ```
 
-When two hosts share the same section name the pipeline emits a **single** `parentRefs` entry for that listener — the Gateway API forbids duplicate `(name, namespace, sectionName)` tuples. The onboarding step still validates the listener once per host.
-
-> **DNS and Cloudflare proxy:** HTTP-01 ACME challenge requires the hostname to resolve directly to the gateway IP. If using Cloudflare, set the record to **DNS-only mode (grey cloud)** while the certificate is being issued. Once the certificate is `Ready`, you can re-enable the orange cloud — the pipeline detects an already-ready certificate and skips the DNS pre-flight check on subsequent runs.
+**Notes:** Gradle uses `gradle/actions/setup-gradle@v5` (do not use the archived `gradle/gradle-build-action`, and do not add `cache: gradle` to `setup-java` — it conflicts). The workflow sets `org.gradle.caching=true` itself, so callers no longer need to. NDK `27.1.12297006` (r27b LTS) is pinned and installed via `sdkmanager` (not `actions/cache` — the Android SDK dir is root-owned). Use the **Android App CI/CD** starter template for a `workflow_dispatch` entry point.
 
 ---
 
@@ -871,88 +548,67 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-### Versioning
+All 18 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`) and `gateway-routing` (`render.sh`) keep logic in a sibling script; the rest is inline bash.
+
+### Versioning & Tagging
 
 | Action | Purpose | Key inputs | Key outputs |
 |---|---|---|---|
-| `determine-semver` | Compute next `major.minor.patch` from git tags | `major`, `minor` | `version` (e.g. `1.4.7`) |
-| `tag-github-origin` | Create and push a git tag via GitHub API | `tag`, `sha`, `repository`, `github-token` | — |
-
-`determine-semver` reads all git tags matching `major.minor.*`, finds the highest patch, increments it by 1. Starts from `.0` when no matching tag exists.
+| `determine-semver` | Compute next `major.minor.patch` from git tags | `major`, `minor`, `release-branch`, `current-ref`, `build-id` | `version`, `git-tag`, `is-release` |
+| `tag-github-origin` | Create a git tag via the GitHub REST API (no checkout) | `github-token`, `repository`, `tag`, `sha` | `created`, `ref` |
 
 ### Docker
 
 | Action | Purpose | Key inputs | Key outputs |
 |---|---|---|---|
-| `docker-build-push` | Build + push with BuildKit cache, multi-platform support, OCI labels | `image-name`, `version`, `username`, `password` | `image-tags`, `image-digest` |
+| `docker-build-push` | Build + push (multi-platform via Buildx/QEMU) up to three tags | `image-name`, `version`, `username`, `password`, `registry`, `platforms` | `image-tags`, `image-digest` |
 
 ### Helm
 
 | Action | Purpose | Key inputs |
 |---|---|---|
-| `helm-deploy` | Profile-based deploy; supports `init_job_image` for pre-deploy DB migration Jobs | `app_name`, `namespace`, `kubeconfig_data` |
-| `helm-deploy-s9generic` | Deploy `s9genericchart` from `https://charts.sf9.io`; handles `set-values` (`--set`) and `set-string-values` (`--set-string`) separately | `chart-name`, `chart-version`, `kubeconfig` |
-| `helm-generic` | Deploy a Helm chart (`helm upgrade --install`) with optional pre-deploy DB migration Job. Used by the `generic-chart-helm` and `generic-gateway-helm-template` reusable workflows | `app_name`, `namespace`, `kubeconfig_data` |
-| `helm-package-push` | Package chart and push to OCI registry | `chart-path`, `chart-name`, `chart-version` |
+| `helm-generic` | `helm upgrade --install` of `s9genericchart` (default) + optional pre-deploy migration Job. Helm 4. snake_case inputs | `app_name`, `namespace`, `kubeconfig_data`, `extra_set_values`, `secret_set_values`, `init_job_image` |
+| `helm-deploy` | Deploy from OCI **or** ChartMuseum (`chart-source-type`) | `chart-name`, `repository`, `kubeconfig`, `chart-source-type`, `chart-repo-url` |
+| `helm-deploy-s9generic` | Deploy from OCI **or** a local chart dir (`chart-path`) with failure diagnostics | `chart-name`, `chart-path`, `kubeconfig` |
+| `helm-package-push` | Package + publish to OCI or ChartMuseum | `chart-path`, `chart-name`, `version`, `publish-method` |
 
-> [!WARNING]
-> **Maintenance smell — three overlapping deploy actions.** `helm-deploy`, `helm-deploy-s9generic`, and
-> `helm-generic` are effectively **duplicates**: all three wrap `helm upgrade --install` and re-implement the
-> same concerns — kubeconfig decoding (raw-or-base64) and cleanup, Helm/kubectl install, atomic rollback,
-> `--set` / `--set-string` value handling, and release verification. They diverge only in incidental details,
-> which is exactly what makes them costly to maintain:
->
-> | Concern | `helm-deploy` | `helm-deploy-s9generic` | `helm-generic` |
-> |---|---|---|---|
-> | Input naming | `kebab-case` | `kebab-case` | `snake_case` |
-> | Chart source | OCI / ChartMuseum | OCI / local path | Helm repo (`charts.sf9.io`) |
-> | Helm version | detects 3 vs 4 | detects 3 vs 4 | **pinned to Helm 4** |
-> | Pre-deploy migration Job | yes | no | yes |
-> | Secret values | `secret-set-string-values` | `secret-set-string-values` | `secret_set_values` |
->
-> **Consequence:** every fix or hardening change (e.g. the `--set-string` secret path, kubeconfig handling,
-> Helm 4 `--wait` semantics) has to be applied — and tested — in three places, and they drift apart over time
-> with inconsistent input names and behaviour. This is a classic [Don't-Repeat-Yourself](https://en.wikipedia.org/wiki/Don%27t_repeat_yourself)
-> violation and a real source of bugs.
->
-> **Recommended direction:** **consolidate these into a single, parameterized composite action** (e.g. one
-> `helm-deploy` action) that covers every chart source (OCI, ChartMuseum, Helm repo, local path) and makes the
-> migration Job and chart conventions optional inputs. Standardize on one input-naming convention, one secret
-> path (`--set-string`), and one Helm-version strategy. Keep the old action names as thin shims that forward to
-> the consolidated action (or alias them) so existing callers — the reusable workflows and any external
-> `@main` consumers — are not broken during migration. This removes far more long-term maintenance than any
-> per-action tweak, and is preferable to replacing them with an off-the-shelf marketplace action (none of which
-> cover the migration-Job-then-deploy orchestration or the `s9genericchart` conventions these encode).
+> ⚠️ **Three overlapping deploy actions.** `helm-deploy`, `helm-deploy-s9generic`, and `helm-generic` all wrap `helm upgrade --install` and re-implement the same concerns (kubeconfig handling, atomic rollback, `--set`/`--set-string`, verification), differing only in input naming, chart source, and migration-Job support. Every hardening fix must be applied in three places. The intended direction is to consolidate them into a single parameterized deploy action and keep the old names as thin shims. See [AGENTS.md](./AGENTS.md#helm).
+
+### Gateway API (Cilium)
+
+| Action | Purpose | Key outputs |
+|---|---|---|
+| `gateway-routing` | Render gateway/ingress/configmap Helm values + host/section lists (pure, no cluster access) | `values-file`, `gateway-host-list`, `gateway-section-names-list` |
+| `gateway-onboard` | Ensure parent Gateway listeners + cert-manager Certificates exist before deploy (cluster-mutating) | — |
 
 ### .NET
 
-| Action | Purpose | Key inputs |
+| Action | Purpose | Key outputs |
 |---|---|---|
-| `dotnet-build` | `dotnet restore` → `dotnet build` → optional `dotnet test`. Detects solution files automatically. | `dotnet-version`, `projects`, `run-tests` |
-| `dotnet-pack-push` | `dotnet pack` → `dotnet nuget push` | `projects`, `package-version`, `nuget-api-key` |
+| `dotnet-build` | Resolve `.sln`/glob, then restore → build → optional test | `build-target` |
+| `dotnet-pack-push` | `dotnet pack --no-build` → `nuget push --skip-duplicate` (empty = skip) | `packages-pushed`, `package-paths` |
 
 ### Cloudflare
 
-| Action | Purpose | Key inputs |
+| Action | Purpose | Key outputs |
 |---|---|---|
-| `setup-cloudflare-domain` | Configure a custom domain; `fail-on-error: false` makes it non-blocking | `api-token`, `account-id`, `project-name`, `custom-domain` |
-| `generate-wrangler-config` | Generate `wrangler.toml` dynamically | `PROJECT_NAME`, `ROUTE`, `COMPATIBILITY_DATE`, `BUILD_FOR_OPENNEXT` |
+| `generate-wrangler-config` | Generate `wrangler.toml` (plain Workers, OpenNext, static assets, SPA) | `config-path` |
+| `setup-cloudflare-domain` | Add a custom domain to a Pages project (`fail-on-error: false` = non-blocking) | `domain-status` |
 
 ### iOS
 
-| Action | Purpose | Key inputs |
-|---|---|---|
-| `ios-install-cert` | Import `.p12` into a temporary keychain | `p12Base64`, `p12Password` |
-| `ios-install-profile` | Install `.mobileprovision` to `~/Library/MobileDevice/Provisioning Profiles/` | `provisioningProfileBase64` |
-| `xcode-setup` | CocoaPods install + optional Xcode version selector | `xcode-version`, `ios-dir` |
-| `xcode-build` | `xcodebuild archive` with manual signing | `workspace`, `scheme`, `configuration`, `archivePath`, `provisioningProfileUuid`, `developmentTeam`, `keychainPath` |
-| `xcode-export` | `xcodebuild -exportArchive` → `.ipa` | `archivePath`, `exportPath`, `exportOptionsPlist` |
+| Action | Purpose |
+|---|---|
+| `ios-install-cert` | Import a `.p12` into a temporary keychain (`p12Base64`, `p12Password`) |
+| `ios-install-profile` | Install a `.mobileprovision`, extract UUID/Name (`profileBase64`) |
+| `xcode-build` | `xcodebuild archive` with manual signing (`workspace`, `scheme`, `archivePath`, `developmentTeam`, `provisioningProfileUuid`, `keychainPath`) |
+| `xcode-export` | `xcodebuild -exportArchive` → `.ipa` (`archivePath`, `exportOptionsPlist`, `exportPath`) |
 
-### Android
+### Shared
 
-| Action | Purpose | Notes |
-|---|---|---|
-| `upload-google-play-release` | Upload AAB to Google Play via Android Publisher API | **Docker-based** (has `Dockerfile` + `play_upload.py`). `service_account_json` must come from secrets. |
+| Action | Purpose |
+|---|---|
+| `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
 
 ---
 
@@ -965,41 +621,37 @@ Caller repository workflow
     └── Reusable workflow  (workflows/*.yml)
             ├── Composite action  (actions/determine-semver)
             ├── Composite action  (actions/docker-build-push)
-            ├── Composite action  (actions/helm-package-push)
-            └── Composite action  (actions/helm-deploy-s9generic)
+            ├── Composite action  (actions/helm-generic | helm-deploy)
+            └── Composite action  (actions/write-job-summary)
 ```
 
-Callers only call **reusable workflows**. Composite actions are internal building blocks and are not called directly by callers (except for simple utilities like `determine-semver` or `tag-github-origin`).
+Callers only call **reusable workflows**. Composite actions are internal building blocks (except simple utilities like `determine-semver` / `tag-github-origin`). Workflows reference actions via the external `simplify9/.github/.github/actions/<name>@main` path.
 
 ### Versioning — `determine-semver`
 
-Every pipeline that produces a deployable artifact computes its version with `determine-semver`:
-
-1. Fetches all git tags from the calling repo.
-2. Finds the highest existing `major.minor.N` tag.
-3. Increments `N` → outputs `major.minor.(N+1)`.
-4. After a successful deploy, `tag-github-origin` writes the tag back to the repo so the next run can increment from it.
+Every pipeline that produces a deployable artifact computes its version with `determine-semver`: it reads the highest existing `major.minor.N` git tag and outputs `major.minor.(N+1)`. After a successful deploy/publish, `tag-github-origin` writes the tag back so the next run increments from it. Branch behavior is controlled by `release-branch: github.event.repository.default_branch` — the default branch yields a clean release version + tag; other branches yield a qualified prerelease (`x.y.z-<branch>.<run>`).
 
 ### Branch-to-Environment Mapping
 
-| Branch | Environment | Deploy flag to enable |
-|---|---|---|
-| `development` | Development | `deploy-to-development: true` |
-| `staging` | Staging | `deploy-to-staging: true` |
-| `main` / `master` | Production | `deploy-to-production: true` |
+Per-branch gating lives in the **caller** (template), not inside the reusable workflows:
 
-Deploy jobs are **disabled by default**. You must set the corresponding flag to `true`.
+| Branch | Typical use | How it's wired |
+|---|---|---|
+| `staging` | Staging/dev | Caller job `if: github.ref == 'refs/heads/staging'` → staging GitHub Environment |
+| `main` / `master` | Production | Caller job `if: github.ref == 'refs/heads/main'` → production GitHub Environment |
+
+Mobile workflows additionally gate the release job on `release-environment != '' && !disable-release`.
 
 ### Helm Values vs Helm Secret Values
 
-This is the most important security pattern in the repo. **Never put secrets into `helm-set-values`.**
+The most important security pattern in the repo. **Never put secrets into `helm-set-values`.**
 
 | Parameter | Passed as | Helm flag | Use for |
 |---|---|---|---|
 | `helm-set-values` | Workflow **input** | `--set` | Non-sensitive config: replicas, ingress, environment label |
 | `helm-set-secret-values` | Workflow **secret** | `--set-string` | Sensitive data: DB connection strings, API keys |
 
-`--set-string` bypasses shell parsing and prevents characters like `=`, `SSL:`, `//` in connection strings from being misinterpreted.
+`--set-string` bypasses Helm type coercion and prevents `=`, `SSL:`, `//` in connection strings from being misinterpreted.
 
 ```yaml
 # Correct
@@ -1013,131 +665,91 @@ with:
   helm-set-values: 'db=${{ secrets.DATABASE_URL }}'
 ```
 
-### Artifact Transfer Pattern
-
-When a `build` job must pass a file to a `deploy` job:
-
-- Upload with `actions/upload-artifact@v7`, specify a `name:`.
-- Download with `actions/download-artifact@v8` using the same `name:`.
-- Set `retention-days: 1` — artifacts are only needed within the same pipeline run.
-- Always download by `name:`, never by `artifact-ids:`.
-
 ### Pinned Tool Versions
 
 | Tool | Pinned version |
 |---|---|
-| Helm CLI | `v4.2.0` |
-| kubectl CLI | `v1.33.0` |
-| `actions/checkout` | `@v6` |
+| `actions/checkout` | `@v7` |
 | `actions/setup-node` | `@v6` |
 | `actions/setup-dotnet` | `@v5` |
-| `actions/setup-java` | `@v4` |
+| `actions/setup-java` | `@v5` |
 | `actions/upload-artifact` | `@v7` |
 | `actions/download-artifact` | `@v8` |
+| `actions/cache` | `@v5` (some CF workflows `@v4`) |
 | `azure/setup-helm` | `@v5` |
 | `azure/setup-kubectl` | `@v5` |
 | `docker/setup-buildx-action` | `@v4` |
+| `docker/setup-qemu-action` | `@v4` |
 | `docker/login-action` | `@v4` |
 | `docker/metadata-action` | `@v6` |
 | `docker/build-push-action` | `@v7` |
 | `cloudflare/wrangler-action` | `@v4` |
-| `gradle/actions/setup-gradle` | `@v4` |
+| `gradle/actions/setup-gradle` | `@v5` |
+| `ruby/setup-ruby` | `@v1` |
+| `maxim-lobanov/setup-xcode` | `@v1` |
+| `apple-actions/upload-testflight-build` | `@v5` |
+| `r0adkll/upload-google-play` | `@v1` |
 
-Do not upgrade `gradle/actions/setup-gradle` to v5 (requires runner ≥ 2.327.1) or v6 (proprietary commercial caching component).
-- Do not add `cache: gradle` to `actions/setup-java` — this secretly invokes `gradle/gradle-build-action` and conflicts with `setup-gradle`, causing the `setup-gradle` cache restore to be skipped.
+Helm/kubectl CLI: the deploy/package actions default to `latest`; some workflows pin (`helm-deploy-values.yml`: Helm `v4.2.0` / kubectl `v1.33.0`; `gateway-chart-cicd.yml`: Helm `v4.2.2`). `gradle/actions/setup-gradle` is pinned to `@v5`; do not switch to the archived `gradle/gradle-build-action` and do not add `cache: gradle` to `setup-java` (it conflicts with `setup-gradle`).
 
 ---
 
 ## Troubleshooting
 
-### Deploy jobs show as "skipped"
+### Deploy job shows as "skipped"
 
-- Set `deploy-to-development: true` (or staging/production) on the calling workflow.
-- Push to the correct branch: `development` for dev, `staging` for staging, `main`/`master` for production.
-- Confirm the `kubeconfig` secret is set and base64-encoded correctly.
-
-### Wrong image in Kubernetes pods
-
-Set `helm-image-repo` explicitly — the default derives from `container-registry/image-name` which may differ from what your chart expects:
-
-```yaml
-with:
-  helm-image-repo: registry.digitalocean.com/my-namespace/my-api
-```
+- For `reusable-service-cicd.yml`, set `deploy: true` (publishing happens regardless; deploying is opt-in).
+- For mobile workflows, the release job needs a non-empty `release-environment` and `disable-release: false`.
+- Confirm the relevant kubeconfig secret is set and base64-encoded (`kubeconfig` for ingress-nginx, `kubeconfig-gateway` for gateway-api).
 
 ### Build directory not found (Vite / Next.js)
 
-Set the correct output directory:
-- Vite projects: `build-directory: dist`
-- Create React App: `build-directory: build`
-- Next.js static export: `build-directory: out`
-
-### Domain setup fails (Cloudflare)
-
-Set `fail-on-domain-error: false` to treat domain setup as non-blocking:
-
-```yaml
-with:
-  fail-on-domain-error: false
-```
+- Vite (`vite-cloudflare-worker.yml`): set `assets_dir: dist`.
+- Next.js (`next-cloudflare-worker.yaml`): default `assets_dir` is `.open-next/assets` — change only if your build differs.
 
 ### Helm parse error: "SSL: command not found" or malformed `--set` value
 
-A secret value contains special characters being parsed by the shell. Move it from `helm-set-values` to `helm-set-secret-values` (passed as a workflow secret, applied with `--set-string`).
+A secret value contains special characters being parsed by the shell. Move it from `helm-set-values` to `helm-set-secret-values` (a workflow secret, applied with `--set-string`).
 
 ### iOS: "No matching provisioning profile"
 
-Confirm the provisioning profile UUID matches the bundle ID and team ID. Certificates must be imported before calling `xcode-build` — use `ios-install-cert` first.
+Confirm the provisioning profile matches the bundle ID and team ID. Manual signing is mandatory in CI; the certificate is imported into a temporary keychain before the archive step.
 
 ### Android versionCode conflicts on Play Console
 
-Increase `version-code-offset`. The default `80000` prevents collisions when migrating from another CI system with a lower run number sequence. Set it above your old system's last published versionCode.
+Increase `version-code-offset` (default `80000`) above your previous CI system's last published versionCode.
 
-### Certificate issuance times out or stays pending (Gateway API)
+### Certificate issuance times out / stays pending (Gateway API)
 
-The pipeline includes a DNS pre-flight check and an ACME Order purge to handle the most common causes:
+The pipeline runs a DNS pre-flight and purges failed ACME Orders. The two most common causes:
 
-**DNS not pointing to the gateway:**  
-The pre-flight runs `dig +short <hostname>` and fails fast with an actionable message if no A record exists or if the resolved IP does not match the gateway. Fix: create the A record before running the pipeline.
-
-**Cloudflare orange-cloud proxy:**  
-cert-manager's HTTP-01 self-check cannot traverse Cloudflare's proxy (hairpin NAT on DigitalOcean). The pre-flight detects this and prints the Cloudflare IPs vs the expected gateway IP. Fix: set the DNS record to **DNS-only (grey cloud)** for the initial certificate issuance. Once the cert is `Ready`, re-enable the orange cloud — the pre-flight is skipped when a valid cert already exists.
-
-**cert-manager backoff after a previously failed Order:**  
-If you fix DNS and re-run without deleting the failed cert-manager Order, cert-manager waits out exponential backoff (up to ~30 min). The pipeline automatically detects and deletes `errored` or `invalid` Orders so cert-manager retries immediately.
+- **DNS not pointing to the gateway** — create the A record before running.
+- **Cloudflare orange-cloud proxy** — cert-manager's HTTP-01 self-check can't traverse the proxy; set the record to **DNS-only (grey cloud)** for issuance, then re-enable once `Ready`.
 
 ### kubeconfig not working
 
-Ensure the kubeconfig is **base64-encoded** before storing it as a secret:
+Ensure it is base64-encoded before storing as a secret:
 
 ```sh
-# Linux
-base64 -w 0 ~/.kube/config
-
-# macOS
-base64 -b 0 ~/.kube/config
+base64 -w 0 ~/.kube/config   # Linux
+base64 -b 0 ~/.kube/config   # macOS
 ```
+
+(Workflows also accept raw-YAML kubeconfig; both are auto-detected.)
 
 ---
 
 ## Contributing
 
-1. Fork this repository and create a feature branch.
-2. Test your changes by calling the workflow/action from a separate repository before merging.
-3. Follow all conventions in [AGENTS.md](./AGENTS.md) — pinned action versions, composite action shell requirements, secrets vs inputs.
-4. Open a pull request with a description of what changed and which callers are affected.
+1. Create a feature branch.
+2. Test changes by calling the workflow/action from a separate repo on a branch (point a caller at `@<branch>`) and watching the Actions run — there is no local test runner.
+3. Follow all conventions in [AGENTS.md](./AGENTS.md) — pinned action versions, the 4-pillar log framework, composite-action shell requirements, and secrets-vs-inputs.
+4. If you change a workflow that has a starter template, update the paired `workflow-templates/<name>.yml` and `.properties.json`.
+5. Update both `README.md` and `AGENTS.md` in the same change.
 
 **Key rules:**
 - Every `run:` step in a composite action must have `shell: bash`.
-- All new inputs must have `description:` and a sensible `default:` or `required: true`.
-- Do not add `on: push:` or `on: pull_request:` triggers to files in `workflows/`.
-- All deploy jobs default to `false`.
+- All new inputs need `description:` and a sensible `default:` or `required: true`.
+- Do not add `on: push:` / `on: pull_request:` triggers to files in `.github/workflows/`.
 - Secrets go under `on.workflow_call.secrets:`, never as inputs.
-
-See [AGENTS.md](./AGENTS.md) for the full contribution guide.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE) for details.
+- Optional deploys are gated (`deploy: false`) or bound to a GitHub Environment.

@@ -940,7 +940,9 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename_ipa.outputs.ipa_file }}
           compression-level: 0
-          retention-days: 14
+          # Transient hand-off to the release job in the same run; 1 day (the
+          # minimum) is plenty and keeps Actions storage near-zero.
+          retention-days: 1
 
       - name: Build failure
         if: failure()
@@ -955,54 +957,47 @@ jobs:
           echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — IPA renamed:           ${CHECKPOINT_3_STATUS:-❌ Not reached}"
 
+      - name: Collect ccache stats
+        if: ${{ always() && inputs.enable-ccache }}
+        shell: bash
+        run: |
+          {
+            echo "CCACHE_STATS_SUMMARY<<CCACHE_STATS_EOF"
+            echo ""
+            echo "## ⚡ ccache Stats"
+            echo ""
+            echo '```text'
+            ccache --show-stats || true
+            echo '```'
+            echo "CCACHE_STATS_EOF"
+          } >> "$GITHUB_ENV"
+
       - name: Build summary
         if: always()
-        shell: bash
-        env:
-          JOB_STATUS: ${{ job.status }}
-          WORKSPACE: ${{ inputs.workspace }}
-          SCHEME: ${{ inputs.scheme }}
-          RUNNER_OS: ${{ runner.os }}
-          MACOS_RUNNER: ${{ inputs.macos-runner }}
-          XCODE_VERSION: ${{ inputs.xcode-version }}
-          NODE_VERSION: ${{ inputs.node-version }}
-          REF_NAME: ${{ github.ref_name }}
-          ACTOR: ${{ github.actor }}
-          ENABLE_CCACHE: ${{ inputs.enable-ccache }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🍎 iOS Build — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Workspace | \`${WORKSPACE}\` |"
-            echo "| Scheme | \`${SCHEME}\` |"
-            echo "| Runner | ${RUNNER_OS} (${MACOS_RUNNER}) |"
-            echo "| Xcode | ${XCODE_VERSION} |"
-            echo "| Node.js | ${NODE_VERSION} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Signing cert installed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Archive created | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-            echo "| 3 | IPA renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${ENABLE_CCACHE}" == "true" ]]; then
-            {
-              echo ""
-              echo "## ⚡ ccache Stats"
-              echo ""
-              echo '```text'
-              ccache --show-stats || true
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🍎'
+          title: iOS Build
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Workspace | `${{ inputs.workspace }}` |
+            | Scheme | `${{ inputs.scheme }}` |
+            | Runner | ${{ runner.os }} (${{ inputs.macos-runner }}) |
+            | Xcode | ${{ inputs.xcode-version }} |
+            | Node.js | ${{ inputs.node-version }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Triggered by | ${{ github.actor }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Signing cert installed | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Archive created | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | IPA renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            ${{ env.CCACHE_STATS_SUMMARY }}
   release_with_environment:
     name: Release
     # Upload is a pure App Store Connect REST API call (apple-actions with
@@ -1188,34 +1183,22 @@ jobs:
 
       - name: Release summary
         if: always()
-        shell: bash
-        env:
-          JOB_STATUS: ${{ job.status }}
-          VERSION: ${{ needs.build.outputs.version }}
-          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
-          UPLOAD_TOOL: ${{ inputs.upload-tool }}
-          REF_NAME: ${{ github.ref_name }}
-          ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🍎 iOS TestFlight Upload — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` (build: ${BUILD_NUMBER}) |"
-            echo "| Upload tool | ${UPLOAD_TOOL} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | TestFlight upload | ${UPLOAD_CHECKPOINT_STATUS:-⏭️ Skipped} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🍎'
+          title: iOS TestFlight Upload
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.build.outputs.version }}` (build: ${{ needs.build.outputs.build-number }}) |
+            | Upload tool | ${{ inputs.upload-tool }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Triggered by | ${{ github.actor }} |
+            | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | TestFlight upload | ${{ env.UPLOAD_CHECKPOINT_STATUS || '⏭️ Skipped' }} |

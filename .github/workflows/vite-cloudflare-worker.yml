@@ -1,3 +1,39 @@
+# =============================================================================
+# Deploy Vite to Cloudflare Workers (static SPA)
+# =============================================================================
+# Reusable workflow that builds a Vite single-page app and deploys it to
+# Cloudflare Workers static assets.
+#
+# SPA routing is handled natively by Cloudflare via
+# `not_found_handling = "single-page-application"`, so NO custom Worker script
+# is generated or invoked — unmatched routes are served `index.html` straight
+# from the edge (free, no Worker invocation).
+#
+# Pipeline:
+#   install -> lint (optional) -> pre-build (optional) -> build ->
+#   generate & validate wrangler.toml -> deploy.
+#
+# Inputs (see `on.workflow_call.inputs` for full list, types & defaults):
+#   node_version, package_manager (npm|yarn|pnpm), install_args, run_lint,
+#   build_script, compatibility_date, route (required), project_name (required),
+#   environment (required), assets_dir, pre_build_commands.
+#
+# Secrets:
+#   cloudflare_api_token   (required)  Cloudflare API token (Workers + DNS).
+#   cloudflare_account_id  (required)  Cloudflare Account ID.
+#
+# Usage:
+#   jobs:
+#     deploy:
+#       uses: simplify9/.github/.github/workflows/vite-cloudflare-worker.yml@main
+#       with:
+#         route: example.com
+#         project_name: my-app
+#         environment: production
+#       secrets:
+#         cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+#         cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+# =============================================================================
 name: Deploy Vite to Cloudflare Workers
 
 on:
@@ -14,7 +50,7 @@ on:
         default: "yarn"
         type: string
       install_args:
-        description: Extra args for install (e.g., --frozen-lockfile)
+        description: "Extra args for install (e.g., --frozen-lockfile). Applies to yarn/pnpm only; npm always uses `npm ci` (which already enforces a frozen lockfile) and ignores this."
         required: false
         default: "--frozen-lockfile"
         type: string
@@ -72,20 +108,40 @@ jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Prevent overlapping deploys to the same project/environment from racing.
+    # Do not cancel an in-flight deploy mid-rollout.
+    concurrency:
+      group: deploy-${{ inputs.project_name }}-${{ inputs.environment }}
+      cancel-in-progress: false
     permissions:
       contents: read
 
     steps:
       - name: Announce deploy job
+        env:
+          PROJECT_NAME: ${{ inputs.project_name }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+          ROUTE: ${{ inputs.route }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=⚡ [CF-WORKERS] Cloudflare Workers Deploy — Job Started::Project: ${{ inputs.project_name }}-${{ inputs.environment }} | Route: ${{ inputs.route }} | Triggered by: ${{ github.actor }}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=⚡ [CF-WORKERS] Cloudflare Workers Deploy — Job Started::Project: ${PROJECT_NAME}-${DEPLOY_ENV} | Route: ${ROUTE} | Triggered by: ${ACTOR}"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+            echo "CHECKPOINT_4_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # No git writes after checkout; don't leave the token in .git/config for
+          # later install/build steps.
+          persist-credentials: false
 
+      # Enable Corepack BEFORE setup-node so its pnpm cache can resolve the
+      # pnpm binary. (Only needed for pnpm.)
       - name: Enable Corepack (pnpm)
         if: ${{ inputs.package_manager == 'pnpm' }}
         run: corepack enable
@@ -96,85 +152,91 @@ jobs:
           node-version: ${{ inputs.node_version }}
           cache: ${{ inputs.package_manager }}
 
-      - name: Install dependencies
+      # Resolve package-manager-specific commands once and export them so the
+      # install/lint/build steps stay DRY and never interpolate untrusted
+      # inputs directly into a shell.
+      - name: Resolve package manager commands
+        env:
+          PKG_MGR: ${{ inputs.package_manager }}
         run: |
-          echo "::group::⚡ [CHECKPOINT 1/3] Install dependencies"
-          echo "→ Package manager: ${{ inputs.package_manager }}"
-          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
-            yarn install ${{ inputs.install_args }}
-          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
-            corepack enable
-            pnpm install ${{ inputs.install_args }}
-          else
-            npm ci
-          fi
+          set -euo pipefail
+          # Only record the resolved tool name — install_args is NEVER baked into a
+          # command string here (that would let a caller inject shell metacharacters
+          # or newlines into GITHUB_ENV). It is passed as a quoted array at install time.
+          case "$PKG_MGR" in
+            yarn)
+              echo "PM_TOOL=yarn" >> "$GITHUB_ENV"
+              echo "PM_RUN=yarn" >> "$GITHUB_ENV"
+              ;;
+            pnpm)
+              echo "PM_TOOL=pnpm" >> "$GITHUB_ENV"
+              echo "PM_RUN=pnpm" >> "$GITHUB_ENV"
+              ;;
+            npm)
+              echo "PM_TOOL=npm" >> "$GITHUB_ENV"
+              echo "PM_RUN=npm run" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::Unsupported package_manager '$PKG_MGR' (expected npm|yarn|pnpm)"
+              exit 1
+              ;;
+          esac
+
+      - name: Install dependencies
+        env:
+          INSTALL_ARGS: ${{ inputs.install_args }}
+        run: |
+          set -euo pipefail
+          echo "::group::⚡ [CHECKPOINT 1/4] Install dependencies"
+          # Split install_args into a word array and pass each as a separate quoted
+          # argument so it can never break out into the shell. npm ci enforces a
+          # frozen lockfile, so extra args are intentionally not applied there.
+          read -r -a EXTRA_ARGS <<< "$INSTALL_ARGS"
+          case "$PM_TOOL" in
+            yarn) echo "→ Install command: yarn install"; yarn install "${EXTRA_ARGS[@]}" ;;
+            pnpm) echo "→ Install command: pnpm install"; pnpm install "${EXTRA_ARGS[@]}" ;;
+            npm)  echo "→ Install command: npm ci"; npm ci ;;
+          esac
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/3] Dependencies installed — PASSED"
+          echo "✅ [CHECKPOINT 1/4] Dependencies installed — PASSED"
           echo "::endgroup::"
 
       - name: Lint
         if: ${{ inputs.run_lint }}
         run: |
-          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
-            yarn lint
-          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
-            pnpm lint
-          else
-            npm run lint
-          fi
+          set -euo pipefail
+          echo "::group::⚡ Lint"
+          $PM_RUN lint
+          echo "✅ Lint — PASSED"
+          echo "::endgroup::"
 
       - name: Pre-Build Custom Commands
         if: ${{ inputs.pre_build_commands != '' }}
         env:
           PRE_BUILD_COMMANDS: ${{ inputs.pre_build_commands }}
         run: |
-          echo "Running custom pre-build commands"
-          printf '%s\n' "$PRE_BUILD_COMMANDS" > /tmp/pre_build.sh
-          bash -e /tmp/pre_build.sh
-
-      - name: Build Vite Project
-        run: |
-          echo "::group::⚡ [CHECKPOINT 2/3] Build Vite project"
-          echo "→ Build script: ${{ inputs.build_script }} | Assets dir: ${{ inputs.assets_dir }}"
-          if [ "${{ inputs.package_manager }}" = "yarn" ]; then
-            yarn ${{ inputs.build_script }}
-          elif [ "${{ inputs.package_manager }}" = "pnpm" ]; then
-            pnpm ${{ inputs.build_script }}
-          else
-            npm run ${{ inputs.build_script }}
-          fi
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Vite build completed — PASSED"
+          set -euo pipefail
+          echo "::group::⚡ Pre-build custom commands"
+          SCRIPT="$(mktemp "${RUNNER_TEMP}/pre_build.XXXXXX.sh")"
+          printf '%s\n' "$PRE_BUILD_COMMANDS" > "$SCRIPT"
+          bash -euo pipefail "$SCRIPT"
           echo "::endgroup::"
 
-      - name: Generate worker.js for static Vite app
+      - name: Build Vite Project
+        env:
+          BUILD_SCRIPT: ${{ inputs.build_script }}
+          ASSETS_DIR: ${{ inputs.assets_dir }}
         run: |
-          cat > worker.js << 'EOF'
-          export default {
-            async fetch(request, env, ctx) {
-              const url = new URL(request.url);
+          set -euo pipefail
+          echo "::group::⚡ [CHECKPOINT 2/4] Build Vite project"
+          echo "→ Build script: $BUILD_SCRIPT | Assets dir: $ASSETS_DIR"
+          $PM_RUN "$BUILD_SCRIPT"
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 2/4] Vite build completed — PASSED"
+          echo "::endgroup::"
 
-              // 1) Try to serve the static asset first
-              let response = await env.ASSETS.fetch(request);
-
-              // 2) If the asset wasn't found *and* this looks like a browser navigation,
-              //    fall back to index.html so the client-side router can take over.
-              if (
-                response.status === 404 &&
-                request.method === 'GET' &&
-                (request.headers.get('accept') || '').includes('text/html')
-              ) {
-                const indexUrl = new URL('/', url);
-                const indexRequest = new Request(indexUrl.toString(), request);
-                response = await env.ASSETS.fetch(indexRequest);
-              }
-
-              return response;
-            },
-          };
-
-          EOF
-
+      # No custom worker.js: Cloudflare serves the SPA fallback natively via
+      # not_found_handling = "single-page-application" (see the action call).
       - name: Generate wrangler.toml
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
@@ -183,38 +245,33 @@ jobs:
           project-name: ${{ inputs.project_name }}
           environment: ${{ inputs.environment }}
           assets-dir: ${{ inputs.assets_dir }}
-          main-entry: "worker.js"
-          add-assets-binding: "true"
+          not-found-handling: "single-page-application"
+          # Pure static assets: no Worker entry, no ASSETS binding, no flags.
+          compatibility-flags: ""
 
-      - name: Validate generated wrangler.toml for Vite static worker
+      - name: Validate generated wrangler.toml for Vite static SPA
         shell: bash
+        env:
+          PROJECT_NAME: ${{ inputs.project_name }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+          COMPAT_DATE: ${{ inputs.compatibility_date }}
+          ASSETS_DIR: ${{ inputs.assets_dir }}
         run: |
           set -euo pipefail
 
           test -f wrangler.toml
-          grep -F "name = \"${{ inputs.project_name }}\"" wrangler.toml
-          grep -F "main = \"worker.js\"" wrangler.toml
-          grep -F "compatibility_date = \"${{ inputs.compatibility_date }}\"" wrangler.toml
-          grep -F "[env.${{ inputs.environment }}]" wrangler.toml
-          grep -F "name = \"${{ inputs.project_name }}-${{ inputs.environment }}\"" wrangler.toml
+          grep -F "name = \"${PROJECT_NAME}\"" wrangler.toml
+          grep -F "compatibility_date = \"${COMPAT_DATE}\"" wrangler.toml
+          grep -F "[env.${DEPLOY_ENV}]" wrangler.toml
+          grep -F "name = \"${PROJECT_NAME}-${DEPLOY_ENV}\"" wrangler.toml
           grep -F "pattern = \"" wrangler.toml
           grep -F "custom_domain = true" wrangler.toml
-          grep -F "directory = \"./${{ inputs.assets_dir }}\"" wrangler.toml
-          grep -F "binding = \"ASSETS\"" wrangler.toml
+          grep -F "directory = \"./${ASSETS_DIR}\"" wrangler.toml
+          grep -F 'not_found_handling = "single-page-application"' wrangler.toml
           echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/3] wrangler.toml validated — PASSED"
+          echo "✅ [CHECKPOINT 3/4] wrangler.toml validated — PASSED"
 
-      - name: Report deploy failure
-        if: failure()
-        run: |
-          echo "::error title=⚡ [CF-WORKERS] Deploy Job Failed::Project '${{ inputs.project_name }}-${{ inputs.environment }}' failed | Route: ${{ inputs.route }}"
-          echo "  Checkpoint 1 — Dependencies:      ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Vite build:        ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — wrangler.toml:     ${CHECKPOINT_3_STATUS:-❌ Not reached}"
-
-      - name: Install Wrangler globally
-        run: npm install -g wrangler
-
+      # Wrangler is installed and managed by wrangler-action; no global install.
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v4
         with:
@@ -222,40 +279,45 @@ jobs:
           apiToken: ${{ secrets.cloudflare_api_token }}
           accountId: ${{ secrets.cloudflare_account_id }}
 
-      - name: Write job summary
-        if: always()
+      - name: Mark deploy checkpoint
+        run: echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+      - name: Report deploy failure
+        if: failure()
         env:
-          JOB_STATUS: ${{ job.status }}
           PROJECT_NAME: ${{ inputs.project_name }}
           DEPLOY_ENV: ${{ inputs.environment }}
           ROUTE: ${{ inputs.route }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-          REPOSITORY: ${{ github.repository }}
         run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## ⚡ Cloudflare Workers Deploy — ${PROJECT_NAME} — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Project | \`${PROJECT_NAME}-${DEPLOY_ENV}\` |"
-            echo "| Route | \`${ROUTE}\` |"
-            echo "| Environment | \`${DEPLOY_ENV}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Dependencies installed | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Vite build | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-            echo "| 3 | wrangler.toml validated | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=⚡ [CF-WORKERS] Deploy Job Failed::Project '${PROJECT_NAME}-${DEPLOY_ENV}' failed | Route: ${ROUTE}"
+          echo "  Checkpoint 1 — Dependencies:      ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 2 — Vite build:        ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 3 — wrangler.toml:     ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+          echo "  Checkpoint 4 — Deploy:            ${CHECKPOINT_4_STATUS:-❌ Not reached}"
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '⚡'
+          title: Cloudflare Workers Deploy — ${{ inputs.project_name }}
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Project | `${{ inputs.project_name }}-${{ inputs.environment }}` |
+            | Route | `${{ inputs.route }}` |
+            | Environment | `${{ inputs.environment }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
+            | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Dependencies installed | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Vite build | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | wrangler.toml validated | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            | 4 | Deploy | ${{ env.CHECKPOINT_4_STATUS || '⏭️ Not reached' }} |

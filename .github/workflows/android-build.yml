@@ -654,7 +654,9 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ steps.rename.outputs.aab_file }}
           compression-level: 0
-          retention-days: 14
+          # Transient hand-off to the release job in the same run; 1 day (the
+          # minimum) is plenty and keeps Actions storage near-zero.
+          retention-days: 1
 
       - name: Build failure
         if: failure()
@@ -670,41 +672,29 @@ jobs:
 
       - name: Build summary
         if: always()
-        shell: bash
-        env:
-          JOB_STATUS: ${{ job.status }}
-          APP_ID: ${{ inputs.app-id }}
-          PLAY_TRACK: ${{ inputs.play-track }}
-          RUNNER_OS: ${{ runner.os }}
-          REF_NAME: ${{ github.ref_name }}
-          ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🤖 Android Build — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| App | \`${APP_ID}\` |"
-            echo "| Version | \`${VERSION_NAME:-unknown}\` (code: ${VERSION_CODE:-unknown}) |"
-            echo "| Track | ${PLAY_TRACK} |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo "| Run | [${RUN_ID}](${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}) |"
-            echo ""
-            echo "## 📋 Build Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Keystore restored | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Bundle built | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-            echo "| 3 | Bundle renamed | ${CHECKPOINT_3_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🤖'
+          title: Android Build
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | App | `${{ inputs.app-id }}` |
+            | Version | `${{ env.VERSION_NAME || 'unknown' }}` (code: ${{ env.VERSION_CODE || 'unknown' }}) |
+            | Track | ${{ inputs.play-track }} |
+            | Runner | ${{ runner.os }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Triggered by | ${{ github.actor }} |
+            | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## 📋 Build Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Keystore restored | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Bundle built | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | Bundle renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
 
   release_with_environment:
     name: Release
@@ -811,34 +801,23 @@ jobs:
 
       - name: Release summary
         if: always()
-        shell: bash
-        env:
-          JOB_STATUS: ${{ job.status }}
-          APP_ID: ${{ inputs.app-id }}
-          VERSION_NAME_OUT: ${{ needs.build.outputs.version-name }}
-          VERSION_CODE_OUT: ${{ needs.build.outputs.version-code }}
-          PLAY_TRACK: ${{ inputs.play-track }}
-          RELEASE_ENV: ${{ inputs.release-environment }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🤖 Android Release to Google Play (Environment-Gated) — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| App | \`${APP_ID}\` |"
-            echo "| Version | \`${VERSION_NAME_OUT}\` (code: ${VERSION_CODE_OUT}) |"
-            echo "| Track | ${PLAY_TRACK} |"
-            echo "| Environment | ${RELEASE_ENV} |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Google Play upload | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🤖'
+          title: Android Release to Google Play (Environment-Gated)
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | App | `${{ inputs.app-id }}` |
+            | Version | `${{ needs.build.outputs.version-name }}` (code: ${{ needs.build.outputs.version-code }}) |
+            | Track | ${{ inputs.play-track }} |
+            | Environment | ${{ inputs.release-environment }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Google Play upload | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |

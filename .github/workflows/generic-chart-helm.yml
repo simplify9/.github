@@ -1,4 +1,4 @@
-name: 'API CI/CD Pipeline (reusable)'
+name: 'Generic Chart Helm CI/CD Pipeline (reusable)'
 
 on:
   workflow_call:
@@ -47,9 +47,9 @@ on:
       run-tests:
         description: 'Whether to run tests before packing'
         required: false
-        default: 'false'
-        type: string
-      
+        default: false
+        type: boolean
+
       # Docker configuration (for build job)
       dockerfile-path:
         description: 'Path to Dockerfile'
@@ -66,7 +66,6 @@ on:
         required: false
         default: 'linux/amd64'
         type: string
-      
 
       # Registry configuration (for build job)
       container-registry:
@@ -74,7 +73,7 @@ on:
         required: false
         default: 'ghcr.io'
         type: string
-            
+
       namespace:
         description: 'Kubernetes namespace for development'
         required: false
@@ -91,15 +90,14 @@ on:
         default: ''
         type: string
       atomic:
-        description: "If 'true', pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        description: "If true, pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
         required: false
-        default: 'true'
-        type: string
+        default: true
+        type: boolean
       helm-set-values:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
-      
 
       # Dynamic deployment value inputs (generic, not prefixed with environment)
       environment:
@@ -187,12 +185,12 @@ on:
       registry-password:
         description: 'Container registry password/token'
         required: false
-      
+
       # Kubernetes secrets
       kubeconfig:
         description: 'Base64 encoded kubeconfig'
         required: false
-      
+
       # GitHub token for tagging
       github-token:
         description: 'GitHub token for tagging'
@@ -207,12 +205,11 @@ on:
       nuget-source:
         description: 'NuGet source URL'
         required: false
-      
+
       # Secret deployment values (ordered by deployment stages)
       helm-set-secret-values:
         description: 'Helm set secret values (comma-separated: key1=value1,key2=value2)'
         required: false
-
 
     outputs:
       version:
@@ -224,6 +221,9 @@ on:
       nuget-version:
         description: 'Generated NuGet package version'
         value: ${{ jobs.nuget.outputs.version }}
+
+# Deny-all by default; every job opts into exactly the scopes it needs below.
+permissions: {}
 
 # Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
 concurrency:
@@ -247,8 +247,13 @@ jobs:
       is-release: ${{ steps.semver.outputs.is-release }}
     steps:
       - name: Announce version job
+        env:
+          MAJOR: ${{ inputs.major-version }}
+          MINOR: ${{ inputs.minor-version }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${MAJOR} | Minor: ${MINOR} | SHA: ${SHA} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -273,30 +278,26 @@ jobs:
 
       - name: Write version job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          SEMVER_VERSION: ${{ steps.semver.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🏷️ Version Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Computed version | \`${SEMVER_VERSION}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🏷️'
+          title: Version Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Computed version | `${{ steps.semver.outputs.version }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
 
   nuget:
     runs-on: ubuntu-latest
     if: ${{ inputs.package-nuget }}
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write   # publish to GitHub Packages feed when nuget-source targets pkg.github.com
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
       git-tag: ${{ steps.nuget-semver.outputs.git-tag }}
@@ -306,8 +307,11 @@ jobs:
       NUGET_SOURCE: ${{ secrets.nuget-source }}
     steps:
       - name: Announce nuget job
+        env:
+          NUGET_ENABLED: ${{ inputs.package-nuget }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Enabled: ${{ inputs.package-nuget }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Enabled: ${NUGET_ENABLED} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
@@ -368,30 +372,26 @@ jobs:
 
       - name: Write nuget job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          NUGET_ENABLED: ${{ inputs.package-nuget }}
-          NUGET_VERSION: ${{ steps.nuget-semver.outputs.version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🔷 NuGet Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Enabled | ${NUGET_ENABLED} |"
-            echo "| Version | \`${NUGET_VERSION}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔷'
+          title: NuGet Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Enabled | ${{ inputs.package-nuget }} |
+            | Version | `${{ steps.nuget-semver.outputs.version }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
 
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, nuget]
+    permissions:
+      contents: read
+      packages: write   # push image to ghcr.io when falling back to GITHUB_TOKEN
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
@@ -400,11 +400,18 @@ jobs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
       - name: Announce build job
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          REGISTRY_INPUT: ${{ inputs.container-registry }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::Version: ${VERSION} | Registry: ${REGISTRY_INPUT} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          # No persisted git token needed in the Docker build context.
+          persist-credentials: false
 
       - name: Build and push Docker image
         id: docker
@@ -423,30 +430,25 @@ jobs:
           tag-latest: 'true'
 
       - name: Confirm Docker image built
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          echo "✅ Docker image built and pushed — ${{ needs.version.outputs.version }}"
+          echo "✅ Docker image built and pushed — ${VERSION}"
 
       - name: Write build job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          VERSION: ${{ needs.version.outputs.version }}
-          REGISTRY_INPUT: ${{ inputs.container-registry }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## 🐳 Build Job — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Registry | \`${REGISTRY_INPUT}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🐳'
+          title: Build Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Registry | `${{ inputs.container-registry }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
 
   deploy:
     runs-on: ubuntu-latest
@@ -461,21 +463,33 @@ jobs:
           && needs.version.result == 'success'
           && needs.build.result == 'success' }}
     environment: ${{ inputs.deploy-environment }}
+    # Deny-all: this job only runs helm-generic against the cluster (kubeconfig
+    # secret) — it never checks out code or calls the GitHub API, so it needs no
+    # GITHUB_TOKEN scopes.
+    permissions: {}
     steps:
       - name: Announce deploy job
+        env:
+          DEPLOY_ENV: ${{ inputs.deploy-environment }}
+          APP_NAME: ${{ inputs.app-name }}
+          VERSION: ${{ needs.version.outputs.version }}
+          NAMESPACE: ${{ inputs.namespace }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=☸️ [HELM] Deploy to Development — Job Started::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=☸️ [HELM] Deploy to ${DEPLOY_ENV} — Job Started::App: ${APP_NAME} | Version: ${VERSION} | Namespace: ${NAMESPACE} | Triggered by: ${ACTOR}"
           echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
           echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Generate dynamic ingress values
         id: ingress
         shell: bash
+        env:
+          # Bind caller-supplied inputs to env vars so they are never interpolated
+          # directly into the shell (avoids script injection via host/path/secret values).
+          HOSTS_INPUT: ${{ inputs.ingress-hosts || inputs.ingress-host }}
+          PATHS_INPUT: ${{ inputs.ingress-paths }}
+          TLS_ARRAY_INPUT: ${{ inputs.ingress-tls-secrets }}
         run: |
-          HOSTS_INPUT="${{ inputs.ingress-hosts || inputs.ingress-host }}"
-          PATHS_INPUT="${{ inputs.ingress-paths }}"
-          TLS_ARRAY_INPUT="${{ inputs.ingress-tls-secrets }}"
-
           # Supports both comma-separated and multiline YAML block scalar inputs.
           # Example multiline usage:
           # ingress-hosts: |
@@ -530,7 +544,7 @@ jobs:
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/2] Ingress values generated — PASSED"
 
-      - name: Deploy to Development (via local composite action)
+      - name: Deploy to ${{ inputs.deploy-environment }} (via local composite action)
         uses: simplify9/.github/.github/actions/helm-generic@main
         with:
           # Required basics
@@ -578,49 +592,46 @@ jobs:
           environment: ${{ inputs.environment }}
 
       - name: Confirm Helm deployed
+        env:
+          APP_NAME: ${{ inputs.app-name }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/2] Helm deploy completed — PASSED: ${{ inputs.app-name }}@${{ needs.version.outputs.version }}"
+          echo "✅ [CHECKPOINT 2/2] Helm deploy completed — PASSED: ${APP_NAME}@${VERSION}"
 
       - name: Report deploy failure
         if: failure()
+        env:
+          APP_NAME: ${{ inputs.app-name }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          echo "::error title=☸️ [HELM] Deploy Job Failed::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }}"
+          echo "::error title=☸️ [HELM] Deploy Job Failed::App: ${APP_NAME} | Version: ${VERSION}"
           echo "  Checkpoint 1 — Ingress values: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Helm deploy:    ${CHECKPOINT_2_STATUS:-❌ Not reached}"
 
       - name: Write deploy job summary
         if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          APP_NAME: ${{ inputs.app-name }}
-          VERSION: ${{ needs.version.outputs.version }}
-          NAMESPACE: ${{ inputs.namespace }}
-          REF_NAME: ${{ github.ref_name }}
-          RUNNER_OS: ${{ runner.os }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          STATUS=$( [ "${JOB_STATUS}" = "success" ] \
-            && echo "✅ SUCCESS" || echo "❌ FAILED" )
-          {
-            echo "## ☸️ Deploy Job — ${APP_NAME} — ${STATUS}"
-            echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| App | \`${APP_NAME}\` |"
-            echo "| Version | \`${VERSION}\` |"
-            echo "| Namespace | \`${NAMESPACE}\` |"
-            echo "| Branch | \`${REF_NAME}\` |"
-            echo "| Runner | ${RUNNER_OS} |"
-            echo "| Triggered by | ${ACTOR} |"
-            echo ""
-            echo "## 📋 Checkpoint Summary"
-            echo ""
-            echo "| # | Checkpoint | Status |"
-            echo "|---|------------|--------|"
-            echo "| 1 | Ingress values generated | ${CHECKPOINT_1_STATUS:-⏭️ Not reached} |"
-            echo "| 2 | Helm deployment | ${CHECKPOINT_2_STATUS:-⏭️ Not reached} |"
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '☸️'
+          title: Deploy Job — ${{ inputs.app-name }}
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | App | `${{ inputs.app-name }}` |
+            | Version | `${{ needs.version.outputs.version }}` |
+            | Namespace | `${{ inputs.namespace }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | Runner | ${{ runner.os }} |
+            | Triggered by | ${{ github.actor }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Ingress values generated | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
 
   tag:
     runs-on: ubuntu-latest

@@ -1,0 +1,193 @@
+# =============================================================================
+# Gateway Routing Values
+# =============================================================================
+# Renders the gateway/ingress/config Helm values for the gateway-first reusable
+# workflow from its routing inputs, and emits the host/section lists the
+# companion gateway-onboard action consumes.
+#
+# The heavy lifting lives in render.sh (pure, no cluster access) so the logic is
+# unit-testable in isolation. Output is a real YAML values file (passed to Helm
+# via `-f`), replacing the previous fragile `\n`-escaped `--set` string.
+#
+# Outputs:
+#   values-file                 Path to the rendered Helm values YAML.
+#   gateway-host-list           Newline-separated trimmed gateway hostnames.
+#   gateway-section-names-list  Newline-separated section names, position-aligned
+#                               with gateway-host-list (blank entry = dedicated).
+# =============================================================================
+name: 'Gateway Routing Values'
+author: 'Simplify9'
+description: 'Render gateway/ingress Helm values and host/section lists for the gateway-first workflow'
+
+inputs:
+  # --- mode selection ---
+  routing-mode:
+    description: 'Routing mode: gateway | ingress | dual'
+    required: false
+    default: gateway
+  configmap-enabled:
+    description: 'Enable configmap rendering'
+    required: false
+    default: 'false'
+
+  # --- gateway (Gateway API) routing ---
+  gateway-parent-name:
+    description: 'Gateway parentRef name'
+    required: false
+    default: ''
+  gateway-parent-namespace:
+    description: 'Gateway parentRef namespace'
+    required: false
+    default: ''
+  gateway-section-name:
+    description: 'Singular Gateway sectionName override (shared-listener mode)'
+    required: false
+    default: ''
+  gateway-section-names:
+    description: 'Per-hostname section names, one per line, position-aligned with gateway-hostnames'
+    required: false
+    default: ''
+  gateway-hostnames:
+    description: 'Gateway hostnames (comma or newline separated)'
+    required: false
+    default: ''
+  gateway-paths:
+    description: 'Gateway paths (comma or newline separated)'
+    required: false
+    default: ''
+  gateway-path-type:
+    description: 'Gateway route path type'
+    required: false
+    default: PathPrefix
+  gateway-backend-service-name:
+    description: 'Optional gateway backend service override'
+    required: false
+    default: ''
+  gateway-backend-port:
+    description: 'Gateway backend service port'
+    required: false
+    default: '80'
+
+  # --- ingress (nginx) routing ---
+  ingress-hosts:
+    description: 'Ingress hosts (comma or newline separated)'
+    required: false
+    default: ''
+  ingress-paths:
+    description: 'Ingress paths (comma or newline separated)'
+    required: false
+    default: ''
+  ingress-tls-secrets:
+    description: 'TLS secrets matching ingress hosts'
+    required: false
+    default: ''
+  ingress-class-name:
+    description: 'Ingress class name'
+    required: false
+    default: nginx
+  ingress-path-type:
+    description: 'Ingress pathType'
+    required: false
+    default: Prefix
+  ingress-tls-enabled:
+    description: 'Ingress tlsEnabled'
+    required: false
+    default: 'true'
+  ingress-cluster-issuer:
+    description: 'Optional ingress cert-manager issuer annotation'
+    required: false
+    default: ''
+  ingress-proxy-body-size:
+    description: 'Optional nginx proxy body size annotation'
+    required: false
+    default: ''
+
+outputs:
+  values-file:
+    description: 'Path to the rendered Helm values YAML file'
+    value: ${{ steps.render.outputs.values-file }}
+  gateway-host-list:
+    description: 'Newline-separated trimmed gateway hostnames'
+    value: ${{ steps.render.outputs.gateway-host-list }}
+  gateway-section-names-list:
+    description: 'Newline-separated section names, position-aligned with gateway-host-list'
+    value: ${{ steps.render.outputs.gateway-section-names-list }}
+
+runs:
+  using: 'composite'
+  steps:
+    # 1. Announce (always runs first) — context-aware notice + namespaced checkpoint.
+    - name: Announce gateway routing
+      shell: bash
+      env:
+        ROUTING_MODE: ${{ inputs.routing-mode }}
+        CONFIGMAP_ENABLED: ${{ inputs.configmap-enabled }}
+      run: |
+        echo "::notice title=🚪 [GATEWAY] Routing Values::mode: ${ROUTING_MODE} | configmap: ${CONFIGMAP_ENABLED}"
+        echo "GATEWAY_ROUTING_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
+    # Inputs are passed via env (not interpolated into the script body) so hostile
+    # or quirky values — quotes, spaces, leading dashes — can never break out into
+    # the shell. The pure logic lives in render.sh; see that file for the algorithm.
+    - name: Render routing values
+      id: render
+      shell: bash
+      env:
+        # Where render.sh writes the Helm values YAML (surfaced as the values-file output).
+        ROUTING_VALUES_FILE: ${{ runner.temp }}/gateway-routing-values.yaml
+        ROUTING_MODE: ${{ inputs.routing-mode }}
+        CONFIGMAP_ENABLED: ${{ inputs.configmap-enabled }}
+        GATEWAY_PARENT_NAME: ${{ inputs.gateway-parent-name }}
+        GATEWAY_PARENT_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+        GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
+        GATEWAY_SECTION_NAMES_RAW: ${{ inputs.gateway-section-names }}
+        GATEWAY_HOSTNAMES_RAW: ${{ inputs.gateway-hostnames }}
+        GATEWAY_PATHS_RAW: ${{ inputs.gateway-paths }}
+        GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
+        GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name }}
+        GATEWAY_BACKEND_PORT: ${{ inputs.gateway-backend-port }}
+        INGRESS_HOSTS: ${{ inputs.ingress-hosts }}
+        INGRESS_PATHS: ${{ inputs.ingress-paths }}
+        INGRESS_TLS_SECRETS: ${{ inputs.ingress-tls-secrets }}
+        INGRESS_CLASS_NAME: ${{ inputs.ingress-class-name }}
+        INGRESS_PATH_TYPE: ${{ inputs.ingress-path-type }}
+        INGRESS_TLS_ENABLED: ${{ inputs.ingress-tls-enabled }}
+        INGRESS_CLUSTER_ISSUER: ${{ inputs.ingress-cluster-issuer }}
+        INGRESS_PROXY_BODY_SIZE: ${{ inputs.ingress-proxy-body-size }}
+      run: |
+        bash "${{ github.action_path }}/render.sh"
+        echo "GATEWAY_ROUTING_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+    # 4. Failure report (before summary).
+    - name: Report failure
+      if: failure()
+      shell: bash
+      env:
+        ROUTING_MODE: ${{ inputs.routing-mode }}
+      run: |
+        echo "::error title=❌ [GATEWAY] Routing render failed::mode '${ROUTING_MODE}'. Checkpoint — 1) Render values: ${GATEWAY_ROUTING_CP1_STATUS:-⏭️ Not reached}. Check routing-mode and gateway/ingress host inputs."
+
+    # 5. Summary (always last, always runs).
+    - name: Write routing summary
+      if: always()
+      shell: bash
+      env:
+        ROUTING_MODE: ${{ inputs.routing-mode }}
+        CONFIGMAP_ENABLED: ${{ inputs.configmap-enabled }}
+        VALUES_FILE: ${{ steps.render.outputs.values-file }}
+      run: |
+        set -euo pipefail
+        {
+          echo "## 🚪 Gateway Routing Values"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Routing mode | \`${ROUTING_MODE}\` |"
+          echo "| ConfigMap enabled | ${CONFIGMAP_ENABLED} |"
+          echo "| Values file | \`${VALUES_FILE:-n/a}\` |"
+          echo "| Render values | ${GATEWAY_ROUTING_CP1_STATUS:-⏭️ Not reached} |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+branding:
+  icon: 'shuffle'
+  color: 'blue'
