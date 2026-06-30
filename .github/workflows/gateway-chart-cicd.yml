@@ -508,8 +508,11 @@ jobs:
         shell: bash
         env:
           CHARTMUSEUM_URL: ${{ inputs.chartmuseum-url }}
-          CHARTMUSEUM_USER: ${{ secrets.registry-username }}
-          CHARTMUSEUM_PASSWORD: ${{ secrets.registry-password }}
+          # On workflow_call the caller maps registry-username/-password. On a direct
+          # workflow_dispatch run there is no mapping (and repo/org secret names can't
+          # contain hyphens), so fall back to the org secrets CM_USER / CM_PASSWORD.
+          CHARTMUSEUM_USER: ${{ secrets.registry-username || secrets.CM_USER }}
+          CHARTMUSEUM_PASSWORD: ${{ secrets.registry-password || secrets.CM_PASSWORD }}
           DEST: ${{ inputs.package-destination }}
         run: |
           set -euo pipefail

@@ -190,16 +190,35 @@ add_host_listeners() {
     gw=$(gateway_json) || { echo "❌ Gateway '${GATEWAY_NAME}' not found in '${GATEWAY_NAMESPACE}'." >&2; return 1; }
 
     # Decide which listeners are missing, from THIS snapshot.
-    local need_http=true need_https=true
-    if jq -e --arg n "$http_listener" --arg h "$host" \
-         '.spec.listeners[]? | select(.name==$n or (.hostname==$h and .protocol=="HTTP" and .port==80))' \
-         >/dev/null <<<"$gw"; then
+    #
+    # This function only runs in DEDICATED mode (shared/section-name hosts are
+    # validated by name elsewhere), so the EXPECTED listener name is the auto slug
+    # http-/https-<slug> — which is exactly what the chart's HTTPRoute parentRef
+    # targets. We must distinguish two cases:
+    #   * a listener with the expected NAME exists        -> ready, skip creation
+    #   * a DIFFERENT listener already claims this host's  -> conflict. The Gateway
+    #     (hostname, port, protocol) under another name       API forbids a second
+    #     listener for the same triple, and the HTTPRoute would point at a section
+    #     that doesn't exist, so the route would silently never attach. Fail with
+    #     guidance instead of treating it as ready.
+    local need_http=true need_https=true other=""
+    if jq -e --arg n "$http_listener" '.spec.listeners[]? | select(.name==$n)' >/dev/null <<<"$gw"; then
       need_http=false
+    elif jq -e --arg h "$host" '.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTP" and .port==80)' >/dev/null <<<"$gw"; then
+      other=$(jq -r --arg h "$host" 'first(.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTP" and .port==80) | .name)' <<<"$gw")
+      echo "❌ Host '${host}' already has an HTTP:80 listener named '${other}', not the expected '${http_listener}'." >&2
+      echo "   The chart's HTTPRoute targets section '${http_listener}', so it would not attach to '${other}'." >&2
+      echo "   ACTION REQUIRED: set gateway-section-name (single shared listener) or gateway-section-names (per-host) to '${other}' so routing reuses the existing listener." >&2
+      return 1
     fi
-    if jq -e --arg n "$https_listener" --arg h "$host" \
-         '.spec.listeners[]? | select(.name==$n or (.hostname==$h and .protocol=="HTTPS" and .port==443))' \
-         >/dev/null <<<"$gw"; then
+    if jq -e --arg n "$https_listener" '.spec.listeners[]? | select(.name==$n)' >/dev/null <<<"$gw"; then
       need_https=false
+    elif jq -e --arg h "$host" '.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTPS" and .port==443)' >/dev/null <<<"$gw"; then
+      other=$(jq -r --arg h "$host" 'first(.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTPS" and .port==443) | .name)' <<<"$gw")
+      echo "❌ Host '${host}' already has an HTTPS:443 listener named '${other}', not the expected '${https_listener}'." >&2
+      echo "   The chart's HTTPRoute targets section '${https_listener}', so it would not attach to '${other}'." >&2
+      echo "   ACTION REQUIRED: set gateway-section-name (single shared listener) or gateway-section-names (per-host) to '${other}' so routing reuses the existing listener." >&2
+      return 1
     fi
 
     local needed=0
