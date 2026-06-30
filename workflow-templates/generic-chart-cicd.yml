@@ -15,7 +15,7 @@
 #
 # WHAT IT DOES:
 #   Computes a semantic version from git tags → (optionally) publishes NuGet
-#   packages → builds & pushes a Docker image → deploys the s9generichart to
+#   packages → builds & pushes a Docker image → deploys the s9genericchart to
 #   Kubernetes via Helm (dynamic ingress hosts/paths/TLS, optional EF Core
 #   migration init-Job) → tags the commit on a successful deploy.
 #

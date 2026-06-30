@@ -79,14 +79,14 @@ Set these as **Organization** or repository secrets. Names below are the secret 
 
 ### Frontend (Cloudflare Workers)
 
-```
+```text
 cloudflare_api_token     # API token with Workers + DNS permissions
 cloudflare_account_id    # Cloudflare account ID
 ```
 
 ### Service / Backend (Kubernetes + Container Registry + Helm)
 
-```
+```text
 registry-username        # Container registry username (GHCR: github.actor)
 registry-password        # Container registry password/token (GHCR: GITHUB_TOKEN)
 kubeconfig               # Base64-encoded (or raw YAML) kubeconfig — ingress-nginx deploys
@@ -100,7 +100,7 @@ nuget-api-key            # NuGet API key (only if publishing packages)
 
 ### Mobile — iOS
 
-```
+```text
 ios-p12-base64                    # Base64-encoded .p12 signing certificate
 ios-p12-password                  # Password for the .p12
 ios-mobileprovision-base64        # Base64-encoded .mobileprovision
@@ -112,7 +112,7 @@ appstore-api-private-key-base64   # Base64-encoded App Store Connect .p8 private
 
 ### Mobile — Android
 
-```
+```text
 android-keystore-base64           # Base64-encoded .jks / .keystore
 android-keystore-password         # Keystore password
 android-key-alias                 # Key alias
@@ -124,7 +124,7 @@ google-play-service-account-json  # Google Play service account JSON
 
 ## Repository Structure
 
-```
+```text
 .github/                          ← workspace root (README.md, AGENTS.md, CLAUDE.md)
 ├── .github/
 │   ├── workflows/                ← reusable workflows (workflow_call)

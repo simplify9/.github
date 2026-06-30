@@ -119,8 +119,11 @@ runs:
     # 1. Announce (always runs first) — context-aware notice + namespaced checkpoint.
     - name: Announce gateway routing
       shell: bash
+      env:
+        ROUTING_MODE: ${{ inputs.routing-mode }}
+        CONFIGMAP_ENABLED: ${{ inputs.configmap-enabled }}
       run: |
-        echo "::notice title=🚪 [GATEWAY] Routing Values::mode: ${{ inputs.routing-mode }} | configmap: ${{ inputs.configmap-enabled }}"
+        echo "::notice title=🚪 [GATEWAY] Routing Values::mode: ${ROUTING_MODE} | configmap: ${CONFIGMAP_ENABLED}"
         echo "GATEWAY_ROUTING_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
     # Inputs are passed via env (not interpolated into the script body) so hostile
@@ -159,8 +162,10 @@ runs:
     - name: Report failure
       if: failure()
       shell: bash
+      env:
+        ROUTING_MODE: ${{ inputs.routing-mode }}
       run: |
-        echo "::error title=❌ [GATEWAY] Routing render failed::mode '${{ inputs.routing-mode }}'. Checkpoint — 1) Render values: ${GATEWAY_ROUTING_CP1_STATUS:-⏭️ Not reached}. Check routing-mode and gateway/ingress host inputs."
+        echo "::error title=❌ [GATEWAY] Routing render failed::mode '${ROUTING_MODE}'. Checkpoint — 1) Render values: ${GATEWAY_ROUTING_CP1_STATUS:-⏭️ Not reached}. Check routing-mode and gateway/ingress host inputs."
 
     # 5. Summary (always last, always runs).
     - name: Write routing summary
