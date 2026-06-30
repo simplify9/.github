@@ -28,8 +28,8 @@
 #         major-version: '1'
 #         minor-version: '2'
 #       secrets:
-#         registry-username: ${{ secrets.CHARTMUSEUM_USERNAME }}
-#         registry-password: ${{ secrets.CHARTMUSEUM_PASSWORD }}
+#         registry-username: ${{ secrets.CM_USER }}
+#         registry-password: ${{ secrets.CM_PASSWORD }}
 #
 # ROADMAP:
 #   Migrate publishing from ChartMuseum HTTP upload to an OCI registry
