@@ -1,5 +1,5 @@
 # =============================================================================
-# Android App CI/CD Caller — Template for app repositories
+# Flutter Android CI/CD Caller — Template for app repositories
 # =============================================================================
 #
 # USAGE:
@@ -9,8 +9,8 @@
 #   Replace all values marked with # REPLACE with your app-specific values.
 #
 # BRANCHES:
-#   develop → triggers Android Dev job → uploads to android-internal environment
-#   main    → triggers Android Prod job → uploads to android-production environment
+#   develop → triggers Android Dev job → uploads to android-develop environment (internal track)
+#   main    → triggers Android Prod job → uploads to android-production environment (production track)
 #
 # VERSIONING:
 #   versionName: SemVer patch counter — major.minor fixed by version-prefix,
@@ -21,15 +21,15 @@
 #                Example: last shipped versionCode was 500 → set offset to 1000.
 #
 # RE-RUNS:
-#   GitHub re-runs keep the same run_number. A re-run produces the same
-#   versionCode as the original attempt. Play will reject a duplicate
-#   versionCode — trigger a new run instead of re-running a failed one.
+#   GitHub re-runs keep the same run_number → same versionCode as the original
+#   attempt. Play rejects duplicate versionCodes — trigger a new run instead of
+#   re-running a failed one.
 #
-# INPUTS (only non-default values are declared — see generic template for
-#   full input reference):
-#   https://github.com/simplify9/.github/blob/main/.github/workflows/android-build.yml
+# INPUTS (only non-default values are declared — see the reusable workflow for
+#   the full input reference):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/flutter-android-build.yml
 # =============================================================================
-name: Android CI/CD                          # REPLACE: e.g. "Mealivery Customer Android"
+name: Flutter Android CI/CD              # REPLACE: e.g. "Laflef Android"
 run-name: android-${{ github.ref_name }}-${{ github.run_number }}
 
 on:
@@ -54,24 +54,25 @@ jobs:
   develop:
     name: Android Dev
     if: ${{ github.ref_name == 'develop' }}
-    uses: simplify9/.github/.github/workflows/android-build.yml@main
+    uses: simplify9/.github/.github/workflows/flutter-android-build.yml@main
     with:
       # ── App ───────────────────────────────────────────────────────────────
-      app-id: com.example.app              # REPLACE: e.g. com.shanap.customer
-      app-slug: app                        # REPLACE: e.g. mealivery-customer
+      app-id: com.example.app              # REPLACE: e.g. com.simplify9.laflef
+      app-slug: app                        # REPLACE: e.g. laflef
+      flutter-version: "3.x"               # REPLACE: pin an exact version for reproducible builds
 
       # ── Versioning ────────────────────────────────────────────────────────
-      version-prefix: "1.0.0"             # REPLACE: your X.Y.Z start version
-      version-code-offset: "80000"      # REPLACE: set above last shipped versionCode
+      version-prefix: "1.0.0"              # REPLACE: your X.Y.Z start version
+      version-code-offset: "80000"         # REPLACE: set above last shipped versionCode
 
       # ── Build ─────────────────────────────────────────────────────────────
-      keystore-output-path: android/app/release.keystore   # REPLACE if differs
-      aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE: e.g. myapp-{version_name}.aab
+      aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE: e.g. laflef-release-{version_name}.aab
 
       # ── Release ───────────────────────────────────────────────────────────
       play-track: internal
+      release-status: draft
       changes-not-sent-for-review: true   # internal track: skip review queue for instant tester access
-      release-environment: android-internal
+      release-environment: android-develop
       disable-release: ${{ inputs.disable_release }}
     secrets:
       android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -83,22 +84,23 @@ jobs:
   production:
     name: Android Prod
     if: ${{ github.ref_name == 'main' }}
-    uses: simplify9/.github/.github/workflows/android-build.yml@main
+    uses: simplify9/.github/.github/workflows/flutter-android-build.yml@main
     with:
       # ── App ───────────────────────────────────────────────────────────────
       app-id: com.example.app              # REPLACE
       app-slug: app                        # REPLACE
+      flutter-version: "3.x"               # REPLACE
 
       # ── Versioning ────────────────────────────────────────────────────────
-      version-prefix: "1.0.0"             # REPLACE
-      version-code-offset: "80000"      # REPLACE
+      version-prefix: "1.0.0"              # REPLACE
+      version-code-offset: "80000"         # REPLACE
 
       # ── Build ─────────────────────────────────────────────────────────────
-      keystore-output-path: android/app/release.keystore   # REPLACE if differs
       aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE
 
       # ── Release ───────────────────────────────────────────────────────────
       play-track: production
+      release-status: draft
       # changes-not-sent-for-review defaults to false — Google review triggered on commit
       release-environment: android-production
       disable-release: ${{ inputs.disable_release }}

@@ -49,6 +49,8 @@
 | Cilium Gateway API-aware Helm chart (chart dev) | ChartMuseum | [`gateway-chart-cicd.yml`](#gateway-chart-cicdyml) |
 | iOS app (React Native or native) | TestFlight | [`ios-build.yml`](#ios-buildyml) |
 | Android app (React Native) | Google Play | [`android-build.yml`](#android-buildyml) |
+| iOS app (Flutter) | TestFlight | [`flutter-ios-build.yml`](#flutter-ios-buildyml) |
+| Android app (Flutter) | Google Play | [`flutter-android-build.yml`](#flutter-android-buildyml) |
 
 All workflows are **reusable** (`on: workflow_call:`). Call them from your repo:
 
@@ -70,6 +72,8 @@ This repo also ships **org workflow templates** (`workflow-templates/`) that app
 | Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` → `staging`/`main`, `workflow_dispatch` |
 | Android App CI/CD | `android-build.yml` | `workflow_dispatch` |
 | iOS App CI/CD | `ios-build.yml` | `workflow_dispatch` |
+| Flutter Android App CI/CD | `flutter-android-build.yml` | `workflow_dispatch` |
+| Flutter iOS App CI/CD | `flutter-ios-build.yml` | `workflow_dispatch` |
 
 ---
 
@@ -136,7 +140,9 @@ google-play-service-account-json  # Google Play service account JSON
 │   │   ├── helm-deploy-values.yml
 │   │   ├── gateway-chart-cicd.yml
 │   │   ├── ios-build.yml
-│   │   └── android-build.yml
+│   │   ├── android-build.yml
+│   │   ├── flutter-ios-build.yml
+│   │   └── flutter-android-build.yml
 │   └── actions/                  ← composite actions
 │       ├── determine-semver/
 │       ├── tag-github-origin/
@@ -440,7 +446,7 @@ CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git ta
 
 ### Mobile · iOS & Android
 
-Both mobile workflows have a **build** job (runs unconditionally) and a **release** job (`release_with_environment`) gated by `if: release-environment != '' && !disable-release` and bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the Android/iOS starter templates).
+There are two flavors: **React Native** (`ios-build.yml` / `android-build.yml`) and **Flutter** (`flutter-ios-build.yml` / `flutter-android-build.yml`). All four share the same shape — a **build** job (runs unconditionally) and a **release** job (`release_with_environment`) gated by `if: release-environment != '' && !disable-release` and bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the matching starter templates). The Flutter and RN iOS workflows reuse the same `ios-install-cert` / `ios-install-profile` composite actions for signing.
 
 ---
 
@@ -537,6 +543,105 @@ jobs:
 ```
 
 **Notes:** Gradle uses `gradle/actions/setup-gradle@v5` (do not use the archived `gradle/gradle-build-action`, and do not add `cache: gradle` to `setup-java` — it conflicts). The workflow sets `org.gradle.caching=true` itself, so callers no longer need to. NDK `27.1.12297006` (r27b LTS) is pinned and installed via `sdkmanager` (not `actions/cache` — the Android SDK dir is root-owned). Use the **Android App CI/CD** starter template for a `workflow_dispatch` entry point.
+
+---
+
+#### `flutter-ios-build.yml`
+
+Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `flutter build ipa`, and uploads it to TestFlight from `ubuntu-latest` via the App Store Connect API (`apple-actions/upload-testflight-build@v5`). The marketing version + build number are derived from `pubspec.yaml` (`X.Y.Z+BUILD`) combined with `github.run_number` — nothing to pass in.
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `macos-runner` | | `macos-latest` | macOS runner label (e.g. `macos-26`) |
+| `xcode-version` | | `""` | Xcode selector via `maxim-lobanov/setup-xcode` (empty = runner default) |
+| `flutter-version` | | `3.x` | `subosito/flutter-action` version selector (pin exact for reproducible builds) |
+| `flutter-channel` | | `stable` | Flutter channel |
+| `project-directory` | | `.` | Flutter project root relative to repo root (set to e.g. `mobile` for a monorepo); `ios-dir`/`pbxproj-path` resolve under it |
+| `ios-dir` | | `ios` | iOS project directory (Podfile + Runner project) |
+| `pbxproj-path` | | `ios/Runner.xcodeproj/project.pbxproj` | project.pbxproj that gets the manual-signing rewrite |
+| `app-slug` | | `app` | Output IPA filename slug |
+| `export-method` | | `app-store-connect` | ExportOptions.plist distribution method |
+| `run-analyze` | | `false` | Run `flutter analyze` before building |
+| `ipa-name-pattern` | | `{app_slug}-{version}-{build_number}.ipa` | Output IPA name tokens |
+| `wait-for-processing` | | `false` | Poll App Store Connect until processing finishes (fire-and-forget by default) |
+| `release-environment` | | `ios-staging` | GitHub Environment for the release job |
+| `disable-release` | | `false` | Build only; skip TestFlight upload |
+
+**Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64` (plus `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` for the upload, and optional `ios-team-id`).
+
+**Outputs:** `version`, `build-number`, `ipa-file`.
+
+```yaml
+jobs:
+  build-and-release:
+    uses: simplify9/.github/.github/workflows/flutter-ios-build.yml@main
+    with:
+      macos-runner: macos-26
+      xcode-version: "26.3"
+      app-slug: myapp
+      release-environment: ios-production
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+```
+
+**Notes:** manual signing only — keychain/cert/profile install is delegated to the shared `ios-install-cert` / `ios-install-profile` composite actions, then the `pbxproj` is rewritten to manual signing (`Apple Distribution`) with fail-loud `grep` asserts and a generated `ExportOptions.plist`. `~/.pub-cache` and `ios/Pods` are cached on `pubspec.lock` / `Podfile.lock`; `pod install` deliberately avoids `deintegrate`/`--repo-update` to preserve the cache. Use the **Flutter iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
+
+---
+
+#### `flutter-android-build.yml`
+
+Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbundle` and publishes it to Google Play (`r0adkll/upload-google-play@v1`). Signing uses Flutter's `key.properties` convention (decoded keystore + generated `android/key.properties`).
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `app-id` | ✅ | — | Android `applicationId` / Play package name |
+| `app-slug` | | `app` | Output AAB filename slug |
+| `project-directory` | | `.` | Flutter project root relative to repo root (set to e.g. `mobile` for a monorepo) |
+| `flutter-version` | | `3.x` | `subosito/flutter-action` version selector (pin exact for reproducible builds) |
+| `flutter-channel` | | `stable` | Flutter channel |
+| `java-version` | | `17` | Java version (temurin) |
+| `version-prefix` | | `1.0.0` | Base version (X.Y or X.Y.Z) |
+| `version-code-offset` | | `80000` | Added to `github.run_number` for versionCode |
+| `run-analyze` | | `true` | Run `flutter analyze` before building |
+| `analyze-fatal-level` | | `none` | `flutter analyze` fatal severity (`none`/`warning`/`info`) |
+| `keystore-output-path` | | `android/app/release.keystore` | Where the decoded keystore is written |
+| `aab-name-pattern` | | `{app_slug}-release-{version_name}.aab` | Output AAB name tokens |
+| `play-track` | | `internal` | `internal`, `alpha`, `beta`, `production` |
+| `release-status` | | `draft` | Play release status (`draft`/`completed`/...) |
+| `changes-not-sent-for-review` | | `false` | Use `changesNotSentForReview` (internal tracks) |
+| `release-environment` | | `android-staging` | GitHub Environment for the release job |
+| `disable-release` | | `false` | Build only; skip Play upload |
+
+**Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
+
+**Outputs:** `version-name`, `version-code`, `aab-file`.
+
+```yaml
+jobs:
+  build-and-release:
+    uses: simplify9/.github/.github/workflows/flutter-android-build.yml@main
+    with:
+      app-id: com.mycompany.myapp
+      app-slug: myapp
+      version-prefix: "2.0.0"
+      version-code-offset: "80000"
+      release-environment: android-production
+      play-track: production
+    secrets:
+      android-keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      android-keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+      android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+```
+
+**Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 → 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK/Gradle plumbing — Flutter owns the Android build. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.
 
 ---
 

@@ -9,7 +9,7 @@
 #   Replace all values marked with # REPLACE with your app-specific values.
 #
 # BRANCHES:
-#   staging → triggers iOS Dev job → uploads to ios-staging environment
+#   develop → triggers iOS Dev job → uploads to ios-develop environment
 #   main    → triggers iOS Prod job → uploads to ios-production environment
 #
 # INPUTS (only non-default values are declared — see generic template for
@@ -20,6 +20,8 @@ name: iOS CI/CD                          # REPLACE: e.g. "Mealivery Customer iOS
 run-name: ios-${{ github.ref_name }}-${{ github.run_number }}
 
 on:
+  push:
+    branches: [develop, main]
   workflow_dispatch:
     inputs:
       disable_release:
@@ -36,9 +38,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  development:
+  develop:
     name: iOS Dev
-    if: ${{ github.ref_name == 'staging' }}
+    if: ${{ github.ref_name == 'develop' }}
     uses: simplify9/.github/.github/workflows/ios-build.yml@main
     with:
       # ── Runner ────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ jobs:
       # ── Export & Upload ───────────────────────────────────────────────────
       generate-export-options: true
       ipa-name-pattern: "app-{run_number}.ipa"  # REPLACE
-      release-environment: ios-staging
+      release-environment: ios-develop
       disable-release: ${{ inputs.disable_release }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}

@@ -1,0 +1,607 @@
+# =============================================================================
+# Flutter · Android Build & Release (reusable)
+# =============================================================================
+# Builds and signs a Flutter Android App Bundle (AAB) and publishes it to
+# Google Play (r0adkll/upload-google-play@v1).
+#
+# Two-job pattern:
+#   build                    → produces + uploads the signed AAB artifact
+#   release_with_environment → downloads + ships to Google Play, gated by a
+#                              named GitHub Environment and skippable via
+#                              disable-release.
+#
+# Drop-in replacement for laflef-mobile/.github/workflows/laflef-android-cicd.yml
+# — same Flutter setup, SemVer patch-counter versioning, key.properties signing and
+# `flutter build appbundle` invocation, generalized behind inputs/secrets.
+# Per-branch dev/prod selection lives in the caller (see flutter-android-app
+# starter template), never here.
+# =============================================================================
+name: Flutter Android Build & Release
+
+on:
+  workflow_call:
+    inputs:
+      # ── Runner & toolchain ──────────────────────────────────────────────────
+      ubuntu-runner:
+        description: GitHub-hosted Ubuntu runner label
+        required: false
+        type: string
+        default: ubuntu-latest
+      flutter-version:
+        description: >
+          Flutter version selector for subosito/flutter-action (for example
+          "3.x" or an exact "3.27.1"). Pin an exact version for reproducible
+          builds. Default "3.x" reproduces the laflef reference.
+        required: false
+        type: string
+        default: "3.x"
+      flutter-channel:
+        description: Flutter release channel for subosito/flutter-action
+        required: false
+        type: string
+        default: stable
+      java-version:
+        description: Java version for the Android Gradle build
+        required: false
+        type: string
+        default: "17"
+      java-distribution:
+        description: Java distribution for setup-java
+        required: false
+        type: string
+        default: temurin
+
+      # ── App identity ────────────────────────────────────────────────────────
+      app-id:
+        description: Android applicationId / Google Play package name
+        required: true
+        type: string
+      app-slug:
+        description: App slug used in the output AAB file name
+        required: false
+        type: string
+        default: app
+      project-directory:
+        description: >
+          Path to the Flutter project root, relative to the repo root. Default
+          "." for a repo whose root is the Flutter app; set to a subdirectory
+          (e.g. "mobile") for a monorepo where the Flutter app is nested.
+        required: false
+        type: string
+        default: "."
+
+      # ── Versioning ──────────────────────────────────────────────────────────
+      version-prefix:
+        description: Base version for VERSION_NAME (X.Y or X.Y.Z); major.minor are fixed, only the patch increments per run
+        required: false
+        type: string
+        default: "1.0.0"
+      version-name-override:
+        description: Optional explicit VERSION_NAME; if empty uses base version + run increment
+        required: false
+        type: string
+        default: ""
+      version-name-offset:
+        description: Numeric offset added to github.run_number when computing VERSION_NAME
+        required: false
+        type: string
+        default: "0"
+      version-code-offset:
+        description: Numeric offset added to github.run_number for VERSION_CODE (set above last shipped versionCode)
+        required: false
+        type: string
+        default: "80000"
+
+      # ── Static analysis ─────────────────────────────────────────────────────
+      run-analyze:
+        description: Run `flutter analyze` before building
+        required: false
+        type: boolean
+        default: true
+      analyze-fatal-level:
+        description: >
+          Severity that fails `flutter analyze`: "none" (advisory — matches
+          laflef: --no-fatal-infos --no-fatal-warnings), "warning"
+          (--no-fatal-infos), or "info" (strict — --fatal-infos --fatal-warnings).
+        required: false
+        type: string
+        default: none
+
+      # ── Signing & artifact paths ────────────────────────────────────────────
+      keystore-output-path:
+        description: Where to write the decoded release keystore
+        required: false
+        type: string
+        default: android/app/release.keystore
+      aab-name-pattern:
+        description: Output AAB file name pattern with tokens {app_slug},{version_name},{version_code},{run_number}
+        required: false
+        type: string
+        default: "{app_slug}-release-{version_name}.aab"
+      artifact-name:
+        description: Artifact name for upload/download pairing
+        required: false
+        type: string
+        default: aab
+
+      # ── Release ─────────────────────────────────────────────────────────────
+      play-track:
+        description: Google Play track (internal, alpha, beta, production)
+        required: false
+        type: string
+        default: internal
+      release-status:
+        description: Google Play release status (draft, completed, inProgress, halted)
+        required: false
+        type: string
+        default: draft
+      changes-not-sent-for-review:
+        description: If true, pass changesNotSentForReview (skip the review queue, e.g. internal track)
+        required: false
+        type: boolean
+        default: false
+      release-environment:
+        description: GitHub Environment for the release job (e.g. android-staging or android-production)
+        required: false
+        type: string
+        default: android-staging
+      disable-release:
+        description: If true, skip the Google Play release job and run build-only
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      android-keystore-base64:
+        description: Base64-encoded Android keystore (.jks / .keystore)
+        required: true
+      android-keystore-password:
+        description: Keystore password
+        required: true
+      android-key-alias:
+        description: Signing key alias
+        required: true
+      android-key-password:
+        description: Signing key password
+        required: true
+      google-play-service-account-json:
+        description: Google Play service account JSON (required only when releasing)
+        required: false
+
+    outputs:
+      version-name:
+        description: VERSION_NAME used for this build
+        value: ${{ jobs.build.outputs.version-name }}
+      version-code:
+        description: VERSION_CODE used for this build
+        value: ${{ jobs.build.outputs.version-code }}
+      aab-file:
+        description: Output AAB file name uploaded and released
+        value: ${{ jobs.build.outputs.aab-file }}
+
+jobs:
+  build:
+    name: Android Build
+    runs-on: ${{ inputs.ubuntu-runner }}
+    timeout-minutes: 60
+    outputs:
+      version-name: ${{ steps.compute.outputs.version_name }}
+      version-code: ${{ steps.compute.outputs.version_code }}
+      aab-file: ${{ steps.rename.outputs.aab_file }}
+
+    steps:
+      - name: Announce
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice title=🤖 [ANDROID] Flutter build starting::app=${{ inputs.app-id }} version-prefix=${{ inputs.version-prefix }} track=${{ inputs.play-track }} actor=${{ github.actor }}"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: ${{ inputs.java-distribution }}
+          java-version: ${{ inputs.java-version }}
+          # NOTE: intentionally NO `cache: gradle` — it routes through the
+          # archived gradle-build-action and conflicts with Flutter's own
+          # Gradle invocation. Flutter manages the Android build itself.
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ inputs.flutter-version }}
+          channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Install dependencies${{ inputs.run-analyze && ' & analyze' || '' }}
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          RUN_ANALYZE: ${{ inputs.run-analyze }}
+          ANALYZE_FATAL_LEVEL: ${{ inputs.analyze-fatal-level }}
+        run: |
+          set -euo pipefail
+          echo "::group::🤖 Flutter dependencies"
+          flutter --version
+          flutter pub get
+          echo "::endgroup::"
+
+          if [[ "${RUN_ANALYZE}" == "true" ]]; then
+            echo "::group::🤖 flutter analyze (fatal level: ${ANALYZE_FATAL_LEVEL})"
+            case "${ANALYZE_FATAL_LEVEL}" in
+              none)    ANALYZE_FLAGS="--no-fatal-infos --no-fatal-warnings" ;;
+              warning) ANALYZE_FLAGS="--no-fatal-infos" ;;
+              info)    ANALYZE_FLAGS="--fatal-infos --fatal-warnings" ;;
+              *)
+                echo "ERROR: analyze-fatal-level must be one of: none, warning, info. Got '${ANALYZE_FATAL_LEVEL}'."
+                exit 1
+                ;;
+            esac
+            # shellcheck disable=SC2086
+            flutter analyze ${ANALYZE_FLAGS}
+            echo "::endgroup::"
+          fi
+
+      - name: Compute version values
+        id: compute
+        shell: bash
+        env:
+          VERSION_PREFIX: ${{ inputs.version-prefix }}
+          VERSION_NAME_OVERRIDE: ${{ inputs.version-name-override }}
+          VERSION_NAME_OFFSET: ${{ inputs.version-name-offset }}
+          VERSION_CODE_OFFSET: ${{ inputs.version-code-offset }}
+        run: |
+          set -euo pipefail
+          echo "::group::🏷️ [VERSION] Compute versionName / versionCode"
+
+          NAME_OFFSET_RAW="${VERSION_NAME_OFFSET}"
+          CODE_OFFSET_RAW="${VERSION_CODE_OFFSET}"
+          MAX_PLAY_VERSION_CODE=2100000000
+
+          if ! [[ "${NAME_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: version-name-offset must be a non-negative integer. Got '${NAME_OFFSET_RAW}'."
+            exit 1
+          fi
+
+          if ! [[ "${CODE_OFFSET_RAW}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: version-code-offset must be a non-negative integer. Got '${CODE_OFFSET_RAW}'."
+            exit 1
+          fi
+
+          NAME_OFFSET=$((NAME_OFFSET_RAW))
+          CODE_OFFSET=$((CODE_OFFSET_RAW))
+
+          VERSION_CODE=$((GITHUB_RUN_NUMBER + CODE_OFFSET))
+          INCREMENT_COUNT=$((GITHUB_RUN_NUMBER + NAME_OFFSET))
+          VERSION_NAME_SOURCE="computed"
+          OVERRIDE_DISPLAY="<empty>"
+
+          if [[ -n "${VERSION_NAME_OVERRIDE}" ]]; then
+            VERSION_NAME="${VERSION_NAME_OVERRIDE}"
+            VERSION_NAME_SOURCE="override"
+            OVERRIDE_DISPLAY="${VERSION_NAME_OVERRIDE}"
+          else
+            BASE_VERSION_RAW="${VERSION_PREFIX}"
+            BASE_MAJOR=""
+            BASE_MINOR=""
+            BASE_PATCH=""
+
+            if [[ "${BASE_VERSION_RAW}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              BASE_MAJOR=$((10#${BASH_REMATCH[1]}))
+              BASE_MINOR=$((10#${BASH_REMATCH[2]}))
+              BASE_PATCH=$((10#${BASH_REMATCH[3]}))
+            elif [[ "${BASE_VERSION_RAW}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+              BASE_MAJOR=$((10#${BASH_REMATCH[1]}))
+              BASE_MINOR=$((10#${BASH_REMATCH[2]}))
+              BASE_PATCH=0
+            else
+              echo "ERROR: version-prefix must be in X.Y or X.Y.Z format. Got '${BASE_VERSION_RAW}'."
+              exit 1
+            fi
+
+            # major.minor stay exactly as set by the developer; only the patch
+            # increments — patch = base patch + run count — by exactly 1 per run,
+            # with no carry/rollover and no upper bound (… 1.1.69 -> 1.1.70 -> …).
+            FINAL_MAJOR="${BASE_MAJOR}"
+            FINAL_MINOR="${BASE_MINOR}"
+            FINAL_PATCH=$((BASE_PATCH + INCREMENT_COUNT))
+            VERSION_NAME="${FINAL_MAJOR}.${FINAL_MINOR}.${FINAL_PATCH}"
+          fi
+
+          if ! [[ "${VERSION_CODE}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "ERROR: Computed VERSION_CODE must be a positive integer. Got '${VERSION_CODE}'."
+            exit 1
+          fi
+
+          if (( VERSION_CODE > MAX_PLAY_VERSION_CODE )); then
+            echo "ERROR: Computed VERSION_CODE '${VERSION_CODE}' exceeds Play-safe limit '${MAX_PLAY_VERSION_CODE}'."
+            exit 1
+          fi
+
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+
+          echo "✅ versionName=${VERSION_NAME} versionCode=${VERSION_CODE} (source: ${VERSION_NAME_SOURCE})"
+          echo "::endgroup::"
+
+          {
+            echo "## 🏷️ Android Version Computation"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| versionName source | ${VERSION_NAME_SOURCE} |"
+            echo "| base version | ${VERSION_PREFIX} |"
+            echo "| versionName override | ${OVERRIDE_DISPLAY} |"
+            echo "| versionName offset | ${NAME_OFFSET} |"
+            echo "| versionCode offset | ${CODE_OFFSET} |"
+            echo "| github.run_number | ${GITHUB_RUN_NUMBER} |"
+            echo "| final versionName | ${VERSION_NAME} |"
+            echo "| final versionCode | ${VERSION_CODE} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create android/local.properties
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FLUTTER_BIN="$(command -v flutter || true)"
+          if [[ -z "${FLUTTER_BIN}" ]]; then
+            echo "ERROR: flutter binary was not found on PATH."
+            exit 1
+          fi
+
+          FLUTTER_SDK_PATH="$(dirname "$(dirname "${FLUTTER_BIN}")")"
+          ANDROID_SDK_PATH="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+
+          {
+            echo "flutter.sdk=${FLUTTER_SDK_PATH}"
+            if [[ -n "${ANDROID_SDK_PATH}" ]]; then
+              echo "sdk.dir=${ANDROID_SDK_PATH}"
+            fi
+          } > android/local.properties
+
+      - name: Restore keystore
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.android-keystore-base64 }}
+          KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
+        run: |
+          set -euo pipefail
+          echo "::group::🔏 [SIGN] [CHECKPOINT 1/3] Restore keystore"
+          mkdir -p "$(dirname "${KEYSTORE_OUTPUT_PATH}")"
+          # printf '%s' avoids the trailing newline `echo` would add, which would
+          # corrupt the decoded binary keystore.
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 -d > "${KEYSTORE_OUTPUT_PATH}"
+          if [[ ! -s "${KEYSTORE_OUTPUT_PATH}" ]]; then
+            echo "ERROR: decoded keystore is empty — check android-keystore-base64."
+            exit 1
+          fi
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ Keystore restored to ${KEYSTORE_OUTPUT_PATH}"
+          echo "::endgroup::"
+
+      - name: Create key.properties for Android signing
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.android-keystore-password }}
+          ANDROID_KEY_ALIAS: ${{ secrets.android-key-alias }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.android-key-password }}
+          KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
+        run: |
+          set -euo pipefail
+          # storeFile is resolved relative to android/app by the Flutter Gradle
+          # template, so write the keystore's basename.
+          STORE_FILE_NAME="$(basename "${KEYSTORE_OUTPUT_PATH}")"
+          {
+            printf 'storePassword=%s\n' "${ANDROID_KEYSTORE_PASSWORD}"
+            printf 'keyPassword=%s\n' "${ANDROID_KEY_PASSWORD}"
+            printf 'keyAlias=%s\n' "${ANDROID_KEY_ALIAS}"
+            printf 'storeFile=%s\n' "${STORE_FILE_NAME}"
+          } > android/key.properties
+
+      - name: Verify build prerequisites
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
+        run: |
+          set -euo pipefail
+          test -f android/local.properties
+          test -f "${KEYSTORE_OUTPUT_PATH}"
+          test -f android/key.properties
+
+      - name: Build Release Bundle (AAB)
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::🤖 [CHECKPOINT 2/3] flutter build appbundle"
+          flutter build appbundle --release \
+            --build-name="${VERSION_NAME}" \
+            --build-number="${VERSION_CODE}"
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "::endgroup::"
+
+      - name: Rename bundle
+        id: rename
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          APP_SLUG: ${{ inputs.app-slug }}
+          AAB_NAME_PATTERN: ${{ inputs.aab-name-pattern }}
+        run: |
+          set -euo pipefail
+          echo "::group::🤖 [CHECKPOINT 3/3] Locate & rename AAB"
+
+          SRC=""
+          DEFAULT_SRC="build/app/outputs/bundle/release/app-release.aab"
+          if [[ -f "${DEFAULT_SRC}" ]]; then
+            SRC="${DEFAULT_SRC}"
+          else
+            SRC="$(find build/app/outputs/bundle -type f -name '*.aab' 2>/dev/null | head -n 1 || true)"
+          fi
+
+          if [[ -z "${SRC}" || ! -f "${SRC}" ]]; then
+            echo "ERROR: Expected AAB not found under build/app/outputs/bundle/."
+            find build -maxdepth 10 -type f 2>/dev/null | sort || true
+            exit 1
+          fi
+
+          AAB_OUT="${AAB_NAME_PATTERN}"
+          AAB_OUT="${AAB_OUT//\{app_slug\}/${APP_SLUG}}"
+          AAB_OUT="${AAB_OUT//\{version_name\}/${VERSION_NAME}}"
+          AAB_OUT="${AAB_OUT//\{version_code\}/${VERSION_CODE}}"
+          AAB_OUT="${AAB_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
+
+          mv "${SRC}" "${AAB_OUT}"
+          echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ AAB renamed to ${AAB_OUT}"
+          echo "::endgroup::"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.project-directory }}/${{ steps.rename.outputs.aab_file }}
+          compression-level: 0
+          retention-days: 5
+
+      - name: Build failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error title=🤖 [ANDROID] Build failed::CP1 keystore=${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2 build=${CHECKPOINT_2_STATUS:-⏭️ Not reached} | CP3 rename=${CHECKPOINT_3_STATUS:-⏭️ Not reached}"
+
+      - name: Build summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🤖'
+          title: Flutter Android Build
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | App | `${{ inputs.app-id }}` |
+            | Version | `${{ steps.compute.outputs.version_name }}` (code: ${{ steps.compute.outputs.version_code }}) |
+            | Track | ${{ inputs.play-track }} |
+            | Flutter | `${{ inputs.flutter-version }}` (${{ inputs.flutter-channel }}) |
+            | Runner | ${{ inputs.ubuntu-runner }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Triggered by | ${{ github.actor }} |
+            | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Keystore restored | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | AAB built | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | AAB renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+
+  release_with_environment:
+    name: Android Release (Google Play)
+    needs: build
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    runs-on: ${{ inputs.ubuntu-runner }}
+    timeout-minutes: 20
+    environment: ${{ inputs.release-environment }}
+
+    steps:
+      - name: Announce
+        shell: bash
+        run: |
+          echo "::notice title=🤖 [ANDROID] Google Play release starting::app=${{ inputs.app-id }} version=${{ needs.build.outputs.version-name }} track=${{ inputs.play-track }} env=${{ inputs.release-environment }} actor=${{ github.actor }}"
+          echo "RELEASE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
+      - name: Download artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .
+
+      - name: Resolve AAB path
+        id: aab
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
+          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
+            echo "ERROR: No .aab file found in release workspace."
+            ls -lah
+            exit 1
+          fi
+          echo "path=${AAB_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release credentials
+        shell: bash
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
+            echo "ERROR: Missing required secret 'google-play-service-account-json' for release."
+            echo "Set disable-release=true to run build-only without Google Play publish."
+            exit 1
+          fi
+
+      - name: Upload to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.google-play-service-account-json }}
+          packageName: ${{ inputs.app-id }}
+          releaseFiles: ${{ steps.aab.outputs.path }}
+          tracks: ${{ inputs.play-track }}
+          releaseName: ${{ needs.build.outputs.version-name }}
+          status: ${{ inputs.release-status }}
+          changesNotSentForReview: ${{ inputs.changes-not-sent-for-review }}
+
+      - name: Confirm upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "RELEASE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — ${{ inputs.app-id }} → ${{ inputs.play-track }}"
+
+      - name: Release failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error title=🤖 [ANDROID] Release failed::app=${{ inputs.app-id }} version=${{ needs.build.outputs.version-name }} track=${{ inputs.play-track }}"
+
+      - name: Release summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🤖'
+          title: Flutter Android Release to Google Play (Environment-Gated)
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | App | `${{ inputs.app-id }}` |
+            | Version | `${{ needs.build.outputs.version-name }}` (code: ${{ needs.build.outputs.version-code }}) |
+            | Track | ${{ inputs.play-track }} |
+            | Release status | ${{ inputs.release-status }} |
+            | Environment | ${{ inputs.release-environment }} |
+            | Branch | `${{ github.ref_name }}` |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Google Play upload | ${{ env.RELEASE_CP1_STATUS || '⏭️ Not reached' }} |

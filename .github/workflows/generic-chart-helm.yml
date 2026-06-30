@@ -237,6 +237,7 @@ env:
 
 jobs:
   version:
+    name: Version
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -292,6 +293,7 @@ jobs:
             | Triggered by | ${{ github.actor }} |
 
   nuget:
+    name: NuGet
     runs-on: ubuntu-latest
     if: ${{ inputs.package-nuget }}
     timeout-minutes: 30
@@ -386,6 +388,7 @@ jobs:
             | Runner | ${{ runner.os }} |
 
   build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, nuget]
@@ -451,6 +454,7 @@ jobs:
             | Runner | ${{ runner.os }} |
 
   deploy:
+    name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, build]
@@ -634,6 +638,7 @@ jobs:
             | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
 
   tag:
+    name: Tag
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [version, nuget, build, deploy]

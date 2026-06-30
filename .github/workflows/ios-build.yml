@@ -642,40 +642,39 @@ jobs:
           echo "github.run_number: ${GITHUB_RUN_NUMBER}"
           echo "Original CURRENT_PROJECT_VERSION in pbxproj: ${BASE_BUILD}"
 
-          # Rollover mode: marketing-prefix X.Y or X.Y.Z + run counter -> X.Y.Z with single-digit carry.
+          # SemVer patch-counter mode: major.minor are fixed by the developer
+          # (marketing-prefix); only the patch increments — by exactly 1 per run,
+          # with no carry/rollover and no upper bound (… 1.1.69 -> 1.1.70 -> …).
           PREFIX_RAW="${MARKETING_PREFIX}"
-          if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])\.([0-9])$ ]]; then
+          if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             BASE_MAJOR="${BASH_REMATCH[1]}"
             BASE_MINOR="${BASH_REMATCH[2]}"
             BASE_PATCH="${BASH_REMATCH[3]}"
-          elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9])$ ]]; then
+          elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
             BASE_MAJOR="${BASH_REMATCH[1]}"
             BASE_MINOR="${BASH_REMATCH[2]}"
             BASE_PATCH="0"
           else
-            echo "ERROR: pbxproj-counter-rollover requires marketing-prefix in X.Y or X.Y.Z format with single-digit minor/patch (0-9). Got '${PREFIX_RAW}'."
+            echo "ERROR: marketing-prefix must be in X.Y or X.Y.Z format. Got '${PREFIX_RAW}'."
             exit 1
           fi
 
+          # major.minor stay exactly as set; patch = base patch + run_number
+          # (monotonic, unbounded — no roll-over into minor/major).
           INCREMENT=$((GITHUB_RUN_NUMBER))
-          TOTAL_PATCH=$((BASE_PATCH + INCREMENT))
-          PATCH=$((TOTAL_PATCH % 10))
-          MINOR_CARRY=$((TOTAL_PATCH / 10))
-          TOTAL_MINOR=$((BASE_MINOR + MINOR_CARRY))
-          FINAL_MINOR=$((TOTAL_MINOR % 10))
-          MAJOR_CARRY=$((TOTAL_MINOR / 10))
-          FINAL_MAJOR=$((BASE_MAJOR + MAJOR_CARRY))
+          PATCH=$((BASE_PATCH + INCREMENT))
+          FINAL_MAJOR="${BASE_MAJOR}"
+          FINAL_MINOR="${BASE_MINOR}"
 
           NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
           # build-number-offset is fixed at 0; formula: BASE + run_number
           NEW_BUILD_NUMBER=$((BASE_BUILD + GITHUB_RUN_NUMBER))
 
-          echo "Rollover base major: ${BASE_MAJOR}"
-          echo "Rollover base minor: ${BASE_MINOR}"
-          echo "Rollover base patch: ${BASE_PATCH}"
-          echo "Rollover increment: ${INCREMENT}"
-          echo "Rollover computed patch: ${PATCH}"
-          echo "Rollover computed minor carry: ${MINOR_CARRY}"
+          echo "Base major: ${BASE_MAJOR}"
+          echo "Base minor: ${BASE_MINOR}"
+          echo "Base patch: ${BASE_PATCH}"
+          echo "Patch increment (run_number): ${INCREMENT}"
+          echo "Computed patch: ${PATCH}"
           echo "Computed MARKETING_VERSION=${NEW_MARKETING_VERSION}"
           echo "Computed CURRENT_PROJECT_VERSION=${NEW_BUILD_NUMBER}"
 
