@@ -15,8 +15,24 @@
 # `flutter build appbundle` invocation, generalized behind inputs/secrets.
 # Per-branch dev/prod selection lives in the caller (see flutter-android-app
 # starter template), never here.
+#
+# FUTURE (optional hardening): the release job authenticates to Google Play with
+# a long-lived service-account JSON (google-play-service-account-json). GCP now
+# recommends keyless Workload Identity Federation — configure
+# google-github-actions/auth with a workload identity provider and pass the
+# resulting credentials file to r0adkll/upload-google-play via `serviceAccountJson`
+# instead of `serviceAccountJsonPlainText`. That removes the long-lived key from
+# the org's secret store. Not adopted yet (current approach is fully supported).
 # =============================================================================
 name: Flutter Android Build & Release
+
+# Least privilege: this pipeline only reads the repo (checkout) and publishes to
+# Google Play via the service-account JSON (external API) — it never writes
+# contents, tags, or packages with GITHUB_TOKEN. Artifact upload/download use the
+# Actions runtime token, not these permissions. A reusable workflow can only
+# narrow the token, never widen it, so this cannot break a caller that grants more.
+permissions:
+  contents: read
 
 on:
   workflow_call:
@@ -184,6 +200,15 @@ jobs:
     name: Android Build
     runs-on: ${{ inputs.ubuntu-runner }}
     timeout-minutes: 60
+    # Superseded builds on the same ref are cancelled to save runner minutes.
+    # Scoped per caller workflow + ref so unrelated runs never collide.
+    concurrency:
+      group: ${{ github.workflow }}-flutter-android-build-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      # Opt the JS-based actions (checkout, setup-java, setup-gradle) onto Node 24
+      # ahead of GitHub's Node 20 retirement — matches the RN android-build.yml.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     outputs:
       version-name: ${{ steps.compute.outputs.version_name }}
       version-code: ${{ steps.compute.outputs.version_code }}
@@ -215,8 +240,24 @@ jobs:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
           # NOTE: intentionally NO `cache: gradle` — it routes through the
-          # archived gradle-build-action and conflicts with Flutter's own
-          # Gradle invocation. Flutter manages the Android build itself.
+          # archived gradle-build-action and conflicts with setup-gradle below.
+
+      - name: Setup Gradle
+        # Caches the Gradle User Home (~/.gradle) so the Android Gradle Plugin
+        # and dependencies aren't re-downloaded every run. setup-gradle owns
+        # Gradle-home caching (never add a manual actions/cache for ~/.gradle),
+        # and its caching applies to the gradlew that `flutter build appbundle`
+        # invokes under the hood — Flutter still drives the actual build.
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          # Use the project's android/gradle-wrapper.properties version; don't
+          # install a separate Gradle.
+          gradle-version: wrapper
+          cache-read-only: false
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            wrapper
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -487,6 +528,20 @@ jobs:
           # minimum) is plenty and keeps Actions storage near-zero.
           retention-days: 1
 
+      - name: Cleanup signing artifacts
+        if: always()
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
+        run: |
+          # Best-effort teardown of the signing material this job wrote into the
+          # checked-out tree (keystore + key.properties). Never fails the job
+          # (always() + `|| true`). Ephemeral GitHub-hosted runners are discarded
+          # after the job, but this keeps a self-hosted runner from leaking the
+          # keystore or credentials into a later job.
+          rm -f "${KEYSTORE_OUTPUT_PATH}" android/key.properties 2>/dev/null || true
+
       - name: Build failure
         if: failure()
         shell: bash
@@ -527,6 +582,13 @@ jobs:
     runs-on: ${{ inputs.ubuntu-runner }}
     timeout-minutes: 20
     environment: ${{ inputs.release-environment }}
+    # Serialize uploads on the same ref but never cancel one in flight — a
+    # cancelled Google Play upload can leave a half-created edit on the console.
+    concurrency:
+      group: ${{ github.workflow }}-flutter-android-release-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Announce
@@ -550,9 +612,19 @@ jobs:
       - name: Resolve AAB path
         id: aab
         shell: bash
+        env:
+          CANDIDATE: ${{ needs.build.outputs.aab-file }}
         run: |
           set -euo pipefail
-          AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
+          # Prefer the exact file the build job produced; fall back to a glob
+          # only if it's missing (mirrors the iOS resolve step).
+          AAB_FILE=""
+          if [[ -n "${CANDIDATE}" ]]; then
+            AAB_FILE="$(basename "${CANDIDATE}")"
+          fi
+          if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
+            AAB_FILE="$(ls -1 *.aab 2>/dev/null | head -n 1 || true)"
+          fi
           if [[ -z "${AAB_FILE}" || ! -f "${AAB_FILE}" ]]; then
             echo "ERROR: No .aab file found in release workspace."
             ls -lah

@@ -22,6 +22,14 @@
 # =============================================================================
 name: Flutter iOS Build & TestFlight Release
 
+# Least privilege: this pipeline only reads the repo (checkout) and uploads to
+# TestFlight via the App Store Connect API — it never writes contents, tags, or
+# packages with GITHUB_TOKEN. Artifact upload/download use the Actions runtime
+# token, not these permissions. A reusable workflow can only narrow the token,
+# never widen it, so this cannot break a caller that grants more.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -171,6 +179,11 @@ jobs:
     name: iOS Build
     runs-on: ${{ inputs.macos-runner }}
     timeout-minutes: 60
+    # Superseded builds on the same ref are cancelled to save expensive macOS
+    # minutes. Scoped per caller workflow + ref so unrelated runs never collide.
+    concurrency:
+      group: ${{ github.workflow }}-flutter-ios-build-${{ github.ref }}
+      cancel-in-progress: true
     outputs:
       version: ${{ steps.version.outputs.version }}
       build-number: ${{ steps.version.outputs.build_number }}
@@ -207,14 +220,11 @@ jobs:
         with:
           flutter-version: ${{ inputs.flutter-version }}
           channel: ${{ inputs.flutter-channel }}
+          # cache: true also caches the pub package cache (the pub-cache input
+          # falls back to this value), so a separate actions/cache for
+          # ~/.pub-cache would be redundant — and ineffective, since the action
+          # redirects PUB_CACHE to its own tool-cache path.
           cache: true
-
-      - name: Cache pub packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.pub-cache
-          key: pub-${{ hashFiles(format('{0}/pubspec.lock', inputs.project-directory)) }}
-          restore-keys: pub-
 
       - name: Install Flutter dependencies${{ inputs.run-analyze && ' & analyze' || '' }}
         working-directory: ${{ inputs.project-directory }}
@@ -368,41 +378,29 @@ jobs:
         with:
           profileBase64: ${{ secrets.ios-mobileprovision-base64 }}
 
-      - name: Extract profile metadata
-        id: profile
-        shell: bash
-        env:
-          IOS_MOBILEPROVISION_BASE64: ${{ secrets.ios-mobileprovision-base64 }}
-        run: |
-          set -euo pipefail
-          # ios-install-profile exports IOS_PROFILE_NAME / IOS_PROFILE_UUID but
-          # not the team id or bundle id, which ExportOptions.plist needs — derive
-          # them here from the same profile.
-          PROFILE_PATH="${RUNNER_TEMP}/profile_meta.mobileprovision"
-          PROFILE_PLIST="${RUNNER_TEMP}/profile_meta.plist"
-          printf '%s' "${IOS_MOBILEPROVISION_BASE64}" | base64 -D > "${PROFILE_PATH}"
-          security cms -D -i "${PROFILE_PATH}" > "${PROFILE_PLIST}"
-
-          TEAM_ID_FROM_PROFILE=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${PROFILE_PLIST}")
-          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${PROFILE_PLIST}")
-          BUNDLE_ID="${APP_ID#*.}"
-
-          echo "team_id=${TEAM_ID_FROM_PROFILE}" >> "$GITHUB_OUTPUT"
-          echo "bundle_id=${BUNDLE_ID}" >> "$GITHUB_OUTPUT"
-
-          # CHECKPOINT 1: signing material installed (cert + profile + metadata).
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-
       - name: Generate ExportOptions.plist
         shell: bash
         env:
           IOS_TEAM_ID: ${{ secrets.ios-team-id }}
           EXPORT_METHOD: ${{ inputs.export-method }}
           PROFILE_NAME: ${{ env.IOS_PROFILE_NAME }}
-          BUNDLE_ID: ${{ steps.profile.outputs.bundle_id }}
-          TEAM_ID_FROM_PROFILE: ${{ steps.profile.outputs.team_id }}
+          # Team id + bundle id are extracted once by ios-install-profile and
+          # exported to the job env, so the profile secret is not decoded again.
+          BUNDLE_ID: ${{ env.IOS_PROFILE_BUNDLE_ID }}
+          TEAM_ID_FROM_PROFILE: ${{ env.IOS_PROFILE_TEAM_ID }}
         run: |
           set -euo pipefail
+
+          # The profile install is best-effort about metadata; assert here (this
+          # workflow requires a bundle id) so a malformed profile fails loudly
+          # rather than producing an ExportOptions.plist with an empty key.
+          if [[ -z "${BUNDLE_ID}" ]]; then
+            echo "ERROR: bundle id was not resolved from the provisioning profile (IOS_PROFILE_BUNDLE_ID empty)."
+            exit 1
+          fi
+
+          # CHECKPOINT 1: signing material installed (cert + profile + metadata).
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
           TEAM_ID="${IOS_TEAM_ID}"
           if [[ -z "${TEAM_ID}" ]]; then
@@ -426,10 +424,6 @@ jobs:
               <key>${BUNDLE_ID}</key>
               <string>${PROFILE_NAME}</string>
             </dict>
-            <key>uploadBitcode</key>
-            <false/>
-            <key>compileBitcode</key>
-            <false/>
           </dict>
           </plist>
           EOF
@@ -512,8 +506,22 @@ jobs:
       - name: Cleanup signing artifacts
         if: always()
         shell: bash
+        env:
+          PROFILE_UUID: ${{ env.IOS_PROFILE_UUID }}
         run: |
-          security delete-keychain "${KEYCHAIN_PATH:-$RUNNER_TEMP/build.keychain-db}" || true
+          # Best-effort teardown of every piece of signing material this job put
+          # on the runner: the temporary keychain, the installed provisioning
+          # profile, and the decoded cert/profile/plist scratch files. Never
+          # fails the job (always() + `|| true`). Ephemeral GitHub-hosted runners
+          # are discarded after the job, but this keeps self-hosted runners from
+          # leaking a certificate or profile into a later job.
+          security delete-keychain "${KEYCHAIN_PATH:-$RUNNER_TEMP/build.keychain-db}" 2>/dev/null || true
+          if [[ -n "${PROFILE_UUID:-}" ]]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision" || true
+          fi
+          rm -f "$RUNNER_TEMP/cert.p12" \
+                "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/profile.plist" \
+                "$RUNNER_TEMP/ExportOptions.plist" 2>/dev/null || true
 
       - name: Build failure
         if: failure()
@@ -556,6 +564,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ inputs.release-environment }}
+    # Serialize uploads on the same ref but never cancel one in flight — a
+    # cancelled TestFlight upload can leave a half-processed build on Apple.
+    concurrency:
+      group: ${{ github.workflow }}-flutter-ios-release-${{ github.ref }}
+      cancel-in-progress: false
 
     steps:
       - name: Announce

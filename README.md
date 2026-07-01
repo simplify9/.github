@@ -590,7 +590,7 @@ jobs:
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
 ```
 
-**Notes:** manual signing only — keychain/cert/profile install is delegated to the shared `ios-install-cert` / `ios-install-profile` composite actions, then the `pbxproj` is rewritten to manual signing (`Apple Distribution`) with fail-loud `grep` asserts and a generated `ExportOptions.plist`. `~/.pub-cache` and `ios/Pods` are cached on `pubspec.lock` / `Podfile.lock`; `pod install` deliberately avoids `deintegrate`/`--repo-update` to preserve the cache. Use the **Flutter iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
+**Notes:** manual signing only — keychain/cert/profile install is delegated to the shared `ios-install-cert` / `ios-install-profile` composite actions, then the `pbxproj` is rewritten to manual signing (`Apple Distribution`) with fail-loud `grep` asserts and a generated `ExportOptions.plist`. The pub package cache is handled by `subosito/flutter-action`'s `cache: true` (no separate `actions/cache` step), and `ios/Pods` is cached on `Podfile.lock`; `pod install` deliberately avoids `deintegrate`/`--repo-update` to preserve the cache. Use the **Flutter iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
 
 ---
 
@@ -641,7 +641,7 @@ jobs:
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
 ```
 
-**Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 → 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK/Gradle plumbing — Flutter owns the Android build. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.
+**Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 → 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK plumbing — Flutter owns the actual build — but the Gradle User Home is cached via `gradle/actions/setup-gradle@v5` (which applies to the `gradlew` Flutter invokes), and both jobs opt JS-based actions onto Node 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`. The keystore and generated `android/key.properties` are removed by an `always()` cleanup step. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.
 
 ---
 
@@ -705,7 +705,7 @@ All 18 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `ios-install-cert` | Import a `.p12` into a temporary keychain (`p12Base64`, `p12Password`) |
-| `ios-install-profile` | Install a `.mobileprovision`, extract UUID/Name (`profileBase64`) |
+| `ios-install-profile` | Install a `.mobileprovision`, extract UUID/Name + best-effort Team ID/Bundle ID (`profileBase64`) |
 | `xcode-build` | `xcodebuild archive` with manual signing (`workspace`, `scheme`, `archivePath`, `developmentTeam`, `provisioningProfileUuid`, `keychainPath`) |
 | `xcode-export` | `xcodebuild -exportArchive` → `.ipa` (`archivePath`, `exportOptionsPlist`, `exportPath`) |
 
@@ -800,6 +800,34 @@ Helm/kubectl CLI: the deploy/package actions default to `latest`; some workflows
 ---
 
 ## Troubleshooting
+
+### Checkout fails: `No url found for submodule path '.claude/worktrees/...' in .gitmodules`
+
+Symptom — every job that runs `actions/checkout` dies at the end (the "Removing auth" / submodule cleanup step) with exit code 128, even though the checkout itself succeeded:
+
+```text
+Error: fatal: No url found for submodule path '.claude/worktrees/agent-xxxxxxxx' in .gitmodules
+Error: The process '/usr/bin/git' failed with exit code 128
+```
+
+This is **not** a problem with the reusable workflow — it's a corrupted state in **your (the consumer) repo**. A Claude Code git worktree under `.claude/worktrees/` was accidentally committed. Because that directory contains its own `.git`, git recorded it as a **gitlink** (a `160000` tree entry, the same way submodules are stored) but there's no matching entry in `.gitmodules`. `actions/checkout`'s teardown runs `git submodule foreach --recursive`, hits the URL-less gitlink, and fails. It surfaces on whichever job checks out first (often the versioning job).
+
+**Fix** — in your repo, remove the stray gitlink and stop it recurring:
+
+```sh
+git rm --cached -r .claude/worktrees      # drop the gitlink from the index (keeps working tree)
+echo ".claude/" >> .gitignore
+git commit -m "Remove stray .claude worktree gitlink breaking CI checkout"
+git push
+```
+
+If the recursive form complains, target the exact path (`git rm --cached .claude/worktrees/agent-xxxxxxxx`). Verify none remain before pushing — this should print nothing:
+
+```sh
+git ls-files -s | grep 160000            # any output = a stray gitlink still tracked
+```
+
+If the bad commit is on more than one branch, repeat on each affected branch.
 
 ### Deploy job shows as "skipped"
 

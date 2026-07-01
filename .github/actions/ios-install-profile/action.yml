@@ -10,6 +10,10 @@
 #   - Copies the profile into the standard provisioning profiles directory,
 #     named <UUID>.mobileprovision.
 #   - Exports IOS_PROFILE_UUID / IOS_PROFILE_NAME to $GITHUB_ENV for later steps.
+#   - Best-effort exports IOS_PROFILE_TEAM_ID / IOS_PROFILE_BUNDLE_ID too, so
+#     callers building an ExportOptions.plist don't have to re-decode the
+#     profile secret a second time. These are left empty (never fatal) if a
+#     profile omits them, so existing callers that don't need them are unaffected.
 #
 # Inputs:
 #   profileBase64  (required)  Base64-encoded .mobileprovision profile.
@@ -72,8 +76,16 @@ runs:
         cp "$RUNNER_TEMP/profile.mobileprovision" \
           "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
 
+        # Best-effort signing metadata for callers (ExportOptions.plist). Never
+        # fatal: a profile without these keys must not break the plain install.
+        TEAM_ID_FROM_PROFILE="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profile.plist" 2>/dev/null || true)"
+        APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist" 2>/dev/null || true)"
+        BUNDLE_ID="${APP_ID#*.}"
+
         echo "IOS_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_TEAM_ID=$TEAM_ID_FROM_PROFILE" >> "$GITHUB_ENV"
+        echo "IOS_PROFILE_BUNDLE_ID=$BUNDLE_ID" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "✅ Profile installed — Name: $NAME, UUID: $UUID"
         echo "::endgroup::"

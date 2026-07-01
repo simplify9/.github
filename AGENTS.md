@@ -80,6 +80,8 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 
 **Helm / kubectl CLI versions:** the composite actions (`helm-deploy`, `helm-deploy-s9generic`, `helm-package-push`) default their `helm-version` / `kubectl-version` inputs to `latest`. Some reusable workflows pin a specific CLI: `helm-deploy-values.yml` defaults Helm `v4.2.0` / kubectl `v1.33.0`; `gateway-chart-cicd.yml` defaults Helm `v4.2.2`. There is no single global CLI pin — check the specific workflow/action input.
 
+> **`actions/checkout@v7` gotcha — stray `.claude/worktrees` gitlink (consumer-repo issue, not ours).** If a caller reports checkout failing at the "Removing auth" / submodule-cleanup step with `fatal: No url found for submodule path '.claude/worktrees/agent-...' in .gitmodules` (exit code 128), **do not touch any workflow or action here** — the reusable pipeline is fine. The consumer repo accidentally committed a Claude Code worktree under `.claude/worktrees/`; since that dir has its own `.git`, git stored it as a `160000` gitlink with no `.gitmodules` entry, and checkout's `git submodule foreach --recursive` teardown chokes on it. It surfaces on whichever job checks out first (usually versioning). Fix is in the caller repo: `git rm --cached -r .claude/worktrees`, add `.claude/` to `.gitignore`, commit, push (repeat per affected branch); verify with `git ls-files -s | grep 160000` returning nothing. See the README Troubleshooting section for the full caller-facing writeup.
+
 ---
 
 ## Conventions — Must Follow for Every Change
@@ -317,7 +319,7 @@ All 18 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ### iOS
 - `ios-install-cert` — Imports a base64 `.p12` into a temporary keychain. Inputs: `p12Base64`, `p12Password`, `keychainPath`. Exports `KEYCHAIN_PATH` to `$GITHUB_ENV`.
-- `ios-install-profile` — Installs a base64 `.mobileprovision` and extracts its UUID/Name. Input: `profileBase64`. Exports `IOS_PROFILE_UUID` / `IOS_PROFILE_NAME` to `$GITHUB_ENV`.
+- `ios-install-profile` — Installs a base64 `.mobileprovision` and extracts its UUID/Name. Input: `profileBase64`. Exports `IOS_PROFILE_UUID` / `IOS_PROFILE_NAME` to `$GITHUB_ENV`, plus best-effort `IOS_PROFILE_TEAM_ID` / `IOS_PROFILE_BUNDLE_ID` (empty, never fatal, if the profile omits them) so callers building an `ExportOptions.plist` don't re-decode the profile secret.
 - `xcode-build` — `xcodebuild archive` (manual signing by default). Inputs: `workspace`, `scheme`, `configuration`, `archivePath`, `signingStyle`, `developmentTeam`, `provisioningProfileUuid`, `keychainPath`.
 - `xcode-export` — `xcodebuild -exportArchive` → `.ipa`. Inputs: `archivePath`, `exportOptionsPlist`, `exportPath`.
 
