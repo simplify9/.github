@@ -22,7 +22,9 @@
 #     environment.
 #
 # Inputs:
-#   projects       (required) Path(s)/glob of .csproj to pack. Empty = skip.
+#   projects       (required) Path(s)/glob of .csproj to pack; pass several as a
+#                  space- or newline-separated list (a YAML `|` block scalar is
+#                  honoured in full, not just its first line). Empty = skip.
 #   configuration  (optional) Build configuration (default: Release).
 #   version        (optional) Semantic version for the NuGet package(s).
 #   api-key        (required) API key for the NuGet feed.
@@ -54,7 +56,7 @@ description: 'Reusable action to pack .NET project(s) and push the resulting NuG
 
 inputs:
   projects:
-    description: 'Path(s)/glob of .csproj file(s) to pack. Empty value skips packing.'
+    description: 'Path(s)/glob of .csproj file(s) to pack; pass several as a space- or newline-separated list (YAML `|` block). Empty value skips packing.'
     required: true
   configuration:
     description: 'Build configuration'
@@ -112,7 +114,12 @@ runs:
         # literal path that itself contains spaces cannot be passed as input,
         # because whitespace is what separates one pattern from the next.)
         declare -a PROJECT_SET=()
-        read -ra PATTERNS <<< "$PROJECTS"
+        # `read -d ''` consumes the WHOLE value (splitting on IFS = space/tab/
+        # newline), so a multi-line YAML block scalar is honoured in full rather
+        # than only its first line. Plain `read -ra` stops at the first newline,
+        # which silently dropped every project after the first. It returns
+        # non-zero at EOF, hence the `|| true` under `set -e`.
+        read -rd '' -a PATTERNS <<< "$PROJECTS" || true
         for pattern in "${PATTERNS[@]}"; do
           for match in $pattern; do
             [[ "$match" == *"/obj/"* || "$match" == *"/bin/"* ]] && continue

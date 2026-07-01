@@ -192,9 +192,14 @@ jobs:
     steps:
       - name: Announce
         shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_PREFIX: ${{ inputs.version-prefix }}
+          PLAY_TRACK: ${{ inputs.play-track }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🤖 [ANDROID] Flutter build starting::app=${{ inputs.app-id }} version-prefix=${{ inputs.version-prefix }} track=${{ inputs.play-track }} actor=${{ github.actor }}"
+          echo "::notice title=🤖 [ANDROID] Flutter build starting::app=${APP_ID} version-prefix=${VERSION_PREFIX} track=${PLAY_TRACK} actor=${ACTOR}"
           {
             echo "CHECKPOINT_1_STATUS=⏳ Pending"
             echo "CHECKPOINT_2_STATUS=⏳ Pending"
@@ -478,7 +483,9 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.project-directory }}/${{ steps.rename.outputs.aab_file }}
           compression-level: 0
-          retention-days: 5
+          # Transient hand-off to the release job in the same run; 1 day (the
+          # minimum) is plenty and keeps Actions storage near-zero.
+          retention-days: 1
 
       - name: Build failure
         if: failure()
@@ -524,8 +531,14 @@ jobs:
     steps:
       - name: Announce
         shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_NAME: ${{ needs.build.outputs.version-name }}
+          PLAY_TRACK: ${{ inputs.play-track }}
+          RELEASE_ENV: ${{ inputs.release-environment }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🤖 [ANDROID] Google Play release starting::app=${{ inputs.app-id }} version=${{ needs.build.outputs.version-name }} track=${{ inputs.play-track }} env=${{ inputs.release-environment }} actor=${{ github.actor }}"
+          echo "::notice title=🤖 [ANDROID] Google Play release starting::app=${APP_ID} version=${VERSION_NAME} track=${PLAY_TRACK} env=${RELEASE_ENV} actor=${ACTOR}"
           echo "RELEASE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Download artifact
@@ -572,16 +585,23 @@ jobs:
 
       - name: Confirm upload
         shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          PLAY_TRACK: ${{ inputs.play-track }}
         run: |
           set -euo pipefail
           echo "RELEASE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — ${{ inputs.app-id }} → ${{ inputs.play-track }}"
+          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — ${APP_ID} → ${PLAY_TRACK}"
 
       - name: Release failure
         if: failure()
         shell: bash
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          VERSION_NAME: ${{ needs.build.outputs.version-name }}
+          PLAY_TRACK: ${{ inputs.play-track }}
         run: |
-          echo "::error title=🤖 [ANDROID] Release failed::app=${{ inputs.app-id }} version=${{ needs.build.outputs.version-name }} track=${{ inputs.play-track }}"
+          echo "::error title=🤖 [ANDROID] Release failed::app=${APP_ID} version=${VERSION_NAME} track=${PLAY_TRACK}"
 
       - name: Release summary
         if: always()

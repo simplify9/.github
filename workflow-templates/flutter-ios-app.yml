@@ -60,7 +60,7 @@ jobs:
       # ── Export & upload ───────────────────────────────────────────────────
       ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
       release-environment: ios-develop
-      disable-release: ${{ inputs.disable_release }}
+      disable-release: ${{ inputs.disable_release || false }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
       ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
@@ -86,7 +86,7 @@ jobs:
       # ── Export & upload ───────────────────────────────────────────────────
       ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
       release-environment: ios-production
-      disable-release: ${{ inputs.disable_release }}
+      disable-release: ${{ inputs.disable_release || false }}
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
       ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}

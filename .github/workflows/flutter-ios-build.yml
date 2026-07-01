@@ -179,9 +179,14 @@ jobs:
     steps:
       - name: Announce
         shell: bash
+        env:
+          IOS_DIR: ${{ inputs.ios-dir }}
+          EXPORT_METHOD: ${{ inputs.export-method }}
+          MACOS_RUNNER: ${{ inputs.macos-runner }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Flutter build starting::ios-dir=${{ inputs.ios-dir }} export-method=${{ inputs.export-method }} runner=${{ inputs.macos-runner }} actor=${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] Flutter build starting::ios-dir=${IOS_DIR} export-method=${EXPORT_METHOD} runner=${MACOS_RUNNER} actor=${ACTOR}"
           {
             echo "CHECKPOINT_1_STATUS=⏳ Pending"
             echo "CHECKPOINT_2_STATUS=⏳ Pending"
@@ -315,7 +320,9 @@ jobs:
           # run_number — by exactly 1 per run, monotonic, unbounded, with no
           # roll-over into minor/major (… 1.1.69 -> 1.1.70 -> …).
           INCREMENT=$((GITHUB_RUN_NUMBER))
-          PATCH=$((BASE_PATCH + INCREMENT))
+          # 10# forces decimal so a leading-zero patch (e.g. 1.2.08) is not
+          # misread as octal and aborted under set -euo pipefail.
+          PATCH=$((10#${BASE_PATCH} + INCREMENT))
           FINAL_MAJOR="${BASE_MAJOR}"
           FINAL_MINOR="${BASE_MINOR}"
 
@@ -323,8 +330,9 @@ jobs:
           # Formula: BASE + run_number. NOTE: github.run_number resets to 1 if
           # this workflow file is renamed/recreated; if that happens, bump the
           # "+N" build in pubspec.yaml to restore a higher floor so App Store
-          # Connect keeps accepting uploads.
-          BUILD_NUMBER=$((BASE_BUILD + GITHUB_RUN_NUMBER))
+          # Connect keeps accepting uploads. 10# forces decimal so a leading-zero
+          # pubspec build (08/09) is not misread as octal under set -euo pipefail.
+          BUILD_NUMBER=$((10#${BASE_BUILD} + GITHUB_RUN_NUMBER))
 
           echo "Computed MARKETING_VERSION=${VERSION}"
           echo "Computed CURRENT_PROJECT_VERSION=${BUILD_NUMBER}"
@@ -497,7 +505,9 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.project-directory }}/${{ steps.rename_ipa.outputs.ipa_file }}
           compression-level: 0
-          retention-days: 7
+          # Transient hand-off to the release job in the same run; 1 day (the
+          # minimum) is plenty and keeps Actions storage near-zero.
+          retention-days: 1
 
       - name: Cleanup signing artifacts
         if: always()
@@ -550,8 +560,13 @@ jobs:
     steps:
       - name: Announce
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
+          RELEASE_ENV: ${{ inputs.release-environment }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🍎 [IOS] TestFlight upload starting::version=${{ needs.build.outputs.version }} build=${{ needs.build.outputs.build-number }} env=${{ inputs.release-environment }} actor=${{ github.actor }}"
+          echo "::notice title=🍎 [IOS] TestFlight upload starting::version=${VERSION} build=${BUILD_NUMBER} env=${RELEASE_ENV} actor=${ACTOR}"
           echo "RELEASE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
 
       - name: Download IPA artifact
@@ -668,8 +683,11 @@ jobs:
       - name: Release failure
         if: failure()
         shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
         run: |
-          echo "::error title=🍎 [IOS] TestFlight upload failed::version=${{ needs.build.outputs.version }} build=${{ needs.build.outputs.build-number }}"
+          echo "::error title=🍎 [IOS] TestFlight upload failed::version=${VERSION} build=${BUILD_NUMBER}"
 
       - name: Release summary
         if: always()

@@ -103,9 +103,14 @@ jobs:
       # init-job-image-pull-secret: "myorgcr"             # default sf9cr; '' for public images
 
       # ── NuGet publishing (optional — uncomment to enable) ───────────────────
+      # nuget-projects takes one or more globs/paths: a single glob, a space-
+      # separated list, or one entry per line as a YAML `|` block (all honoured
+      # in full). Same applies to test-projects below.
       # package-nuget: true
-      # nuget-projects: "src/**/*.csproj"
       # dotnet-version: "8.0.x"
+      # nuget-projects: |
+      #   src/My.Sdk/My.Sdk.csproj
+      #   src/My.Tools/My.Tools.csproj
       # run-tests: true
       # test-projects: "**/*Tests/*.csproj"
     secrets:
@@ -164,9 +169,14 @@ jobs:
       # init-job-image-pull-secret: "myorgcr"
 
       # ── NuGet publishing (optional — uncomment to enable) ───────────────────
+      # nuget-projects takes one or more globs/paths: a single glob, a space-
+      # separated list, or one entry per line as a YAML `|` block (all honoured
+      # in full). Same applies to test-projects below.
       # package-nuget: true
-      # nuget-projects: "src/**/*.csproj"
       # dotnet-version: "8.0.x"
+      # nuget-projects: |
+      #   src/My.Sdk/My.Sdk.csproj
+      #   src/My.Tools/My.Tools.csproj
       # run-tests: true
       # test-projects: "**/*Tests/*.csproj"
     secrets:
