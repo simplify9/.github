@@ -61,7 +61,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  Publish:
     uses: simplify9/.github/.github/workflows/reusable-service-cicd.yml@main
     with:
       # ── Helm chart ──────────────────────────────────────────────────────────

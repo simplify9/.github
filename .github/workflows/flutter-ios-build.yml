@@ -1,0 +1,694 @@
+# =============================================================================
+# Flutter · iOS Build & TestFlight Release (reusable)
+# =============================================================================
+# Builds and signs a Flutter iOS app on a macOS runner, exports an IPA via
+# `flutter build ipa`, and uploads it to TestFlight from ubuntu-latest using
+# the App Store Connect API (apple-actions/upload-testflight-build@v5).
+#
+# Two-job pattern:
+#   build                    → archives + exports + uploads the signed IPA
+#   release_with_environment → downloads + uploads to TestFlight, gated by a
+#                              named GitHub Environment and skippable via
+#                              disable-release.
+#
+# Drop-in replacement for laflef-mobile/.github/workflows/testflight.yml — same
+# Flutter setup, SemVer patch-counter versioning from pubspec, manual
+# signing (sed pbxproj rewrite + generated ExportOptions.plist) and
+# `flutter build ipa` invocation, generalized behind inputs/secrets. Keychain /
+# certificate / profile install is delegated to the shared composite actions
+# ios-install-cert@main and ios-install-profile@main.
+# Per-branch dev/prod selection lives in the caller (see flutter-ios-app starter
+# template), never here.
+# =============================================================================
+name: Flutter iOS Build & TestFlight Release
+
+on:
+  workflow_call:
+    inputs:
+      # ── Runner & toolchain ──────────────────────────────────────────────────
+      macos-runner:
+        description: GitHub-hosted macOS runner label (e.g. macos-latest or macos-26)
+        required: false
+        type: string
+        default: macos-latest
+      xcode-version:
+        description: >
+          Optional Xcode selector for maxim-lobanov/setup-xcode (e.g. "26" or
+          "26.3"). Empty uses the runner's default Xcode. App Store Connect
+          requires the current iOS SDK, so pin a recent Xcode on older runners.
+        required: false
+        type: string
+        default: ""
+      flutter-version:
+        description: >
+          Flutter version selector for subosito/flutter-action (e.g. "3.x" or an
+          exact "3.27.1"). Pin an exact version for reproducible builds. Default
+          "3.x" reproduces the laflef reference.
+        required: false
+        type: string
+        default: "3.x"
+      flutter-channel:
+        description: Flutter release channel for subosito/flutter-action
+        required: false
+        type: string
+        default: stable
+
+      # ── iOS project layout ──────────────────────────────────────────────────
+      ios-dir:
+        description: iOS project directory (holds the Podfile and Runner project)
+        required: false
+        type: string
+        default: ios
+      pbxproj-path:
+        description: Path to the Xcode project.pbxproj that gets the manual-signing rewrite
+        required: false
+        type: string
+        default: ios/Runner.xcodeproj/project.pbxproj
+      app-slug:
+        description: App slug used in the output IPA file name
+        required: false
+        type: string
+        default: app
+      project-directory:
+        description: >
+          Path to the Flutter project root, relative to the repo root. Default
+          "." for a repo whose root is the Flutter app; set to a subdirectory
+          (e.g. "mobile") for a monorepo where the Flutter app is nested.
+          ios-dir / pbxproj-path are resolved relative to this directory.
+        required: false
+        type: string
+        default: "."
+
+      # ── Static analysis ─────────────────────────────────────────────────────
+      run-analyze:
+        description: Run `flutter analyze` before building (off by default — matches the laflef iOS reference)
+        required: false
+        type: boolean
+        default: false
+      analyze-fatal-level:
+        description: >
+          Severity that fails `flutter analyze` when run-analyze is true: "none"
+          (--no-fatal-infos --no-fatal-warnings), "warning" (--no-fatal-infos),
+          or "info" (--fatal-infos --fatal-warnings).
+        required: false
+        type: string
+        default: none
+
+      # ── Export & artifact ───────────────────────────────────────────────────
+      export-method:
+        description: ExportOptions.plist distribution method (app-store-connect, release-testing, enterprise, debugging)
+        required: false
+        type: string
+        default: app-store-connect
+      ipa-name-pattern:
+        description: Output IPA file name pattern with tokens {app_slug},{version},{build_number},{run_number}
+        required: false
+        type: string
+        default: "{app_slug}-{version}-{build_number}.ipa"
+      artifact-name:
+        description: Artifact name for upload/download pairing
+        required: false
+        type: string
+        default: ipa
+
+      # ── Release ─────────────────────────────────────────────────────────────
+      wait-for-processing:
+        description: >
+          If true, the upload step polls App Store Connect until processing
+          finishes. Default false (fire-and-forget): JWT tokens expire after
+          ~20 min while Apple processing often takes longer, so polling can 401
+          after a perfectly good upload. Apple emails the processing result.
+        required: false
+        type: boolean
+        default: false
+      release-environment:
+        description: GitHub Environment for the release job (e.g. ios-staging or ios-production)
+        required: false
+        type: string
+        default: ios-staging
+      disable-release:
+        description: If true, skip the TestFlight upload job and run build-only
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      ios-p12-base64:
+        description: Base64-encoded signing certificate (.p12)
+        required: true
+      ios-p12-password:
+        description: Password for the .p12 certificate
+        required: true
+      ios-mobileprovision-base64:
+        description: Base64-encoded provisioning profile (.mobileprovision)
+        required: true
+      ios-team-id:
+        description: Optional explicit Apple Team ID (falls back to the profile's team)
+        required: false
+      appstore-api-key-id:
+        description: App Store Connect API key id (required only when releasing)
+        required: false
+      appstore-issuer-id:
+        description: App Store Connect issuer id (required only when releasing)
+        required: false
+      appstore-api-private-key-base64:
+        description: Base64-encoded App Store Connect API private key .p8 PEM (required only when releasing)
+        required: false
+
+    outputs:
+      version:
+        description: Marketing version (CFBundleShortVersionString) used for this build
+        value: ${{ jobs.build.outputs.version }}
+      build-number:
+        description: Build number (CFBundleVersion) used for this build
+        value: ${{ jobs.build.outputs.build-number }}
+      ipa-file:
+        description: Output IPA file name uploaded and released
+        value: ${{ jobs.build.outputs.ipa-file }}
+
+jobs:
+  build:
+    name: iOS Build
+    runs-on: ${{ inputs.macos-runner }}
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build-number: ${{ steps.version.outputs.build_number }}
+      ipa-file: ${{ steps.rename_ipa.outputs.ipa_file }}
+
+    steps:
+      - name: Announce
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice title=🍎 [IOS] Flutter build starting::ios-dir=${{ inputs.ios-dir }} export-method=${{ inputs.export-method }} runner=${{ inputs.macos-runner }} actor=${{ github.actor }}"
+          {
+            echo "CHECKPOINT_1_STATUS=⏳ Pending"
+            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        if: ${{ inputs.xcode-version != '' }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ inputs.flutter-version }}
+          channel: ${{ inputs.flutter-channel }}
+          cache: true
+
+      - name: Cache pub packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ hashFiles(format('{0}/pubspec.lock', inputs.project-directory)) }}
+          restore-keys: pub-
+
+      - name: Install Flutter dependencies${{ inputs.run-analyze && ' & analyze' || '' }}
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          RUN_ANALYZE: ${{ inputs.run-analyze }}
+          ANALYZE_FATAL_LEVEL: ${{ inputs.analyze-fatal-level }}
+        run: |
+          set -euo pipefail
+          echo "::group::🍎 Flutter dependencies"
+          flutter --version
+          flutter pub get
+          echo "::endgroup::"
+
+          if [[ "${RUN_ANALYZE}" == "true" ]]; then
+            echo "::group::🍎 flutter analyze (fatal level: ${ANALYZE_FATAL_LEVEL})"
+            case "${ANALYZE_FATAL_LEVEL}" in
+              none)    ANALYZE_FLAGS="--no-fatal-infos --no-fatal-warnings" ;;
+              warning) ANALYZE_FLAGS="--no-fatal-infos" ;;
+              info)    ANALYZE_FLAGS="--fatal-infos --fatal-warnings" ;;
+              *)
+                echo "ERROR: analyze-fatal-level must be one of: none, warning, info. Got '${ANALYZE_FATAL_LEVEL}'."
+                exit 1
+                ;;
+            esac
+            # shellcheck disable=SC2086
+            flutter analyze ${ANALYZE_FLAGS}
+            echo "::endgroup::"
+          fi
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.project-directory }}/${{ inputs.ios-dir }}/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles(format('{0}/{1}/Podfile.lock', inputs.project-directory, inputs.ios-dir)) }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: Install Pods
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          IOS_DIR: ${{ inputs.ios-dir }}
+        run: |
+          set -euo pipefail
+          # Podfile.lock is committed and Pods is restored from the cache above,
+          # so a plain `pod install` is reproducible and fast. We intentionally
+          # do NOT `pod deintegrate`, `rm -rf Pods`, or pass --repo-update: any
+          # of those would discard the restored cache and force a full CocoaPods
+          # spec-repo refresh every run.
+          cd "${IOS_DIR}"
+          pod install
+
+      - name: Verify iOS project paths
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          PBXPROJ_PATH: ${{ inputs.pbxproj-path }}
+        run: |
+          set -euo pipefail
+          test -f "${PBXPROJ_PATH}"
+
+      - name: Compute version variables
+        id: version
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::🏷️ [VERSION] Compute marketing version / build number"
+
+          # Versioning strategy: SemVer patch counter. For Flutter the source
+          # of truth is pubspec.yaml (X.Y.Z+BUILD): the iOS Info.plist resolves
+          # CFBundleShortVersionString / CFBundleVersion from $(FLUTTER_BUILD_NAME)
+          # / $(FLUTTER_BUILD_NUMBER), which the `flutter build ipa --build-name
+          # --build-number` step injects from VERSION / BUILD_NUMBER below.
+          PUBSPEC_VERSION="$(grep -m 1 '^version:' pubspec.yaml | awk '{print $2}')"
+          PUBSPEC_SEMVER="${PUBSPEC_VERSION%%+*}"
+
+          BASE_BUILD="${PUBSPEC_VERSION##*+}"
+          if ! [[ "${BASE_BUILD}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Could not parse numeric build from pubspec version '${PUBSPEC_VERSION}' (expected X.Y.Z+N)."
+            exit 1
+          fi
+
+          echo "pubspec version: ${PUBSPEC_VERSION}"
+          echo "github.run_number: ${GITHUB_RUN_NUMBER}"
+          echo "Original base build (pubspec +N): ${BASE_BUILD}"
+
+          PREFIX_RAW="${PUBSPEC_SEMVER}"
+          if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="${BASH_REMATCH[3]}"
+          elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="0"
+          else
+            echo "ERROR: pubspec marketing version must be in X.Y or X.Y.Z format. Got '${PREFIX_RAW}'."
+            exit 1
+          fi
+
+          # major.minor stay exactly as set in pubspec; patch = base patch +
+          # run_number — by exactly 1 per run, monotonic, unbounded, with no
+          # roll-over into minor/major (… 1.1.69 -> 1.1.70 -> …).
+          INCREMENT=$((GITHUB_RUN_NUMBER))
+          PATCH=$((BASE_PATCH + INCREMENT))
+          FINAL_MAJOR="${BASE_MAJOR}"
+          FINAL_MINOR="${BASE_MINOR}"
+
+          VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
+          # Formula: BASE + run_number. NOTE: github.run_number resets to 1 if
+          # this workflow file is renamed/recreated; if that happens, bump the
+          # "+N" build in pubspec.yaml to restore a higher floor so App Store
+          # Connect keeps accepting uploads.
+          BUILD_NUMBER=$((BASE_BUILD + GITHUB_RUN_NUMBER))
+
+          echo "Computed MARKETING_VERSION=${VERSION}"
+          echo "Computed CURRENT_PROJECT_VERSION=${BUILD_NUMBER}"
+
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${BUILD_NUMBER}" >> "$GITHUB_ENV"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+          {
+            echo "## 🏷️ iOS Version Computation"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| strategy | SemVer patch counter (patch = base + run_number; build = pubspec base + run_number) |"
+            echo "| marketing prefix | ${PREFIX_RAW} |"
+            echo "| github.run_number | ${GITHUB_RUN_NUMBER} |"
+            echo "| computed version | ${VERSION} |"
+            echo "| base build from pubspec | ${BASE_BUILD} |"
+            echo "| computed build number | ${BUILD_NUMBER} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install iOS signing certificate
+        uses: simplify9/.github/.github/actions/ios-install-cert@main
+        with:
+          p12Base64: ${{ secrets.ios-p12-base64 }}
+          p12Password: ${{ secrets.ios-p12-password }}
+
+      - name: Install iOS provisioning profile
+        uses: simplify9/.github/.github/actions/ios-install-profile@main
+        with:
+          profileBase64: ${{ secrets.ios-mobileprovision-base64 }}
+
+      - name: Extract profile metadata
+        id: profile
+        shell: bash
+        env:
+          IOS_MOBILEPROVISION_BASE64: ${{ secrets.ios-mobileprovision-base64 }}
+        run: |
+          set -euo pipefail
+          # ios-install-profile exports IOS_PROFILE_NAME / IOS_PROFILE_UUID but
+          # not the team id or bundle id, which ExportOptions.plist needs — derive
+          # them here from the same profile.
+          PROFILE_PATH="${RUNNER_TEMP}/profile_meta.mobileprovision"
+          PROFILE_PLIST="${RUNNER_TEMP}/profile_meta.plist"
+          printf '%s' "${IOS_MOBILEPROVISION_BASE64}" | base64 -D > "${PROFILE_PATH}"
+          security cms -D -i "${PROFILE_PATH}" > "${PROFILE_PLIST}"
+
+          TEAM_ID_FROM_PROFILE=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${PROFILE_PLIST}")
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${PROFILE_PLIST}")
+          BUNDLE_ID="${APP_ID#*.}"
+
+          echo "team_id=${TEAM_ID_FROM_PROFILE}" >> "$GITHUB_OUTPUT"
+          echo "bundle_id=${BUNDLE_ID}" >> "$GITHUB_OUTPUT"
+
+          # CHECKPOINT 1: signing material installed (cert + profile + metadata).
+          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+
+      - name: Generate ExportOptions.plist
+        shell: bash
+        env:
+          IOS_TEAM_ID: ${{ secrets.ios-team-id }}
+          EXPORT_METHOD: ${{ inputs.export-method }}
+          PROFILE_NAME: ${{ env.IOS_PROFILE_NAME }}
+          BUNDLE_ID: ${{ steps.profile.outputs.bundle_id }}
+          TEAM_ID_FROM_PROFILE: ${{ steps.profile.outputs.team_id }}
+        run: |
+          set -euo pipefail
+
+          TEAM_ID="${IOS_TEAM_ID}"
+          if [[ -z "${TEAM_ID}" ]]; then
+            TEAM_ID="${TEAM_ID_FROM_PROFILE}"
+          fi
+
+          EXPORT_PLIST="${RUNNER_TEMP}/ExportOptions.plist"
+          cat > "${EXPORT_PLIST}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${EXPORT_METHOD}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+          /usr/bin/plutil -p "${EXPORT_PLIST}" >/dev/null
+          echo "EXPORT_OPTIONS_PLIST=${EXPORT_PLIST}" >> "$GITHUB_ENV"
+
+      - name: Build IPA
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          PROFILE_NAME: ${{ env.IOS_PROFILE_NAME }}
+          PBXPROJ: ${{ inputs.pbxproj-path }}
+        run: |
+          set -euo pipefail
+          echo "::group::🔏 [SIGN] [CHECKPOINT 2/3] Manual-sign rewrite & flutter build ipa"
+
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "${PBXPROJ}"
+          sed -i '' "s|PROVISIONING_PROFILE_SPECIFIER = \"\";|PROVISIONING_PROFILE_SPECIFIER = \"${PROFILE_NAME}\";|g" "${PBXPROJ}"
+          sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "Apple Distribution";/g' "${PBXPROJ}"
+
+          # `sed` exits 0 even when nothing matches, so a future Xcode project
+          # format change would silently leave the build unsigned or mis-signed.
+          # Assert the intended signing state actually applied and fail loudly.
+          grep -q 'CODE_SIGN_STYLE = Manual;' "${PBXPROJ}" \
+            || { echo "ERROR: 'CODE_SIGN_STYLE = Manual;' not found in ${PBXPROJ} — manual-signing rewrite did not apply."; exit 1; }
+          grep -qF "PROVISIONING_PROFILE_SPECIFIER = \"${PROFILE_NAME}\";" "${PBXPROJ}" \
+            || { echo "ERROR: PROVISIONING_PROFILE_SPECIFIER was not set to '${PROFILE_NAME}' in ${PBXPROJ}."; exit 1; }
+          grep -q 'CODE_SIGN_IDENTITY = "Apple Distribution";' "${PBXPROJ}" \
+            || { echo "ERROR: 'CODE_SIGN_IDENTITY = \"Apple Distribution\";' not found in ${PBXPROJ}."; exit 1; }
+
+          flutter build ipa --release \
+            --build-name="${VERSION}" \
+            --build-number="${BUILD_NUMBER}" \
+            --export-options-plist="${EXPORT_OPTIONS_PLIST}"
+
+          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "::endgroup::"
+
+      - name: Rename IPA
+        id: rename_ipa
+        working-directory: ${{ inputs.project-directory }}
+        shell: bash
+        env:
+          APP_SLUG: ${{ inputs.app-slug }}
+          IPA_NAME_PATTERN: ${{ inputs.ipa-name-pattern }}
+        run: |
+          set -euo pipefail
+          echo "::group::🍎 [CHECKPOINT 3/3] Locate & rename IPA"
+
+          IPA_SRC="$(ls -1 build/ios/ipa/*.ipa 2>/dev/null | head -n 1 || true)"
+          if [[ -z "${IPA_SRC}" || ! -f "${IPA_SRC}" ]]; then
+            echo "ERROR: No .ipa found under build/ios/ipa/."
+            find build/ios -maxdepth 4 -type f 2>/dev/null | sort || true
+            exit 1
+          fi
+
+          IPA_OUT="${IPA_NAME_PATTERN}"
+          IPA_OUT="${IPA_OUT//\{app_slug\}/${APP_SLUG}}"
+          IPA_OUT="${IPA_OUT//\{version\}/${VERSION}}"
+          IPA_OUT="${IPA_OUT//\{build_number\}/${BUILD_NUMBER}}"
+          IPA_OUT="${IPA_OUT//\{run_number\}/${GITHUB_RUN_NUMBER}}"
+
+          mv "${IPA_SRC}" "${IPA_OUT}"
+          echo "ipa_file=${IPA_OUT}" >> "$GITHUB_OUTPUT"
+          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ IPA renamed to ${IPA_OUT}"
+          echo "::endgroup::"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.project-directory }}/${{ steps.rename_ipa.outputs.ipa_file }}
+          compression-level: 0
+          retention-days: 7
+
+      - name: Cleanup signing artifacts
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "${KEYCHAIN_PATH:-$RUNNER_TEMP/build.keychain-db}" || true
+
+      - name: Build failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error title=🍎 [IOS] Build failed::CP1 signing=${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2 build=${CHECKPOINT_2_STATUS:-⏭️ Not reached} | CP3 rename=${CHECKPOINT_3_STATUS:-⏭️ Not reached}"
+
+      - name: Build summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🍎'
+          title: Flutter iOS Build
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | iOS dir | `${{ inputs.ios-dir }}` |
+            | Version | `${{ steps.version.outputs.version }}` (build: ${{ steps.version.outputs.build_number }}) |
+            | Export method | ${{ inputs.export-method }} |
+            | Flutter | `${{ inputs.flutter-version }}` (${{ inputs.flutter-channel }}) |
+            | Runner | ${{ inputs.macos-runner }} |
+            | Xcode | ${{ inputs.xcode-version || 'runner default' }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Triggered by | ${{ github.actor }} |
+            | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | Signing material installed | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 2 | IPA built (manual-signed) | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 3 | IPA renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+
+  release_with_environment:
+    name: iOS Release (TestFlight)
+    needs: build
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.release-environment }}
+
+    steps:
+      - name: Announce
+        shell: bash
+        run: |
+          echo "::notice title=🍎 [IOS] TestFlight upload starting::version=${{ needs.build.outputs.version }} build=${{ needs.build.outputs.build-number }} env=${{ inputs.release-environment }} actor=${{ github.actor }}"
+          echo "RELEASE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .
+
+      - name: Resolve IPA path
+        id: ipa
+        shell: bash
+        env:
+          CANDIDATE: ${{ needs.build.outputs.ipa-file }}
+        run: |
+          set -euo pipefail
+          IPA_FILE=""
+          if [[ -n "${CANDIDATE}" ]]; then
+            IPA_FILE="$(basename "${CANDIDATE}")"
+          fi
+          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
+            IPA_FILE="$(ls -1 *.ipa 2>/dev/null | head -n 1 || true)"
+          fi
+          if [[ -z "${IPA_FILE}" || ! -f "${IPA_FILE}" ]]; then
+            echo "ERROR: No .ipa file found in release workspace."
+            ls -lah
+            exit 1
+          fi
+          echo "path=./${IPA_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release credentials
+        shell: bash
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
+          APPSTORE_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
+          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ secrets.appstore-api-private-key-base64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPSTORE_API_KEY_ID:-}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-api-key-id' for TestFlight upload."
+            echo "Set disable-release=true to run build-only without TestFlight upload."
+            exit 1
+          fi
+          if [[ -z "${APPSTORE_ISSUER_ID:-}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-issuer-id' for TestFlight upload."
+            exit 1
+          fi
+          if [[ -z "${APPSTORE_API_PRIVATE_KEY_BASE64:-}" ]]; then
+            echo "ERROR: Missing required secret 'appstore-api-private-key-base64' for TestFlight upload."
+            exit 1
+          fi
+
+      - name: Prepare App Store Connect API key
+        id: appstore_key
+        shell: bash
+        env:
+          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ secrets.appstore-api-private-key-base64 }}
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          # apple-actions/upload-testflight-build expects the raw PKCS8 .p8 PEM,
+          # but the secret is stored base64-encoded — decode it here.
+          KEY_CONTENT="$(printf '%s' "${APPSTORE_API_PRIVATE_KEY_BASE64}" | base64 -d)"
+          if [[ -z "${KEY_CONTENT}" ]]; then
+            echo "ERROR: Decoded App Store Connect private key is empty."
+            exit 1
+          fi
+
+          # Mask every line so the key never appears in logs.
+          while IFS= read -r line; do
+            [[ -n "${line}" ]] && echo "::add-mask::${line}"
+          done <<< "${KEY_CONTENT}"
+
+          # Pass the key via this step's OUTPUT, not GITHUB_ENV. A GITHUB_ENV
+          # value is injected into EVERY subsequent step's process (broad blast
+          # radius); a step output is read only by the single step that
+          # interpolates steps.appstore_key.outputs.key. A unique heredoc
+          # delimiter carries the multiline PEM safely.
+          DELIM="APPSTOREAPI_KEY_$(openssl rand -hex 8)"
+          {
+            echo "key<<${DELIM}"
+            echo "${KEY_CONTENT}"
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
+
+          # Non-sensitive metadata for the upload confirmation / summary.
+          echo "APPSTOREAPI_IPA_NAME=$(basename "${IPA_PATH}")" >> "$GITHUB_ENV"
+          echo "APPSTOREAPI_IPA_SIZE_MB=$(du -m "${IPA_PATH}" | cut -f1)" >> "$GITHUB_ENV"
+          echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Upload to TestFlight (App Store Connect API)
+        uses: apple-actions/upload-testflight-build@v5
+        with:
+          app-path: ${{ steps.ipa.outputs.path }}
+          app-type: ios
+          issuer-id: ${{ secrets.appstore-issuer-id }}
+          api-key-id: ${{ secrets.appstore-api-key-id }}
+          api-private-key: ${{ steps.appstore_key.outputs.key }}
+          backend: appstore-api
+          wait-for-processing: ${{ inputs.wait-for-processing }}
+
+      - name: Confirm upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
+          echo "::group::🍎 [IOS] Upload complete"
+          echo "  ${APPSTOREAPI_IPA_SIZE_MB} MB uploaded in ${ELAPSED}s"
+          echo "  → Completed at $(date -u +'%H:%M:%S UTC')"
+          echo "::endgroup::"
+          echo "RELEASE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
+
+      - name: Release failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "::error title=🍎 [IOS] TestFlight upload failed::version=${{ needs.build.outputs.version }} build=${{ needs.build.outputs.build-number }}"
+
+      - name: Release summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🍎'
+          title: Flutter iOS TestFlight Upload (Environment-Gated)
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.build.outputs.version }}` (build: ${{ needs.build.outputs.build-number }}) |
+            | Upload tool | appstore-api |
+            | Environment | ${{ inputs.release-environment }} |
+            | Branch | `${{ github.ref_name }}` |
+            | Triggered by | ${{ github.actor }} |
+
+            ## 📋 Checkpoint Summary
+
+            | # | Checkpoint | Status |
+            |---|------------|--------|
+            | 1 | TestFlight upload | ${{ env.RELEASE_CP1_STATUS || '⏭️ Not reached' }} |

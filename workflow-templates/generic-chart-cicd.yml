@@ -20,17 +20,17 @@
 #   migration init-Job) → tags the commit on a successful deploy.
 #
 # BRANCHES:
-#   staging → deploy-staging job  → namespace "staging"     / GitHub env Staging
+#   develop → deploy-develop job  → namespace "develop"     / GitHub env develop
 #   main    → deploy-main job     → namespace "production"   / GitHub env Production
 #
 # TWO "environment" INPUTS — DON'T CONFUSE THEM:
 #   environment        → the app's RUNTIME environment name, injected as the
-#                        Helm value `environment=` (e.g. Staging, Production)
+#                        Helm value `environment=` (e.g. develop, Production)
 #                        and into the app (ASPNETCORE_ENVIRONMENT, etc.).
 #   deploy-environment → the GITHUB Environment for the deploy job — activates
 #                        protection rules (required reviewers, wait timers) and
 #                        environment-scoped secrets. Best practice: set it per
-#                        branch so staging and production are gated separately.
+#                        branch so develop and production are gated separately.
 #
 # INPUTS (only the commonly-set values are declared here — see the reusable
 #   workflow for the full, documented input reference):
@@ -41,7 +41,7 @@ run-name: build-${{ github.ref_name }}-${{ github.run_number }}
 
 on:
   push:
-    branches: [staging, main]
+    branches: [develop, main]
   workflow_dispatch:
 
 # Least-privilege ceiling for the reusable workflow's jobs (they narrow further
@@ -56,8 +56,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-staging:
-    if: ${{ github.ref_name == 'staging' }}
+  Dev:
+    if: ${{ github.ref_name == 'develop' }}
     uses: simplify9/.github/.github/workflows/generic-chart-helm.yml@main
     with:
       # ── App & version ───────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ jobs:
       namespace: "staging"
       service-target-port: "80"              # REPLACE if your container listens elsewhere
       environment: "Staging"                 # app runtime environment (Helm value)
-      deploy-environment: "Staging"          # GitHub Environment (protection rules + scoped secrets)
+      deploy-environment: "develop"          # GitHub Environment (protection rules + scoped secrets)
       # atomic: true                         # roll back automatically on a failed deploy (default true)
       # helm-timeout-minutes: "15"           # default 10
 
@@ -117,7 +117,7 @@ jobs:
       # nuget-api-key: ${{ secrets.NUGET_API_KEY }}                    # only with package-nuget: true
       # nuget-source: ${{ secrets.NUGET_SOURCE }}
 
-  deploy-main:
+  Prod:
     if: ${{ github.ref_name == 'main' }}
     uses: simplify9/.github/.github/workflows/generic-chart-helm.yml@main
     with:

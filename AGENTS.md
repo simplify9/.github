@@ -73,6 +73,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `cloudflare/wrangler-action` | `@v4` | Used for all Cloudflare Workers deploys (`command: deploy`). Deployment URL is the `deployment-url` output |
 | `gradle/actions/setup-gradle` | `@v5` | **Pinned to v5.** Do NOT use `gradle/gradle-build-action` (archived). v6.x is not adopted — stay on v5 |
 | `ruby/setup-ruby` | `@v1` | iOS: Ruby/Bundler-managed CocoaPods (`bundler-cache`) |
+| `subosito/flutter-action` | `@v2` | Flutter SDK setup (Flutter iOS/Android workflows). Version selector via `flutter-version` input, default `3.x` |
 | `maxim-lobanov/setup-xcode` | `@v1` | iOS Xcode version selection |
 | `apple-actions/upload-testflight-build` | `@v5` | iOS TestFlight upload (App Store Connect API) — runs on `ubuntu-latest` |
 | `r0adkll/upload-google-play` | `@v1` | Android Google Play upload |
@@ -257,8 +258,10 @@ Both call `generate-wrangler-config` to produce `wrangler.toml` dynamically, and
 |---|---|---|
 | `ios-build.yml` | React Native / native iOS → TestFlight. Builds + archives + exports on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API | `workspace`, `scheme`, `release-environment`, `disable-release` |
 | `android-build.yml` | React Native Android AAB → Google Play | `app-id`, `gradle-task`, `version-code-offset`, `release-environment`, `disable-release` |
+| `flutter-ios-build.yml` | Flutter iOS → TestFlight. `flutter build ipa` on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API. Version from `pubspec.yaml` + `run_number` | `macos-runner`, `xcode-version`, `app-slug`, `release-environment`, `disable-release` |
+| `flutter-android-build.yml` | Flutter Android AAB → Google Play. `flutter build appbundle` with `key.properties` signing | `app-id`, `app-slug`, `version-code-offset`, `release-environment`, `disable-release` |
 
-Both mobile workflows have a `build` job (no gating) and a `release_with_environment` job gated by `if: release-environment != '' && !disable-release` and bound to the named GitHub Environment. They use **marketplace** release actions (`apple-actions/upload-testflight-build@v5`, `r0adkll/upload-google-play@v1`) — there is **no** Docker-based upload action. Per-branch environment selection (e.g. `android-staging` vs `android-production`) is done by the caller template's `workflow_dispatch` jobs, gated on `github.ref_name`.
+All four mobile workflows have a `build` job (no gating) and a `release_with_environment` job gated by `if: release-environment != '' && !disable-release` and bound to the named GitHub Environment. They use **marketplace** release actions (`apple-actions/upload-testflight-build@v5`, `r0adkll/upload-google-play@v1`) — there is **no** Docker-based upload action. The Flutter and RN iOS workflows both reuse `ios-install-cert` / `ios-install-profile` for signing; Flutter sets up the SDK with `subosito/flutter-action@v2`. Per-branch environment selection (e.g. `android-staging` vs `android-production`) is done by the caller template's `workflow_dispatch` jobs, gated on `github.ref_name`.
 
 ---
 
@@ -335,7 +338,7 @@ All 18 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ## Android-Specific Rules
 
-- `VERSION_CODE` = `github.run_number + version-code-offset`. Set `version-code-offset` high (default `80000`) when migrating from another CI system to avoid versionCode collisions on the Play Console. `VERSION_NAME` derives from `version-prefix` (with single-digit carry rollover) unless `version-name-override` is set.
+- `VERSION_CODE` = `github.run_number + version-code-offset`. Set `version-code-offset` high (default `80000`) when migrating from another CI system to avoid versionCode collisions on the Play Console. `VERSION_NAME` derives from `version-prefix` as a SemVer patch counter — `major.minor` fixed, `patch = base patch + run_number` (no carry/rollover, no upper bound) — unless `version-name-override` is set.
 - Release uses `r0adkll/upload-google-play@v1` (a marketplace action) — **not** a Docker-based action. Track via `play-track` (default `internal`); set `changes-not-sent-for-review: true` for internal tracks.
 - Gradle uses `gradle/actions/setup-gradle@v5` (Gradle home caching). Do **not** use `gradle/gradle-build-action` (archived). Do **not** add `cache: gradle` to `actions/setup-java` — it invokes `gradle-build-action` internally and conflicts with `setup-gradle`. Do not add a manual `actions/cache` step for `~/.gradle` — `setup-gradle` owns Gradle home caching.
 - The workflow **itself** sets `org.gradle.caching=true` in the project's `gradle.properties` (the caller no longer needs to add it manually).

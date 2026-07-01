@@ -1,0 +1,10 @@
+{
+    "name": "Flutter Android App CI/CD",
+    "description": "Builds, signs, and uploads a Flutter Android app to Google Play using the Simplify9 reusable workflow.",
+    "iconName": "octicon-device-mobile",
+    "categories": [
+        "Flutter",
+        "Android",
+        "Google Play"
+    ]
+}

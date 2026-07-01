@@ -1,0 +1,97 @@
+# =============================================================================
+# Flutter iOS CI/CD Caller — Template for app repositories
+# =============================================================================
+#
+# USAGE:
+#   Copy this file to your app repo at:
+#     .github/workflows/{app-name}-ios.yml
+#
+#   Replace all values marked with # REPLACE with your app-specific values.
+#
+# BRANCHES:
+#   develop → triggers iOS Dev job → uploads to ios-develop environment
+#   main    → triggers iOS Prod job → uploads to ios-production environment
+#
+# VERSIONING:
+#   The marketing version + build number come from your pubspec.yaml
+#   (X.Y.Z+BUILD) combined with github.run_number — no inputs to set.
+#   Build number = pubspec "+N" + run_number (strictly increasing per run).
+#
+# INPUTS (only non-default values are declared — see the reusable workflow for
+#   the full input reference):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/flutter-ios-build.yml
+# =============================================================================
+name: Flutter iOS CI/CD                  # REPLACE: e.g. "Laflef iOS"
+run-name: ios-${{ github.ref_name }}-${{ github.run_number }}
+
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      disable_release:
+        description: Build IPA only — skip TestFlight upload
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  develop:
+    name: iOS Dev
+    if: ${{ github.ref_name == 'develop' }}
+    uses: simplify9/.github/.github/workflows/flutter-ios-build.yml@main
+    with:
+      # ── Runner & toolchain ────────────────────────────────────────────────
+      macos-runner: macos-26          # REPLACE if you need a different runner
+      xcode-version: "26.3"           # REPLACE: App Store Connect needs a recent SDK
+      flutter-version: "3.x"          # REPLACE: pin an exact version for reproducible builds
+
+      # ── iOS project layout ────────────────────────────────────────────────
+      app-slug: app                   # REPLACE: e.g. laflef
+      # ios-dir / pbxproj-path default to the Flutter standard (ios/Runner...)
+
+      # ── Export & upload ───────────────────────────────────────────────────
+      ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
+      release-environment: ios-develop
+      disable-release: ${{ inputs.disable_release }}
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+
+  production:
+    name: iOS Prod
+    if: ${{ github.ref_name == 'main' }}
+    uses: simplify9/.github/.github/workflows/flutter-ios-build.yml@main
+    with:
+      # ── Runner & toolchain ────────────────────────────────────────────────
+      macos-runner: macos-26          # REPLACE if you need a different runner
+      xcode-version: "26.3"           # REPLACE
+      flutter-version: "3.x"          # REPLACE
+
+      # ── iOS project layout ────────────────────────────────────────────────
+      app-slug: app                   # REPLACE
+
+      # ── Export & upload ───────────────────────────────────────────────────
+      ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
+      release-environment: ios-production
+      disable-release: ${{ inputs.disable_release }}
+    secrets:
+      ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}
+      ios-p12-password: ${{ secrets.IOS_P12_PASSWORD }}
+      ios-mobileprovision-base64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
+      ios-team-id: ${{ secrets.IOS_TEAM_ID }}
+      appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+      appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+      appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}

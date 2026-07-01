@@ -22,10 +22,10 @@
 #   all tracks (internal, alpha, beta, production) and staged rollouts.
 #
 # VERSIONING:
-#   versionName: carry-based rollover from version-prefix + run counter.
-#                version-prefix X.Y.Z + run_number.
-#                Patch carries into minor at 9, minor carries into major
-#                at 9 (e.g. 4.9.9 at run 1 → 5.0.0).
+#   versionName: SemVer patch counter. major.minor are fixed by the developer
+#                (version-prefix); only the patch increments — patch =
+#                base patch + run_number — by exactly 1 per run, with no
+#                carry/rollover and no upper bound (e.g. 1.1.69 → 1.1.70 → …).
 #                Optional version-name-override bypasses this logic.
 #   versionCode: strictly monotonic integer —
 #                run_number + version-code-offset.
@@ -95,7 +95,7 @@ on:
         type: string
         default: "1.0.0"
       version-name-override:
-        description: Optional explicit VERSION_NAME; if empty uses base version + increment with single-digit carry
+        description: Optional explicit VERSION_NAME; if empty uses base version with the patch incremented per run
         required: false
         type: string
         default: ""
@@ -278,7 +278,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # versionName uses carry-based progression from base version + run count.
+          # versionName: major.minor fixed by the developer, patch = base + run count.
           # versionCode remains the Play-safe monotonic counter.
           # Keep versionName and versionCode intentionally decoupled:
           # - versionName is human-readable for release visibility.
@@ -317,20 +317,12 @@ jobs:
               exit 1
             fi
 
-            if (( BASE_MINOR > 9 || BASE_PATCH > 9 )); then
-              echo "ERROR: version-prefix minor and patch must be single digits (0-9). Got '${BASE_VERSION_RAW}'."
-              exit 1
-            fi
-
-            PATCH_TOTAL=$((BASE_PATCH + INCREMENT_COUNT))
-            PATCH_CARRY=$((PATCH_TOTAL / 10))
-            FINAL_PATCH=$((PATCH_TOTAL % 10))
-
-            MINOR_TOTAL=$((BASE_MINOR + PATCH_CARRY))
-            MINOR_CARRY=$((MINOR_TOTAL / 10))
-            FINAL_MINOR=$((MINOR_TOTAL % 10))
-
-            FINAL_MAJOR=$((BASE_MAJOR + MINOR_CARRY))
+            # major.minor stay exactly as set by the developer; only the patch
+            # increments — patch = base patch + run count — with no carry/rollover
+            # and no upper bound (… 1.1.69 -> 1.1.70 -> …).
+            FINAL_MAJOR="${BASE_MAJOR}"
+            FINAL_MINOR="${BASE_MINOR}"
+            FINAL_PATCH=$((BASE_PATCH + INCREMENT_COUNT))
             VERSION_NAME="${FINAL_MAJOR}.${FINAL_MINOR}.${FINAL_PATCH}"
           fi
 
