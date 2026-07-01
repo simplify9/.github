@@ -309,6 +309,8 @@ All 18 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - `dotnet-build` — Resolves a build target (existing `*.sln` or an ephemeral generated one), then `restore` → `build` → optional `test`. Output: `build-target`.
 - `dotnet-pack-push` — `dotnet pack --no-build` → `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. Outputs: `packages-pushed`, `package-paths`.
 
+**Project-list inputs** (`projects` / `test-projects` on `dotnet-build`, `projects` on `dotnet-pack-push`, and the `nuget-projects` workflow input) accept one or more glob patterns as a **space- OR newline-separated** list. A YAML `|` block scalar (one project per line) is honoured in full. These are split with `read -rd '' -a` — plain `read -ra` stops at the first newline and silently drops every entry after the first, so never revert to it.
+
 ### Cloudflare
 - `generate-wrangler-config` — Generates `wrangler.toml` dynamically (plain Workers, OpenNext via `build-for-opennext`, static assets, SPA `not-found-handling`, route lists). Output: `config-path`.
 - `setup-cloudflare-domain` — Adds a custom domain to a Cloudflare Pages project via the CF REST API (idempotent). Input `fail-on-error` (default `false`) makes failure non-blocking. Output: `domain-status`.

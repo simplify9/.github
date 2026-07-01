@@ -22,8 +22,9 @@
 #     action never mutates the caller's job environment.
 #   - `projects` and `test-projects` are real glob patterns (bash globstar):
 #     `**/*.csproj`, `src/**/*.csproj`, `**/*Tests/*.csproj`, a concrete
-#     path, or a space-separated list of any of these. obj/ and bin/ are
-#     always excluded.
+#     path, or a space- OR newline-separated list of any of these (a YAML `|`
+#     block scalar is fully honoured, not just its first line). obj/ and bin/
+#     are always excluded.
 #
 # Inputs:
 #   projects        (required) Project(s) to build when no solution is present
@@ -55,11 +56,11 @@ description: 'Reusable action to restore, build, and optionally test .NET projec
 
 inputs:
   projects:
-    description: 'Project(s) to restore and build when no solution is present (glob allowed)'
+    description: 'Project(s) to restore and build when no solution is present. Glob(s) allowed; pass several as a space- or newline-separated list (YAML `|` block).'
     required: true
     default: '**/*.csproj'
   test-projects:
-    description: 'Test project(s) to run (glob allowed)'
+    description: 'Test project(s) to run. Glob(s) allowed; pass several as a space- or newline-separated list (YAML `|` block).'
     required: false
     default: '**/*Tests/*.csproj'
   configuration:
@@ -124,7 +125,10 @@ runs:
         expand_globs() {
           local raw="$1" pattern match
           local -a patterns=() out=()
-          read -ra patterns <<< "$raw"
+          # `read -d ''` reads the WHOLE value (IFS = space/tab/newline), so a
+          # multi-line YAML block scalar is honoured in full; plain `read -ra`
+          # stops at the first newline and would drop every glob after the first.
+          read -rd '' -a patterns <<< "$raw" || true
           for pattern in "${patterns[@]}"; do
             for match in $pattern; do
               [[ "$match" == *"/obj/"* || "$match" == *"/bin/"* ]] && continue
@@ -223,7 +227,9 @@ runs:
 
         # Expand the test glob(s) the same way the build target was resolved.
         declare -a TEST_SET=()
-        read -ra TEST_PATTERNS <<< "$TEST_PROJECTS"
+        # `read -d ''` reads the WHOLE value (IFS = space/tab/newline) so a
+        # multi-line list is honoured; plain `read -ra` stops at the first line.
+        read -rd '' -a TEST_PATTERNS <<< "$TEST_PROJECTS" || true
         for pattern in "${TEST_PATTERNS[@]}"; do
           for match in $pattern; do
             [[ "$match" == *"/obj/"* || "$match" == *"/bin/"* ]] && continue

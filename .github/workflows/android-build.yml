@@ -322,7 +322,9 @@ jobs:
             # and no upper bound (… 1.1.69 -> 1.1.70 -> …).
             FINAL_MAJOR="${BASE_MAJOR}"
             FINAL_MINOR="${BASE_MINOR}"
-            FINAL_PATCH=$((BASE_PATCH + INCREMENT_COUNT))
+            # 10# forces decimal so a leading-zero patch (e.g. 1.2.08) is not
+            # misread as octal and aborted under set -euo pipefail.
+            FINAL_PATCH=$((10#${BASE_PATCH} + INCREMENT_COUNT))
             VERSION_NAME="${FINAL_MAJOR}.${FINAL_MINOR}.${FINAL_PATCH}"
           fi
 

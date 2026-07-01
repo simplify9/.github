@@ -662,13 +662,17 @@ jobs:
           # major.minor stay exactly as set; patch = base patch + run_number
           # (monotonic, unbounded — no roll-over into minor/major).
           INCREMENT=$((GITHUB_RUN_NUMBER))
-          PATCH=$((BASE_PATCH + INCREMENT))
+          # 10# forces decimal so a leading-zero prefix (e.g. 1.2.08) is not
+          # misread as octal and aborted under set -euo pipefail.
+          PATCH=$((10#${BASE_PATCH} + INCREMENT))
           FINAL_MAJOR="${BASE_MAJOR}"
           FINAL_MINOR="${BASE_MINOR}"
 
           NEW_MARKETING_VERSION="${FINAL_MAJOR}.${FINAL_MINOR}.${PATCH}"
-          # build-number-offset is fixed at 0; formula: BASE + run_number
-          NEW_BUILD_NUMBER=$((BASE_BUILD + GITHUB_RUN_NUMBER))
+          # build-number-offset is fixed at 0; formula: BASE + run_number.
+          # 10# forces decimal so a leading-zero CURRENT_PROJECT_VERSION (08/09)
+          # is not misread as octal and aborted under set -euo pipefail.
+          NEW_BUILD_NUMBER=$((10#${BASE_BUILD} + GITHUB_RUN_NUMBER))
 
           echo "Base major: ${BASE_MAJOR}"
           echo "Base minor: ${BASE_MINOR}"
