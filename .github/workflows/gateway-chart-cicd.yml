@@ -86,7 +86,7 @@ on:
         default: true
         type: boolean
       validate-configmap:
-        description: Validate ConfigMap gating and merged key rendering
+        description: Validate ConfigMap gating and key routing (config.data → ConfigMap, environmentVariables → Secret)
         required: false
         default: true
         type: boolean
@@ -158,7 +158,7 @@ on:
         default: true
         type: boolean
       validate-configmap:
-        description: Validate ConfigMap gating and merged key rendering
+        description: Validate ConfigMap gating and key routing (config.data → ConfigMap, environmentVariables → Secret)
         required: false
         default: true
         type: boolean
@@ -176,7 +176,7 @@ concurrency:
 
 jobs:
   version:
-    name: Compute chart version
+    name: Version Compute
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -235,7 +235,7 @@ jobs:
             | Triggered by | ${{ github.actor }} |
 
   validate-chart:
-    name: Validate Helm chart
+    name: Validate Chart
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [version]
@@ -368,16 +368,24 @@ jobs:
             echo "::error::ConfigMap name '${cm_name}' did not match expected '<app>-config' pattern." >&2
             exit 1
           fi
-          if [ "$(printf '%s\n' "$cm" | yq '.data.APP_ENV')" = "null" ]; then
-            echo "::error::APP_ENV key from environmentVariables was not found in ConfigMap data." >&2
-            exit 1
-          fi
           if [ "$(printf '%s\n' "$cm" | yq '.data.FEATURE_FLAG')" = "null" ]; then
             echo "::error::FEATURE_FLAG key from config.data was not found in ConfigMap data." >&2
             exit 1
           fi
 
-          echo "→ ConfigMap enabled behavior and merged key rendering are valid."
+          # environmentVariables are sensitive values: the chart routes them into a
+          # Kubernetes Secret (injected via secretKeyRef), never into the ConfigMap.
+          secret="$(printf '%s\n' "$enabled_rendered" | yq ea 'select(.kind == "Secret")' -)"
+          if [ -z "$secret" ]; then
+            echo "::error::Secret should render when environmentVariables is set." >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$secret" | yq '.data.APP_ENV')" = "null" ]; then
+            echo "::error::APP_ENV key from environmentVariables was not found in Secret data." >&2
+            exit 1
+          fi
+
+          echo "→ ConfigMap gating, config.data rendering, and environmentVariables→Secret routing are valid."
           echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 3/3] ConfigMap behavior validated — PASSED"
           echo "::endgroup::"

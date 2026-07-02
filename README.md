@@ -434,7 +434,7 @@ CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git ta
 | `major-version` / `minor-version` | | `1` / `0` | SemVer components |
 | `update-dependencies` | | `true` | `helm package --dependency-update` |
 | `validate-routing` | | `true` | Validate default/ingress/gateway/dual rendering |
-| `validate-configmap` | | `true` | Validate ConfigMap gating + merged keys |
+| `validate-configmap` | | `true` | Validate ConfigMap gating + key routing (`config.data` → ConfigMap, `environmentVariables` → Secret) |
 
 **Secrets:** `registry-username`, `registry-password` (required); `github-token` (optional — used by the tag job, falls back to `GITHUB_TOKEN`).
 
