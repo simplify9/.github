@@ -268,6 +268,10 @@ jobs:
           version: ${{ inputs.helm-version }}
 
       - name: Cache Helm dependencies
+        # Helm only writes ~/.cache/helm when it downloads chart dependencies,
+        # and a chart without a committed Chart.lock has none — skip the cache
+        # step then, or its post step warns that the path does not exist.
+        if: ${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path)) != '' }}
         uses: actions/cache@v5
         with:
           path: ~/.cache/helm
@@ -462,6 +466,10 @@ jobs:
           version: ${{ inputs.helm-version }}
 
       - name: Cache Helm dependencies
+        # Helm only writes ~/.cache/helm when it downloads chart dependencies,
+        # and a chart without a committed Chart.lock has none — skip the cache
+        # step then, or its post step warns that the path does not exist.
+        if: ${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path)) != '' }}
         uses: actions/cache@v5
         with:
           path: ~/.cache/helm
