@@ -516,9 +516,10 @@ jobs:
             ruby -e '
           content = File.read(ARGV[0])
           modified = content.gsub(/(\breact_native_post_install\s*\(.*?)(\n?\s*\))/m) do
-            inner  = $1.rstrip.chomp(",")
+            call_body, closing_paren = $1, $2
+            inner  = call_body.rstrip.chomp(",")
             indent = inner.lines.last.to_s[/^(\s*)/, 1] || "      "
-            "#{inner},\n#{indent}:ccache_enabled => true#{$2}"
+            "#{inner},\n#{indent}:ccache_enabled => true#{closing_paren}"
           end
           abort "ERROR: react_native_post_install not found in #{ARGV[0]}" if modified == content
           File.write(ARGV[0], modified)
