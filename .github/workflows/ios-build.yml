@@ -772,9 +772,19 @@ jobs:
       # Archive flags:
       #   -parallelizeTargets            — builds independent targets in parallel
       #   COMPILER_INDEX_STORE_ENABLE=NO — disables Xcode IDE indexing (CI-only)
-      #   CLANG_ENABLE_EXPLICIT_MODULES_WITH_COMPILER_LAUNCHER=YES
-      #                                  — keeps explicit modules active with
-      #                                    ccache as the compiler launcher
+      #   CLANG_ENABLE_EXPLICIT_MODULES=NO
+      #                                  — RN's :ccache_enabled replaces CC with
+      #                                    a ccache wrapper script that Xcode's
+      #                                    explicit-modules scanner cannot
+      #                                    recognize, so every Pod target
+      #                                    already falls back to implicit
+      #                                    modules — after printing a note per
+      #                                    compile task (thousands of log
+      #                                    lines). Disabling explicit modules
+      #                                    makes that fallback explicit and
+      #                                    silences the notes; ccache hits are
+      #                                    unaffected. (Diagnostic notes are
+      #                                    NOT suppressed by -quiet.)
       #   -quiet                         — suppresses per-file compilation logs
       #   -hideShellScriptEnvironment    — suppresses env var dumps from
       #                                    script phases
@@ -823,7 +833,7 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--keychain ${KEYCHAIN_PATH}" \
             -parallelizeTargets \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            CLANG_ENABLE_EXPLICIT_MODULES_WITH_COMPILER_LAUNCHER=YES \
+            CLANG_ENABLE_EXPLICIT_MODULES=NO \
             -quiet \
             -hideShellScriptEnvironment \
             -showBuildTimingSummary
