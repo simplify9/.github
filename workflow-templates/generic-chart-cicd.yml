@@ -51,10 +51,8 @@ permissions:
   contents: write
   packages: write
 
-concurrency:
-  group: cicd-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
+# No concurrency block here: the reusable workflow (generic-chart-helm.yml)
+# already serializes runs per ref to protect its semver tag computation.
 jobs:
   Dev:
     if: ${{ github.ref_name == 'develop' }}
