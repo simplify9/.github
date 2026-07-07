@@ -444,7 +444,7 @@ env:
 
 jobs:
   version:
-    name: Version
+    name: Versioning
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
