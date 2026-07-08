@@ -20,6 +20,11 @@
 #     never echoed. State is passed between this action's own steps via step
 #     outputs (NOT $GITHUB_ENV), so the action never mutates the caller's job
 #     environment.
+#   - Every pack stamps -p:RepositoryUrl on the nuspec with the triggering
+#     repo's URL (from the `github` context), regardless of what each .csproj
+#     declares. GitHub Packages links a NuGet package to a repo's "Packages"
+#     sidebar by reading this nuspec field, so without it the package only
+#     shows under the org/user's Packages tab, unlinked from any repo.
 #
 # Inputs:
 #   projects       (required) Path(s)/glob of .csproj to pack; pass several as a
@@ -90,6 +95,7 @@ runs:
         PROJECTS: ${{ inputs.projects }}
         CONFIGURATION: ${{ inputs.configuration }}
         VERSION: ${{ inputs.version }}
+        REPO_URL: ${{ github.server_url }}/${{ github.repository }}
       run: |
         set -euo pipefail
         shopt -s globstar nullglob
@@ -143,6 +149,10 @@ runs:
           echo "→ $project"
           declare -a pack_args=("$project" --configuration "$CONFIGURATION" --no-build --output "$nupkg_dir")
           [[ -n "$VERSION" ]] && pack_args+=("-p:Version=$VERSION")
+          # Stamps the nuspec <repository> element so GitHub Packages links the
+          # published package to this repo's "Packages" sidebar (same purpose as
+          # the org.opencontainers.image.source label on the Docker image).
+          pack_args+=("-p:RepositoryUrl=$REPO_URL" "-p:RepositoryType=git")
           dotnet pack "${pack_args[@]}"
         done
 
