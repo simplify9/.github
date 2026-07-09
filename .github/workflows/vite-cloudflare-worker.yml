@@ -50,7 +50,9 @@ on:
         default: "yarn"
         type: string
       install_args:
-        description: "Extra args for install (e.g., --frozen-lockfile). Applies to yarn/pnpm only; npm always uses `npm ci` (which already enforces a frozen lockfile) and ignores this."
+        description: "Extra args for install (e.g., --frozen-lockfile). Applies to
+          yarn/pnpm only; npm always uses `npm ci` (which already enforces a frozen
+          lockfile) and ignores this."
         required: false
         default: "--frozen-lockfile"
         type: string
@@ -98,12 +100,14 @@ on:
         type: string
     secrets:
       cloudflare_api_token:
-        description: Cloudflare API token with Workers + DNS permissions as needed
+        description: Cloudflare API token with Workers + DNS permissions as 
+          needed
         required: true
       cloudflare_account_id:
         description: Cloudflare Account ID
         required: true
 
+  workflow_dispatch:
 jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}

@@ -246,7 +246,8 @@ on:
         default: '8.0.x'
         type: string
       nuget-projects:
-        description: 'NuGet projects to pack and push (glob pattern). Leave empty to skip NuGet publishing.'
+        description: 'NuGet projects to pack and push (glob pattern). Leave empty
+          to skip NuGet publishing.'
         required: false
         default: ''
         type: string
@@ -289,12 +290,15 @@ on:
         required: true
         type: string
       chart-publish-method:
-        description: "Where to publish the Helm chart. Valid values: 'github-oci' (GHCR OCI), 'chartmuseum', or 'both' (publishes to GHCR OCI and ChartMuseum). Defaults to 'both'. An unrecognised (or explicitly empty) value hard-fails."
+        description: "Where to publish the Helm chart. Valid values: 'github-oci'
+          (GHCR OCI), 'chartmuseum', or 'both' (publishes to GHCR OCI and ChartMuseum).
+          Defaults to 'both'. An unrecognised (or explicitly empty) value hard-fails."
         required: false
         default: 'both'
         type: string
       chart-repo-url:
-        description: 'ChartMuseum base URL (required when chart-publish-method is chartmuseum or both, e.g. https://charts.sf9.io)'
+        description: 'ChartMuseum base URL (required when chart-publish-method is
+          chartmuseum or both, e.g. https://charts.sf9.io)'
         required: false
         type: string
 
@@ -316,7 +320,10 @@ on:
         default: false
         type: boolean
       deploy-chart-source:
-        description: "Where to pull the chart from for deployment: 'github-oci' or 'chartmuseum'. Leave empty to inherit chart-publish-method; when that is 'both', the deploy defaults to pulling from OCI (set this to 'chartmuseum' to pull from ChartMuseum instead)."
+        description: "Where to pull the chart from for deployment: 'github-oci' or
+          'chartmuseum'. Leave empty to inherit chart-publish-method; when that is
+          'both', the deploy defaults to pulling from OCI (set this to 'chartmuseum'
+          to pull from ChartMuseum instead)."
         required: false
         default: ''
         type: string
@@ -331,7 +338,8 @@ on:
         default: ''
         type: string
       deploy-environment:
-        description: 'GitHub Environment for the deploy job (enables approval gates / environment secrets).'
+        description: 'GitHub Environment for the deploy job (enables approval gates
+          / environment secrets).'
         required: false
         default: 'Development'
         type: string
@@ -341,19 +349,22 @@ on:
         default: '10m'
         type: string
       helm-set-values:
-        description: 'Comma-separated key=value pairs passed to helm --set during deploy (non-secret).'
+        description: 'Comma-separated key=value pairs passed to helm --set during
+          deploy (non-secret).'
         required: false
         default: ''
         type: string
 
       # Routing configuration (consumed by the deploy job)
       routing-mode:
-        description: "North-south routing for the deploy: 'ingress-nginx' (default) or 'gateway-api'."
+        description: "North-south routing for the deploy: 'ingress-nginx' (default)
+          or 'gateway-api'."
         required: false
         default: 'ingress-nginx'
         type: string
       gateway-hostnames:
-        description: 'Gateway-API hostnames (comma or newline separated). Required when routing-mode is gateway-api.'
+        description: 'Gateway-API hostnames (comma or newline separated). Required
+          when routing-mode is gateway-api.'
         required: false
         default: ''
         type: string
@@ -373,7 +384,8 @@ on:
         default: '80'
         type: string
       gateway-backend-service-name:
-        description: 'Optional Gateway-API backend service name override (defaults to the chart service).'
+        description: 'Optional Gateway-API backend service name override (defaults
+          to the chart service).'
         required: false
         default: ''
         type: string
@@ -388,12 +400,14 @@ on:
         default: 's9-dev-edge'
         type: string
       gateway-section-name:
-        description: 'Gateway listener sectionName. Applied only for *.sf9.io hosts (attach to the shared wildcard listener; avoids creating per-host listeners).'
+        description: 'Gateway listener sectionName. Applied only for *.sf9.io hosts
+          (attach to the shared wildcard listener; avoids creating per-host listeners).'
         required: false
         default: 'https-wildcard-sf9-io'
         type: string
       gateway-auto-onboarding:
-        description: 'For non-*.sf9.io hosts, ensure the parent Gateway, listeners, and cert-manager Certificate exist before deploying.'
+        description: 'For non-*.sf9.io hosts, ensure the parent Gateway, listeners,
+          and cert-manager Certificate exist before deploying.'
         required: false
         default: true
         type: boolean
@@ -440,20 +454,25 @@ on:
         required: false
       # ChartMuseum secrets (required when chart-publish-method is chartmuseum or both)
       chartmuseum-username:
-        description: 'ChartMuseum username (required when chart-publish-method is chartmuseum or both)'
+        description: 'ChartMuseum username (required when chart-publish-method is
+          chartmuseum or both)'
         required: false
       chartmuseum-password:
-        description: 'ChartMuseum password/token (required when chart-publish-method is chartmuseum or both)'
+        description: 'ChartMuseum password/token (required when chart-publish-method
+          is chartmuseum or both)'
         required: false
       # Deploy secrets (used when deploy is true)
       kubeconfig:
-        description: 'Base64-encoded kubeconfig for the target cluster (required when deploy is true and routing-mode is ingress-nginx)'
+        description: 'Base64-encoded kubeconfig for the target cluster (required when
+          deploy is true and routing-mode is ingress-nginx)'
         required: false
       kubeconfig-gateway:
-        description: 'Base64-encoded kubeconfig used when routing-mode is gateway-api (required when deploy is true and routing-mode is gateway-api)'
+        description: 'Base64-encoded kubeconfig used when routing-mode is gateway-api
+          (required when deploy is true and routing-mode is gateway-api)'
         required: false
       helm-set-secret-values:
-        description: 'Comma-separated key=value pairs passed to helm --set-string during deploy (masked secret values)'
+        description: 'Comma-separated key=value pairs passed to helm --set-string
+          during deploy (masked secret values)'
         required: false
 
       # GitHub token for tagging
@@ -473,6 +492,7 @@ on:
         value: ${{ jobs.ci.outputs.helm-chart }}
 
 # Default to least privilege; each job escalates only what it needs.
+  workflow_dispatch:
 permissions:
   contents: read
 
@@ -566,7 +586,8 @@ jobs:
           configuration: "Release"
           version: ${{ needs.version.outputs.version }}
           api-key: ${{ secrets.nuget-api-key }}
-          nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
+          nuget-source: ${{ secrets.nuget-source || 
+            'https://api.nuget.org/v3/index.json' }}
 
       - name: Write nuget job summary
         if: always()
@@ -592,7 +613,8 @@ jobs:
       packages: write
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
-      helm-chart: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
+      helm-chart: ${{ steps.helm_oci.outputs.chart-url || 
+        steps.helm_chartmuseum.outputs.chart-url }}
     steps:
       - name: Initialize CI run
         env:
@@ -902,7 +924,8 @@ jobs:
           echo "::endgroup::"
 
       - name: Push Helm chart to GHCR OCI
-        if: ${{ inputs.chart-publish-method == 'github-oci' || inputs.chart-publish-method == 'both' }}
+        if: ${{ inputs.chart-publish-method == 'github-oci' || 
+          inputs.chart-publish-method == 'both' }}
         id: helm_oci
         shell: bash
         env:
@@ -948,7 +971,8 @@ jobs:
           echo "::notice title=Published ${CHART_NAME} ${VERSION}::${CHART_FULL_URL}"
 
       - name: Push Helm chart to ChartMuseum
-        if: ${{ inputs.chart-publish-method == 'chartmuseum' || inputs.chart-publish-method == 'both' }}
+        if: ${{ inputs.chart-publish-method == 'chartmuseum' || 
+          inputs.chart-publish-method == 'both' }}
         id: helm_chartmuseum
         shell: bash
         env:
@@ -1052,7 +1076,8 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
           PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
           CHART_REPO_URL: ${{ inputs.chart-repo-url }}
-          CHART_URL: ${{ steps.helm_oci.outputs.chart-url || steps.helm_chartmuseum.outputs.chart-url }}
+          CHART_URL: ${{ steps.helm_oci.outputs.chart-url || 
+            steps.helm_chartmuseum.outputs.chart-url }}
         run: |
           # OWNER_LOWER is exported to $GITHUB_ENV by the Initialize CI run step.
           OCI_REGISTRY="oci://ghcr.io/${OWNER_LOWER}/charts"
@@ -1152,7 +1177,8 @@ jobs:
           GATEWAY_PATHS: ${{ inputs.gateway-paths }}
           GATEWAY_PATH_TYPE: ${{ inputs.gateway-path-type }}
           GATEWAY_BACKEND_PORT: ${{ inputs.gateway-backend-port }}
-          GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name }}
+          GATEWAY_BACKEND_SERVICE_NAME: ${{ inputs.gateway-backend-service-name 
+            }}
           HELM_SET_VALUES: ${{ inputs.helm-set-values }}
         run: |
           set -euo pipefail
@@ -1269,7 +1295,8 @@ jobs:
           echo "::endgroup::"
 
       - name: Onboard gateway hostnames
-        if: ${{ inputs.routing-mode == 'gateway-api' && inputs.gateway-auto-onboarding }}
+        if: ${{ inputs.routing-mode == 'gateway-api' && 
+          inputs.gateway-auto-onboarding }}
         shell: bash
         env:
           KUBECONFIG_DATA: ${{ secrets.kubeconfig-gateway }}
@@ -1280,7 +1307,8 @@ jobs:
           GATEWAY_CERT_ISSUER_NAME: ${{ inputs.gateway-cert-issuer-name }}
           GATEWAY_CERT_ISSUER_KIND: ${{ inputs.gateway-cert-issuer-kind }}
           GATEWAY_CERT_WAIT: ${{ inputs.gateway-cert-wait }}
-          GATEWAY_CERT_WAIT_TIMEOUT: ${{ inputs.gateway-cert-wait-timeout-seconds }}
+          GATEWAY_CERT_WAIT_TIMEOUT: ${{ 
+            inputs.gateway-cert-wait-timeout-seconds }}
           HOST_LIST: ${{ steps.params.outputs.onboard-hosts }}
         run: |
           set -euo pipefail
@@ -1440,7 +1468,8 @@ jobs:
           chart-repo-username: ${{ secrets.chartmuseum-username }}
           chart-repo-password: ${{ secrets.chartmuseum-password }}
           # Cluster + release: routing-mode selects which kubeconfig is used.
-          kubeconfig: ${{ inputs.routing-mode == 'gateway-api' && secrets.kubeconfig-gateway || secrets.kubeconfig }}
+          kubeconfig: ${{ inputs.routing-mode == 'gateway-api' && 
+            secrets.kubeconfig-gateway || secrets.kubeconfig }}
           release-name: ${{ steps.params.outputs.release-name }}
           namespace: ${{ inputs.deploy-namespace }}
           timeout: ${{ inputs.deploy-timeout }}
@@ -1480,7 +1509,8 @@ jobs:
       ${{ !cancelled()
           && needs.version.result == 'success'
           && needs.ci.result == 'success'
-          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped')
+      }}
     permissions:
       contents: write
     steps:

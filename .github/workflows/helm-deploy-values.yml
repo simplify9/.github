@@ -45,7 +45,8 @@ on:
         required: true
 
       chart-repo:
-        description: Classic Helm chart repository URL (ChartMuseum-style) to pull the chart from.
+        description: Classic Helm chart repository URL (ChartMuseum-style) to 
+          pull the chart from.
         type: string
         required: true
 
@@ -82,13 +83,15 @@ on:
       gh-environment:
         description: >-
           Optional GitHub Environment name for deployment protection rules,
-          environment-scoped secrets and deployment history. Empty = no environment binding.
+          environment-scoped secrets and deployment history. Empty = no environment
+          binding.
         type: string
         required: false
         default: ""
 
       service-target-port:
-        description: Optional service target port to set on the chart (empty = chart default).
+        description: Optional service target port to set on the chart (empty = 
+          chart default).
         type: string
         required: false
         default: ""
@@ -102,7 +105,8 @@ on:
         default: ""
 
       ingress-paths:
-        description: Ingress paths, one per line or comma-separated (empty = chart default).
+        description: Ingress paths, one per line or comma-separated (empty = 
+          chart default).
         type: string
         required: false
         default: ""
@@ -114,7 +118,8 @@ on:
         default: ""
 
       image-tag:
-        description: Optional image tag to set on the chart (empty = chart default).
+        description: Optional image tag to set on the chart (empty = chart 
+          default).
         type: string
         required: false
         default: ""
@@ -144,13 +149,15 @@ on:
         default: 10m
 
       atomic:
-        description: Use Helm's atomic flag so a failed upgrade rolls back automatically.
+        description: Use Helm's atomic flag so a failed upgrade rolls back 
+          automatically.
         type: boolean
         required: false
         default: true
 
       wait:
-        description: Wait for resources to become ready before reporting success.
+        description: Wait for resources to become ready before reporting 
+          success.
         type: boolean
         required: false
         default: true
@@ -185,6 +192,7 @@ on:
       helm-set-secret-values:
         required: false
 
+  workflow_dispatch:
 permissions:
   contents: read
 

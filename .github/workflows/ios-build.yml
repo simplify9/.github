@@ -1,4 +1,4 @@
-﻿# =============================================================================
+# =============================================================================
 # iOS Build & Deploy — Reusable Workflow
 # =============================================================================
 #
@@ -75,12 +75,14 @@ on:
       # install-command only when the default (yarn install --frozen-lockfile
       # or npm ci) is not suitable.
       package-manager:
-        description: Node package manager used for cache and default dependency commands (yarn or npm)
+        description: Node package manager used for cache and default dependency 
+          commands (yarn or npm)
         required: false
         type: string
         default: yarn
       package-manager-directory:
-        description: Directory containing package.json and lockfile for selected package manager
+        description: Directory containing package.json and lockfile for selected
+          package manager
         required: false
         type: string
         default: "."
@@ -90,13 +92,15 @@ on:
         type: string
         default: ""
       install-command:
-        description: Optional explicit dependency install command; if empty uses package-manager default
+        description: Optional explicit dependency install command; if empty uses
+          package-manager default
         required: false
         type: string
         default: ""
       # ── Xcode ───────────────────────────────────────────────────────────────
       xcode-version:
-        description: "Optional Xcode major or major.minor selector (for example: 26 or 16.4)"
+        description: "Optional Xcode major or major.minor selector (for example: 26
+          or 16.4)"
         required: false
         type: string
         default: ""
@@ -116,7 +120,8 @@ on:
       # mutating config before yarn/npm runs. Content is passed to eval —
       # never pass untrusted input here.
       pre-build-script:
-        description: Optional bash script to run before dependency install (for example, env file mutation)
+        description: Optional bash script to run before dependency install (for 
+          example, env file mutation)
         required: false
         type: string
         default: ""
@@ -151,7 +156,8 @@ on:
         type: string
         default: output/package
       export-options-plist:
-        description: Path to static exportOptions.plist. If empty and generate-export-options=true, one is generated.
+        description: Path to static exportOptions.plist. If empty and 
+          generate-export-options=true, one is generated.
         required: false
         type: string
         default: ""
@@ -183,7 +189,8 @@ on:
         type: string
         default: ""
       marketing-prefix:
-        description: Marketing version start in X.Y or X.Y.Z format (for example 1.0 or 2.3.0)
+        description: Marketing version start in X.Y or X.Y.Z format (for example
+          1.0 or 2.3.0)
         required: false
         type: string
         default: "1.0"
@@ -192,7 +199,8 @@ on:
       # ipa-name-pattern tokens: {scheme}, {version}, {build_number},
       # {run_number}
       ipa-name-pattern:
-        description: Output IPA file name pattern with tokens {scheme},{version},{build_number},{run_number}
+        description: Output IPA file name pattern with tokens 
+          {scheme},{version},{build_number},{run_number}
         required: false
         type: string
         default: "{scheme}{run_number}.ipa"
@@ -209,7 +217,8 @@ on:
       # The input is retained for caller compatibility; any other value is
       # rejected at runtime with a migration message.
       upload-tool:
-        description: "TestFlight upload tool. Only 'appstoreapi' is supported (altool and transporter were removed)."
+        description: "TestFlight upload tool. Only 'appstoreapi' is supported (altool
+          and transporter were removed)."
         required: false
         type: string
         default: appstoreapi
@@ -218,7 +227,8 @@ on:
       # Set release-environment to route through release_with_environment job,
       # which enforces GitHub Environment approval gates.
       release-environment:
-        description: GitHub environment for release job (ios-staging or ios-production)
+        description: GitHub environment for release job (ios-staging or 
+          ios-production)
         required: false
         type: string
         default: "ios-staging"
@@ -234,12 +244,14 @@ on:
       # match the version in .ruby-version or Gemfile. CFPropertyList 3.0.9
       # requires ruby < 3.2; use 3.1 for RN 0.85 projects.
       ruby-version:
-        description: "Ruby version for bundler/CocoaPods setup. Empty disables Ruby setup."
+        description: "Ruby version for bundler/CocoaPods setup. Empty disables Ruby
+          setup."
         required: false
         type: string
         default: ""
       use-bundler:
-        description: "If true and ruby-version set, install gems via bundler (requires a Gemfile)."
+        description: "If true and ruby-version set, install gems via bundler (requires
+          a Gemfile)."
         required: false
         type: boolean
         default: false
@@ -249,7 +261,8 @@ on:
       # Requires :ccache_enabled => true in Podfile react_native_post_install.
       # Cache keyed on Podfile.lock — any pod version change invalidates it.
       enable-ccache:
-        description: "Enable ccache for Objective-C/C++ pod compilation (partial speedup; no Swift benefit)."
+        description: "Enable ccache for Objective-C/C++ pod compilation (partial speedup;
+          no Swift benefit)."
         required: false
         type: boolean
         default: true
@@ -275,7 +288,8 @@ on:
         description: App Store Connect issuer id
         required: false
       appstore-api-private-key-base64:
-        description: Base64-encoded App Store Connect API private key (.p8) for the appstoreapi upload
+        description: Base64-encoded App Store Connect API private key (.p8) for 
+          the appstoreapi upload
         required: false
 
     outputs:
@@ -289,6 +303,7 @@ on:
         description: IPA file name uploaded and released
         value: ${{ jobs.build.outputs.ipa-file }}
 
+  workflow_dispatch:
 permissions:
   contents: read
 
@@ -345,7 +360,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/Library/Caches/ccache
-          key: ccache-ios-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          key: ccache-ios-${{ runner.os }}-${{ 
+            hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
           restore-keys: |
             ccache-ios-${{ runner.os }}-
 
@@ -467,13 +483,15 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.package_manager.outputs.cache }}
-          cache-dependency-path: ${{ steps.package_manager.outputs.cache_dependency_path }}
+          cache-dependency-path: ${{ 
+            steps.package_manager.outputs.cache_dependency_path }}
 
       - name: Install dependencies
         shell: bash
         env:
           INSTALL_COMMAND_INPUT: ${{ inputs.install-command }}
-          DEFAULT_INSTALL_COMMAND: ${{ steps.package_manager.outputs.default_install_command }}
+          DEFAULT_INSTALL_COMMAND: ${{ 
+            steps.package_manager.outputs.default_install_command }}
         run: |
           set -euo pipefail
           if [[ -n "${INSTALL_COMMAND_INPUT}" ]]; then
@@ -557,7 +575,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cocoapods/repos
-          key: cocoapods-specs-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          key: cocoapods-specs-${{ runner.os }}-${{ 
+            hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
           restore-keys: |
             cocoapods-specs-${{ runner.os }}-
 
@@ -569,7 +588,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ inputs.ios-dir }}/Pods
-          key: pods-dir-${{ runner.os }}-${{ hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
+          key: pods-dir-${{ runner.os }}-${{ 
+            hashFiles(format('{0}/Podfile.lock', inputs.ios-dir)) }}
           restore-keys: |
             pods-dir-${{ runner.os }}-
 
