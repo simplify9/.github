@@ -35,7 +35,8 @@ on:
     inputs:
       # ── Runner & toolchain ──────────────────────────────────────────────────
       macos-runner:
-        description: GitHub-hosted macOS runner label (e.g. macos-latest or macos-26)
+        description: GitHub-hosted macOS runner label (e.g. macos-latest or 
+          macos-26)
         required: false
         type: string
         default: macos-latest
@@ -63,12 +64,14 @@ on:
 
       # ── iOS project layout ──────────────────────────────────────────────────
       ios-dir:
-        description: iOS project directory (holds the Podfile and Runner project)
+        description: iOS project directory (holds the Podfile and Runner 
+          project)
         required: false
         type: string
         default: ios
       pbxproj-path:
-        description: Path to the Xcode project.pbxproj that gets the manual-signing rewrite
+        description: Path to the Xcode project.pbxproj that gets the 
+          manual-signing rewrite
         required: false
         type: string
         default: ios/Runner.xcodeproj/project.pbxproj
@@ -89,7 +92,8 @@ on:
 
       # ── Static analysis ─────────────────────────────────────────────────────
       run-analyze:
-        description: Run `flutter analyze` before building (off by default — matches the laflef iOS reference)
+        description: Run `flutter analyze` before building (off by default — 
+          matches the laflef iOS reference)
         required: false
         type: boolean
         default: false
@@ -104,12 +108,14 @@ on:
 
       # ── Export & artifact ───────────────────────────────────────────────────
       export-method:
-        description: ExportOptions.plist distribution method (app-store-connect, release-testing, enterprise, debugging)
+        description: ExportOptions.plist distribution method (app-store-connect,
+          release-testing, enterprise, debugging)
         required: false
         type: string
         default: app-store-connect
       ipa-name-pattern:
-        description: Output IPA file name pattern with tokens {app_slug},{version},{build_number},{run_number}
+        description: Output IPA file name pattern with tokens 
+          {app_slug},{version},{build_number},{run_number}
         required: false
         type: string
         default: "{app_slug}-{version}-{build_number}.ipa"
@@ -130,7 +136,8 @@ on:
         type: boolean
         default: false
       release-environment:
-        description: GitHub Environment for the release job (e.g. ios-staging or ios-production)
+        description: GitHub Environment for the release job (e.g. ios-staging or
+          ios-production)
         required: false
         type: string
         default: ios-staging
@@ -151,7 +158,8 @@ on:
         description: Base64-encoded provisioning profile (.mobileprovision)
         required: true
       ios-team-id:
-        description: Optional explicit Apple Team ID (falls back to the profile's team)
+        description: Optional explicit Apple Team ID (falls back to the 
+          profile's team)
         required: false
       appstore-api-key-id:
         description: App Store Connect API key id (required only when releasing)
@@ -160,12 +168,14 @@ on:
         description: App Store Connect issuer id (required only when releasing)
         required: false
       appstore-api-private-key-base64:
-        description: Base64-encoded App Store Connect API private key .p8 PEM (required only when releasing)
+        description: Base64-encoded App Store Connect API private key .p8 PEM 
+          (required only when releasing)
         required: false
 
     outputs:
       version:
-        description: Marketing version (CFBundleShortVersionString) used for this build
+        description: Marketing version (CFBundleShortVersionString) used for 
+          this build
         value: ${{ jobs.build.outputs.version }}
       build-number:
         description: Build number (CFBundleVersion) used for this build
@@ -174,6 +184,7 @@ on:
         description: Output IPA file name uploaded and released
         value: ${{ jobs.build.outputs.ipa-file }}
 
+  workflow_dispatch:
 jobs:
   build:
     name: iOS Build
@@ -226,7 +237,8 @@ jobs:
           # redirects PUB_CACHE to its own tool-cache path.
           cache: true
 
-      - name: Install Flutter dependencies${{ inputs.run-analyze && ' & analyze' || '' }}
+      - name: Install Flutter dependencies${{ inputs.run-analyze && ' & analyze'
+          || '' }}
         working-directory: ${{ inputs.project-directory }}
         shell: bash
         env:
@@ -259,7 +271,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ inputs.project-directory }}/${{ inputs.ios-dir }}/Pods
-          key: pods-${{ runner.os }}-${{ hashFiles(format('{0}/{1}/Podfile.lock', inputs.project-directory, inputs.ios-dir)) }}
+          key: pods-${{ runner.os }}-${{ 
+            hashFiles(format('{0}/{1}/Podfile.lock', inputs.project-directory, 
+            inputs.ios-dir)) }}
           restore-keys: pods-${{ runner.os }}-
 
       - name: Install Pods
@@ -497,7 +511,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
-          path: ${{ inputs.project-directory }}/${{ steps.rename_ipa.outputs.ipa_file }}
+          path: ${{ inputs.project-directory }}/${{ 
+            steps.rename_ipa.outputs.ipa_file }}
           compression-level: 0
           # Transient hand-off to the release job in the same run; 1 day (the
           # minimum) is plenty and keeps Actions storage near-zero.
@@ -614,7 +629,8 @@ jobs:
         env:
           APPSTORE_API_KEY_ID: ${{ secrets.appstore-api-key-id }}
           APPSTORE_ISSUER_ID: ${{ secrets.appstore-issuer-id }}
-          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ secrets.appstore-api-private-key-base64 }}
+          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ 
+            secrets.appstore-api-private-key-base64 }}
         run: |
           set -euo pipefail
           if [[ -z "${APPSTORE_API_KEY_ID:-}" ]]; then
@@ -635,7 +651,8 @@ jobs:
         id: appstore_key
         shell: bash
         env:
-          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ secrets.appstore-api-private-key-base64 }}
+          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ 
+            secrets.appstore-api-private-key-base64 }}
           IPA_PATH: ${{ steps.ipa.outputs.path }}
         run: |
           set -euo pipefail

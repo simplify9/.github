@@ -90,17 +90,20 @@ on:
       # - version-prefix is the base release line.
       # - version-code-offset keeps Play versionCode strictly increasing.
       version-prefix:
-        description: Base version for VERSION_NAME (X.Y or X.Y.Z, for example 4.0.0)
+        description: Base version for VERSION_NAME (X.Y or X.Y.Z, for example 
+          4.0.0)
         required: false
         type: string
         default: "1.0.0"
       version-name-override:
-        description: Optional explicit VERSION_NAME; if empty uses base version with the patch incremented per run
+        description: Optional explicit VERSION_NAME; if empty uses base version 
+          with the patch incremented per run
         required: false
         type: string
         default: ""
       version-code-offset:
-        description: Numeric offset added to github.run_number for VERSION_CODE (set high for CI migrations)
+        description: Numeric offset added to github.run_number for VERSION_CODE 
+          (set high for CI migrations)
         required: false
         type: string
         default: "80000"
@@ -108,12 +111,14 @@ on:
       # Package manager inputs keep setup-node cache and install commands aligned.
       # Defaults preserve legacy behavior (Yarn at repository root).
       package-manager:
-        description: Node package manager used for cache and default dependency commands (yarn or npm)
+        description: Node package manager used for cache and default dependency 
+          commands (yarn or npm)
         required: false
         type: string
         default: yarn
       package-manager-directory:
-        description: Directory containing package.json and lockfile for selected package manager
+        description: Directory containing package.json and lockfile for selected
+          package manager
         required: false
         type: string
         default: "."
@@ -125,12 +130,14 @@ on:
       # Leave install-command empty to use package-manager defaults.
       # Set this only when a caller needs a fully custom install command.
       install-command:
-        description: Optional explicit dependency install command; if empty uses package-manager default
+        description: Optional explicit dependency install command; if empty uses
+          package-manager default
         required: false
         type: string
         default: ""
       use-jetifier:
-        description: Install and run jetifier (npx jetify). Disable for projects that do not need AndroidX migration.
+        description: Install and run jetifier (npx jetify). Disable for projects
+          that do not need AndroidX migration.
         required: false
         type: boolean
         default: true
@@ -151,7 +158,8 @@ on:
         type: string
         default: ""
       gradle-react-native-architectures:
-        description: "Android ABIs to build. Default arm64-v8a only (production devices). Override for projects needing more."
+        description: "Android ABIs to build. Default arm64-v8a only (production devices).
+          Override for projects needing more."
         required: false
         type: string
         default: arm64-v8a
@@ -167,7 +175,8 @@ on:
         type: string
         default: android/app/build/outputs/bundle/release/app-release.aab
       aab-name-pattern:
-        description: Output AAB name pattern with tokens {app_slug},{version_name},{run_number}
+        description: Output AAB name pattern with tokens 
+          {app_slug},{version_name},{run_number}
         required: false
         type: string
         default: "{app_slug}-release-{version_name}.aab"
@@ -193,7 +202,8 @@ on:
         type: boolean
         default: false
       release-environment:
-        description: GitHub environment for release job (android-staging or android-production)
+        description: GitHub environment for release job (android-staging or 
+          android-production)
         required: false
         type: string
         default: "android-staging"
@@ -232,6 +242,7 @@ on:
         description: Output AAB file uploaded and released
         value: ${{ jobs.build.outputs.aab-file }}
 
+  workflow_dispatch:
 permissions:
   contents: read
 
@@ -426,7 +437,8 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.package_manager.outputs.cache }}
-          cache-dependency-path: ${{ steps.package_manager.outputs.cache_dependency_path }}
+          cache-dependency-path: ${{ 
+            steps.package_manager.outputs.cache_dependency_path }}
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -438,7 +450,8 @@ jobs:
         shell: bash
         env:
           INSTALL_COMMAND_INPUT: ${{ inputs.install-command }}
-          DEFAULT_INSTALL_COMMAND: ${{ steps.package_manager.outputs.default_install_command }}
+          DEFAULT_INSTALL_COMMAND: ${{ 
+            steps.package_manager.outputs.default_install_command }}
         run: |
           set -euo pipefail
           if [[ -n "${INSTALL_COMMAND_INPUT}" ]]; then
@@ -451,7 +464,8 @@ jobs:
         if: ${{ inputs.use-jetifier }}
         shell: bash
         env:
-          JETIFIER_INSTALL_CMD: ${{ steps.package_manager.outputs.jetifier_install_command }}
+          JETIFIER_INSTALL_CMD: ${{ 
+            steps.package_manager.outputs.jetifier_install_command }}
         run: |
           set -euo pipefail
           eval "${JETIFIER_INSTALL_CMD}"
@@ -460,7 +474,8 @@ jobs:
         if: ${{ inputs.use-jetifier }}
         shell: bash
         env:
-          JETIFIER_RUN_CMD: ${{ steps.package_manager.outputs.jetifier_run_command }}
+          JETIFIER_RUN_CMD: ${{ 
+            steps.package_manager.outputs.jetifier_run_command }}
         run: |
           set -euo pipefail
           eval "${JETIFIER_RUN_CMD}"
@@ -550,7 +565,7 @@ jobs:
           "${SDKMANAGER}" "ndk;27.1.12297006"
           echo "✅ NDK version pre-installed"
           echo "::endgroup::"
-      
+
       # Pinned to setup-gradle@v5 (not v6).
       # v6 (initial release) moved Gradle User Home caching to a proprietary closed-source
       # component. v6.1.0 later added a free MIT-licensed alternative via cache-provider: basic.
@@ -751,7 +766,8 @@ jobs:
       - name: Validate credentials
         shell: bash
         env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ 
+            secrets.google-play-service-account-json }}
         run: |
           set -euo pipefail
           if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
@@ -763,13 +779,15 @@ jobs:
       - name: Upload
         uses: r0adkll/upload-google-play@v1
         with:
-          serviceAccountJsonPlainText: ${{ secrets.google-play-service-account-json }}
+          serviceAccountJsonPlainText: ${{ 
+            secrets.google-play-service-account-json }}
           packageName: ${{ inputs.app-id }}
           releaseFiles: ${{ steps.aab.outputs.path }}
           tracks: ${{ inputs.play-track }}
           releaseName: ${{ needs.build.outputs.version-name }}
           status: ${{ inputs.release-status }}
-          changesNotSentForReview: ${{ inputs.changes-not-sent-for-review && 'true' || 'false' }}
+          changesNotSentForReview: ${{ inputs.changes-not-sent-for-review && 
+            'true' || 'false' }}
 
       - name: Confirm upload
         shell: bash

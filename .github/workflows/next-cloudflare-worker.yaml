@@ -55,7 +55,9 @@ on:
         default: "yarn"
         type: string
       install_args:
-        description: "Extra args for install (e.g., --frozen-lockfile). Applies to yarn/pnpm only; npm always uses `npm ci` (which already enforces a frozen lockfile) and ignores this."
+        description: "Extra args for install (e.g., --frozen-lockfile). Applies to
+          yarn/pnpm only; npm always uses `npm ci` (which already enforces a frozen
+          lockfile) and ignores this."
         required: false
         default: "--frozen-lockfile"
         type: string
@@ -65,7 +67,8 @@ on:
         default: true
         type: boolean
       opennextjs_version:
-        description: "Version of the @opennextjs/cloudflare adapter to install (pinned for reproducible builds; set to a specific version or a tag like `latest`)."
+        description: "Version of the @opennextjs/cloudflare adapter to install (pinned
+          for reproducible builds; set to a specific version or a tag like `latest`)."
         required: false
         default: "1.20.1"
         type: string
@@ -75,7 +78,8 @@ on:
         default: "2026-05-01"
         type: string
       route:
-        description: Route / custom domain for the Worker (e.g., example.com). If blank, falls back to repo vars CLOUDFLARE_ROUTE then ROUTE.
+        description: Route / custom domain for the Worker (e.g., example.com). 
+          If blank, falls back to repo vars CLOUDFLARE_ROUTE then ROUTE.
         required: false
         default: ""
         type: string
@@ -99,12 +103,14 @@ on:
         type: string
     secrets:
       cloudflare_api_token:
-        description: Cloudflare API token with Workers + DNS permissions as needed
+        description: Cloudflare API token with Workers + DNS permissions as 
+          needed
         required: true
       cloudflare_account_id:
         description: Cloudflare Account ID
         required: true
 
+  workflow_dispatch:
 jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
@@ -239,7 +245,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.[jt]s', '**/*.[jt]sx') }}
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', 
+            '**/yarn.lock', '**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.[jt]s', 
+            '**/*.[jt]sx') }}
           restore-keys: |
             ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml') }}-
 
@@ -290,7 +298,8 @@ jobs:
         uses: simplify9/.github/.github/actions/generate-wrangler-config@main
         with:
           compatibility-date: ${{ inputs.compatibility_date }}
-          route: ${{ inputs.route != '' && inputs.route || vars.CLOUDFLARE_ROUTE || vars.ROUTE }}
+          route: ${{ inputs.route != '' && inputs.route || vars.CLOUDFLARE_ROUTE
+            || vars.ROUTE }}
           project-name: ${{ inputs.project_name }}
           environment: ${{ inputs.environment }}
           assets-dir: ${{ inputs.assets_dir }}
@@ -336,7 +345,8 @@ jobs:
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
           icon: '⚡'
-          title: Next.js → Cloudflare Workers Deploy — ${{ inputs.project_name }}
+          title: Next.js → Cloudflare Workers Deploy — ${{ inputs.project_name 
+            }}
           status: ${{ job.status }}
           details: |
             | Field | Value |

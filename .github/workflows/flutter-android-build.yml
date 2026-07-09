@@ -88,22 +88,26 @@ on:
 
       # ── Versioning ──────────────────────────────────────────────────────────
       version-prefix:
-        description: Base version for VERSION_NAME (X.Y or X.Y.Z); major.minor are fixed, only the patch increments per run
+        description: Base version for VERSION_NAME (X.Y or X.Y.Z); major.minor 
+          are fixed, only the patch increments per run
         required: false
         type: string
         default: "1.0.0"
       version-name-override:
-        description: Optional explicit VERSION_NAME; if empty uses base version + run increment
+        description: Optional explicit VERSION_NAME; if empty uses base version 
+          + run increment
         required: false
         type: string
         default: ""
       version-name-offset:
-        description: Numeric offset added to github.run_number when computing VERSION_NAME
+        description: Numeric offset added to github.run_number when computing 
+          VERSION_NAME
         required: false
         type: string
         default: "0"
       version-code-offset:
-        description: Numeric offset added to github.run_number for VERSION_CODE (set above last shipped versionCode)
+        description: Numeric offset added to github.run_number for VERSION_CODE 
+          (set above last shipped versionCode)
         required: false
         type: string
         default: "80000"
@@ -130,7 +134,8 @@ on:
         type: string
         default: android/app/release.keystore
       aab-name-pattern:
-        description: Output AAB file name pattern with tokens {app_slug},{version_name},{version_code},{run_number}
+        description: Output AAB file name pattern with tokens 
+          {app_slug},{version_name},{version_code},{run_number}
         required: false
         type: string
         default: "{app_slug}-release-{version_name}.aab"
@@ -147,22 +152,26 @@ on:
         type: string
         default: internal
       release-status:
-        description: Google Play release status (draft, completed, inProgress, halted)
+        description: Google Play release status (draft, completed, inProgress, 
+          halted)
         required: false
         type: string
         default: draft
       changes-not-sent-for-review:
-        description: If true, pass changesNotSentForReview (skip the review queue, e.g. internal track)
+        description: If true, pass changesNotSentForReview (skip the review 
+          queue, e.g. internal track)
         required: false
         type: boolean
         default: false
       release-environment:
-        description: GitHub Environment for the release job (e.g. android-staging or android-production)
+        description: GitHub Environment for the release job (e.g. 
+          android-staging or android-production)
         required: false
         type: string
         default: android-staging
       disable-release:
-        description: If true, skip the Google Play release job and run build-only
+        description: If true, skip the Google Play release job and run 
+          build-only
         required: false
         type: boolean
         default: false
@@ -181,7 +190,8 @@ on:
         description: Signing key password
         required: true
       google-play-service-account-json:
-        description: Google Play service account JSON (required only when releasing)
+        description: Google Play service account JSON (required only when 
+          releasing)
         required: false
 
     outputs:
@@ -195,6 +205,7 @@ on:
         description: Output AAB file name uploaded and released
         value: ${{ jobs.build.outputs.aab-file }}
 
+  workflow_dispatch:
 jobs:
   build:
     name: Android Build
@@ -266,7 +277,8 @@ jobs:
           channel: ${{ inputs.flutter-channel }}
           cache: true
 
-      - name: Install dependencies${{ inputs.run-analyze && ' & analyze' || '' }}
+      - name: Install dependencies${{ inputs.run-analyze && ' & analyze' || '' 
+          }}
         working-directory: ${{ inputs.project-directory }}
         shell: bash
         env:
@@ -522,7 +534,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
-          path: ${{ inputs.project-directory }}/${{ steps.rename.outputs.aab_file }}
+          path: ${{ inputs.project-directory }}/${{ 
+            steps.rename.outputs.aab_file }}
           compression-level: 0
           # Transient hand-off to the release job in the same run; 1 day (the
           # minimum) is plenty and keeps Actions storage near-zero.
@@ -635,7 +648,8 @@ jobs:
       - name: Validate release credentials
         shell: bash
         env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.google-play-service-account-json }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ 
+            secrets.google-play-service-account-json }}
         run: |
           set -euo pipefail
           if [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
@@ -647,7 +661,8 @@ jobs:
       - name: Upload to Google Play
         uses: r0adkll/upload-google-play@v1
         with:
-          serviceAccountJsonPlainText: ${{ secrets.google-play-service-account-json }}
+          serviceAccountJsonPlainText: ${{ 
+            secrets.google-play-service-account-json }}
           packageName: ${{ inputs.app-id }}
           releaseFiles: ${{ steps.aab.outputs.path }}
           tracks: ${{ inputs.play-track }}

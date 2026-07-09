@@ -80,17 +80,20 @@ on:
         default: 'development'
         type: string
       deploy-environment:
-        description: 'GitHub Environment name for the deploy job (controls protection rules and scoped secrets)'
+        description: 'GitHub Environment name for the deploy job (controls protection
+          rules and scoped secrets)'
         required: false
         default: 'development'
         type: string
       helm-timeout-minutes:
-        description: 'Optional Helm timeout in minutes (e.g., 15). If empty, defaults to 10 minutes.'
+        description: 'Optional Helm timeout in minutes (e.g., 15). If empty, defaults
+          to 10 minutes.'
         required: false
         default: ''
         type: string
       atomic:
-        description: "If true, pass --rollback-on-failure to helm upgrade so a failed deploy rolls back automatically (implies --wait)."
+        description: "If true, pass --rollback-on-failure to helm upgrade so a failed
+          deploy rolls back automatically (implies --wait)."
         required: false
         default: true
         type: boolean
@@ -125,7 +128,8 @@ on:
         required: false
         type: string
       ingress-tls-secrets:
-        description: 'Comma or newline separated list of TLS secrets matching ingress-hosts by index; falls back to ingress-tls-secret if absent'
+        description: 'Comma or newline separated list of TLS secrets matching ingress-hosts
+          by index; falls back to ingress-tls-secret if absent'
         required: false
         type: string
       init-job-image:
@@ -152,17 +156,20 @@ on:
         default: ''
         type: string
       init-job-secret-key:
-        description: Key in init-job-secret-name holding the connection string (default 'connection-string').
+        description: Key in init-job-secret-name holding the connection string 
+          (default 'connection-string').
         required: false
         default: ''
         type: string
       init-job-connstring-env:
-        description: Env var name the connection string is injected into (default 'ConnectionStrings__ShanapDb').
+        description: Env var name the connection string is injected into 
+          (default 'ConnectionStrings__ShanapDb').
         required: false
         default: ''
         type: string
       init-job-environment-env:
-        description: Env var name carrying the environment name in the migration Job (default 'ASPNETCORE_ENVIRONMENT').
+        description: Env var name carrying the environment name in the migration
+          Job (default 'ASPNETCORE_ENVIRONMENT').
         required: false
         default: ''
         type: string
@@ -197,7 +204,8 @@ on:
         required: false
       # NuGet secrets
       NUGET_PACKAGE_PAT:
-        description: 'Personal access token for GitHub Packages restores inside Docker builds'
+        description: 'Personal access token for GitHub Packages restores inside Docker
+          builds'
         required: false
       nuget-api-key:
         description: 'NuGet API key'
@@ -223,6 +231,7 @@ on:
         value: ${{ jobs.nuget.outputs.version }}
 
 # Deny-all by default; every job opts into exactly the scopes it needs below.
+  workflow_dispatch:
 permissions: {}
 
 # Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
@@ -325,7 +334,8 @@ jobs:
           persist-credentials: false
 
       - name: Configure GitHub Packages feed
-        if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 'pkg.github.com') }}
+        if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && 
+          contains(env.NUGET_SOURCE, 'pkg.github.com') }}
         env:
           FEED_URL: ${{ env.NUGET_SOURCE }}
           FEED_USERNAME: ${{ github.actor }}
@@ -370,7 +380,8 @@ jobs:
           configuration: 'Release'
           version: ${{ steps.nuget-semver.outputs.version }}
           api-key: ${{ secrets.nuget-api-key }}
-          nuget-source: ${{ secrets.nuget-source || 'https://api.nuget.org/v3/index.json' }}
+          nuget-source: ${{ secrets.nuget-source || 
+            'https://api.nuget.org/v3/index.json' }}
 
       - name: Write nuget job summary
         if: always()
@@ -398,7 +409,8 @@ jobs:
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
-          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped')
+      }}
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
     steps:
@@ -428,7 +440,8 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
-          build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
+          build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && 
+            format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
           # Org requirement: EVERY pushed image carries the 'latest' tag, on any branch.
           tag-latest: 'true'
 
@@ -548,7 +561,8 @@ jobs:
           echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 1/2] Ingress values generated — PASSED"
 
-      - name: Deploy to ${{ inputs.deploy-environment }} (via local composite action)
+      - name: Deploy to ${{ inputs.deploy-environment }} (via local composite 
+          action)
         uses: simplify9/.github/.github/actions/helm-generic@main
         with:
           # Required basics
@@ -563,7 +577,8 @@ jobs:
           # --wait=legacy: s9genericchart renders a livenessProbe with NO startupProbe when
           # probes are enabled, which can hang/fail under Helm 4's default kstatus watcher
           # (helm/helm#31526). The legacy waiter restores the proven Helm 3 behaviour.
-          helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', inputs.helm-timeout-minutes) || '10m' }}
+          helm_timeout: ${{ inputs.helm-timeout-minutes != '' && format('{0}m', 
+            inputs.helm-timeout-minutes) || '10m' }}
           extra_args: "--wait=legacy"
           atomic: ${{ inputs.atomic }}
 
@@ -649,7 +664,8 @@ jobs:
           && needs.version.result == 'success'
           && needs.build.result == 'success'
           && needs.deploy.result == 'success'
-          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped') }}
+          && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped')
+      }}
     permissions:
       contents: write
     steps:
