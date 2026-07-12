@@ -1,0 +1,163 @@
+# =============================================================================
+# Check Critical Dependabot Vulnerabilities
+# =============================================================================
+# Queries the Dependabot Alerts REST API for open CRITICAL-severity alerts on
+# the target repository and FAILS the step (non-zero exit) if any are found.
+# This is the single mechanism reused at three call sites: the PR-time
+# critical-vuln-gate reusable workflow (enforced via branch protection), the
+# build-time gate embedded in every deploy/build reusable workflow, and a
+# dependency of the dependabot-auto-merge workflow-template.
+#
+# Deliberately NOT actions/dependency-review-action: that action's private-repo
+# enforcement guarantees have historically required a GitHub Advanced Security
+# license, and this org is on the Team plan. This action only needs Dependabot
+# alerts enabled on the repo (a free feature) plus a token with
+# `security-events: read`.
+#
+# Inputs:
+#   github-token  (required)  Token with security-events:read on the target
+#                             repo (the caller's job must grant this in its
+#                             own `permissions:` block — job-level permissions
+#                             override the workflow-level default).
+#   repository    (optional)  owner/repo to check. Default: the calling repo.
+#
+# Outputs (set on both pass and fail — unlike this repo's version/tag actions,
+# the count is useful even when it causes a failure, e.g. for the caller's
+# job summary):
+#   critical-count  Number of open critical-severity alerts found.
+# =============================================================================
+name: 'Check Critical Dependabot Vulnerabilities'
+author: 'Simplify9'
+description: 'Fails if the repository has any open critical-severity Dependabot alert.'
+
+inputs:
+  github-token:
+    description: 'Token with security-events:read permission on the target repository.'
+    required: true
+  repository:
+    description: 'Target repository in owner/repo format. Defaults to the calling repository.'
+    required: false
+    default: ${{ github.repository }}
+
+outputs:
+  critical-count:
+    description: 'Number of open critical-severity Dependabot alerts found. Set on both pass and fail.'
+    value: ${{ steps.check.outputs.critical-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Announce critical-vuln check
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+      run: |
+        echo "::notice title=🔒 [VULN-GATE] Critical Vulnerability Check::repository: ${REPOSITORY}"
+        echo "VULN_GATE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+
+    - name: Query Dependabot alerts and evaluate
+      id: check
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPOSITORY: ${{ inputs.repository }}
+      run: |
+        set -euo pipefail
+        echo "::add-mask::$GITHUB_TOKEN"
+        echo "::group::🔒 [CHECKPOINT 1/1] Query Open Critical Dependabot Alerts"
+
+        page=1
+        total_critical=0
+        summary_rows=""
+
+        while :; do
+          response_file="$(mktemp)"
+          http_code="$(curl -sS \
+            --max-time 30 \
+            --retry 3 \
+            --retry-connrefused \
+            -o "$response_file" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPOSITORY}/dependabot/alerts?state=open&severity=critical&per_page=100&page=${page}")"
+
+          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error title=❌ [VULN-GATE] Dependabot Alerts API call failed::HTTP ${http_code} on page ${page} for ${REPOSITORY}. Response: $(cat "$response_file")"
+            rm -f "$response_file"
+            exit 1
+          fi
+
+          page_count="$(jq 'length' "$response_file")"
+          if [[ "$page_count" -eq 0 ]]; then
+            rm -f "$response_file"
+            break
+          fi
+
+          total_critical=$((total_critical + page_count))
+          summary_rows+="$(jq -r '.[] | "| " + (.security_advisory.ghsa_id // "unknown") + " | " + (.dependency.package.name // "unknown") + " | [" + (.html_url // "") + "](" + (.html_url // "") + ") |"' "$response_file")"
+          summary_rows+=$'\n'
+          rm -f "$response_file"
+
+          if [[ "$page_count" -lt 100 ]]; then
+            break
+          fi
+          page=$((page + 1))
+          if [[ "$page" -gt 10 ]]; then
+            echo "::warning title=⚠️ [VULN-GATE] Pagination cap reached::Stopped after 10 pages (1000 alerts) for ${REPOSITORY} — true count may be higher."
+            break
+          fi
+        done
+
+        echo "critical-count=${total_critical}" >> "$GITHUB_OUTPUT"
+        EOF="$(dd if=/dev/urandom bs=15 count=1 status=none | base64)"
+        {
+          echo "alert-summary<<$EOF"
+          printf '%s\n' "$summary_rows"
+          echo "$EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "VULN_GATE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "::endgroup::"
+
+        if [[ "$total_critical" -gt 0 ]]; then
+          echo "::error title=❌ [VULN-GATE] Blocked by critical Dependabot alert(s)::${REPOSITORY} has ${total_critical} open CRITICAL-severity Dependabot alert(s) — this check/pipeline is blocked until they are resolved or dismissed."
+          printf '%s\n' "$summary_rows"
+          exit 1
+        fi
+
+    - name: Report failure
+      if: failure()
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+      run: |
+        echo "::error title=❌ [VULN-GATE] Critical vulnerability gate failed::${REPOSITORY} is blocked — either the Dependabot Alerts API call failed, or an open CRITICAL-severity alert exists. Checkpoint — 1) Query alerts: ${VULN_GATE_CP1_STATUS:-⏭️ Not reached}. See the step above for affected package(s)/advisory ID(s)."
+
+    - name: Write action summary
+      if: always()
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        CRITICAL_COUNT: ${{ steps.check.outputs.critical-count }}
+      run: |
+        EOF="$(dd if=/dev/urandom bs=15 count=1 status=none | base64)"
+        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
+        ## 🔒 Critical Dependabot Vulnerability Check
+
+        | Field | Value |
+        |-------|-------|
+        | Repository | ${{ inputs.repository }} |
+        | Open critical alerts found | ${CRITICAL_COUNT:-unknown} |
+
+        ## 📋 Checkpoint Summary
+
+        | # | Checkpoint | Status |
+        |---|------------|--------|
+        | 1 | Query open critical Dependabot alerts | ${VULN_GATE_CP1_STATUS:-⏭️ Not reached} |
+        $EOF
+
+branding:
+  icon: 'shield'
+  color: 'red'
