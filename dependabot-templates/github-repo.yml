@@ -1,0 +1,22 @@
+# Dependabot config for this .github repo itself — github-actions only, no
+# application code lives here. Target branch is main (this repo has no
+# develop branch).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "github-actions"
