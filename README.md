@@ -52,7 +52,6 @@
 | Android app (React Native) | Google Play | [`android-build.yml`](#android-buildyml) |
 | iOS app (Flutter) | TestFlight | [`flutter-ios-build.yml`](#flutter-ios-buildyml) |
 | Android app (Flutter) | Google Play | [`flutter-android-build.yml`](#flutter-android-buildyml) |
-| Any repo — block on open critical Dependabot alerts | PR check / Dependabot auto-merge gate | [`critical-vuln-gate.yml`](#critical-vuln-gateyml) |
 
 All workflows are **reusable** (`on: workflow_call:`). Call them from your repo:
 
