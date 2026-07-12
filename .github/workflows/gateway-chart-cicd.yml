@@ -279,7 +279,7 @@ jobs:
         # and a chart without a committed Chart.lock has none — skip the cache
         # step then, or its post step warns that the path does not exist.
         if: ${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path)) != '' }}
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/helm
           key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', 
@@ -478,7 +478,7 @@ jobs:
         # and a chart without a committed Chart.lock has none — skip the cache
         # step then, or its post step warns that the path does not exist.
         if: ${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path)) != '' }}
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/helm
           key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', 
