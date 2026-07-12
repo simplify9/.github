@@ -39,7 +39,7 @@
 #
 # CACHING:
 #   - Node modules  — via actions/setup-node cache, keyed on lockfile
-#   - Gradle home   — via gradle/actions/setup-gradle@v5 (pinned; see
+#   - Gradle home   — via gradle/actions/setup-gradle@v6 (pinned; see
 #                     note above Setup Gradle step re: v6 upgrade path)
 #
 # KNOWN LIMITATIONS:
@@ -596,7 +596,7 @@ jobs:
       # component. v6.1.0 later added a free MIT-licensed alternative via cache-provider: basic.
       # Upgrade to @v6 with cache-provider: basic to adopt the open-source caching path.
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           # wrapper — always use the project's gradle-wrapper.properties.
           # All RN projects in this fleet manage their Gradle version via the wrapper.

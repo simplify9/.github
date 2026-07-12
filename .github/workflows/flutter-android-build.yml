@@ -283,7 +283,7 @@ jobs:
         # Gradle-home caching (never add a manual actions/cache for ~/.gradle),
         # and its caching applies to the gradlew that `flutter build appbundle`
         # invokes under the hood — Flutter still drives the actual build.
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           # Use the project's android/gradle-wrapper.properties version; don't
           # install a separate Gradle.
