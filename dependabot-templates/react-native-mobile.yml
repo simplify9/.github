@@ -1,0 +1,47 @@
+# Dependabot config for React Native mobile repos (npm + fastlane Gemfile).
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    target-branch: "{{TARGET_BRANCH}}"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "npm"
+
+  - package-ecosystem: "bundler"
+    directory: "/"
+    target-branch: "{{TARGET_BRANCH}}"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "fastlane"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "{{TARGET_BRANCH}}"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "github-actions"

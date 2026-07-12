@@ -190,8 +190,11 @@ on:
         description: Signing key password
         required: true
       google-play-service-account-json:
-        description: Google Play service account JSON (required only when 
+        description: Google Play service account JSON (required only when
           releasing)
+        required: false
+      github-token:
+        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
         required: false
 
     outputs:
@@ -207,6 +210,27 @@ on:
 
   workflow_dispatch:
 jobs:
+  critical-vuln-gate:
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
   build:
     name: Android Build
     runs-on: ${{ inputs.ubuntu-runner }}
@@ -590,7 +614,7 @@ jobs:
 
   release_with_environment:
     name: Android Release (Google Play)
-    needs: build
+    needs: [build, critical-vuln-gate]
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     runs-on: ${{ inputs.ubuntu-runner }}
     timeout-minutes: 20

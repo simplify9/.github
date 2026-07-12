@@ -76,6 +76,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `subosito/flutter-action` | `@v2` | Flutter SDK setup (Flutter iOS/Android workflows). Version selector via `flutter-version` input, default `3.x` |
 | `maxim-lobanov/setup-xcode` | `@v1` | iOS Xcode version selection |
 | `apple-actions/upload-testflight-build` | `@v5` | iOS TestFlight upload (App Store Connect API) — runs on `ubuntu-latest` |
+| `dependabot/fetch-metadata` | `@v2` | Reads Dependabot PR metadata (`update-type`, `package-ecosystem`) for the auto-merge template |
 | `r0adkll/upload-google-play` | `@v1` | Android Google Play upload |
 
 **Helm / kubectl CLI versions:** the composite actions (`helm-deploy`, `helm-deploy-s9generic`, `helm-package-push`) default their `helm-version` / `kubectl-version` inputs to `latest`. Some reusable workflows pin a specific CLI: `helm-deploy-values.yml` defaults Helm `v4.2.0` / kubectl `v1.33.0`; `gateway-chart-cicd.yml` defaults Helm `v4.2.2`. There is no single global CLI pin — check the specific workflow/action input.
@@ -88,7 +89,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 
 ### Composite Actions
 - File: `.github/actions/<name>/action.yml`
-- `runs.using: "composite"` always — **all 18 actions in this repo are composite**; none are Docker- or JavaScript-based
+- `runs.using: "composite"` always — **all 19 actions in this repo are composite**; none are Docker- or JavaScript-based
 - Every `run:` step must have `shell: bash`
 - Every input must have `description:` and a sensible `default:` (or `required: true`)
 - Outputs must have a `value:` expression pointing to a step output
@@ -228,7 +229,7 @@ steps:
 
 ## Workflow Reference
 
-All nine workflows live in `.github/workflows/`. (When in doubt, `ls .github/workflows` is the source of truth — this table is maintained, not generated.)
+All twelve workflows live in `.github/workflows/`. (When in doubt, `ls .github/workflows` is the source of truth — this table is maintained, not generated.)
 
 ### Frontend / Cloudflare
 
@@ -265,11 +266,17 @@ Both call `generate-wrangler-config` to produce `wrangler.toml` dynamically, and
 
 All four mobile workflows have a `build` job (no gating) and a `release_with_environment` job gated by `if: release-environment != '' && !disable-release` and bound to the named GitHub Environment. They use **marketplace** release actions (`apple-actions/upload-testflight-build@v5`, `r0adkll/upload-google-play@v1`) — there is **no** Docker-based upload action. The Flutter and RN iOS workflows both reuse `ios-install-cert` / `ios-install-profile` for signing; Flutter sets up the SDK with `subosito/flutter-action@v2`. Per-branch environment selection (e.g. `android-staging` vs `android-production`) is done by the caller template's `workflow_dispatch` jobs, gated on `github.ref_name`.
 
+### Security
+
+| Workflow | Purpose | Key inputs |
+|---|---|---|
+| `critical-vuln-gate.yml` | Thin `workflow_call` wrapper around `check-critical-vulns` — fails if the calling repo has an open critical-severity Dependabot alert. Called from the `critical-vuln-check` and `dependabot-auto-merge` workflow-templates, and embedded as an early job in every deploy/build reusable workflow. | none (secret: `github-token`) |
+
 ---
 
 ## Workflow Templates
 
-`workflow-templates/` holds the six starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
+`workflow-templates/` holds the ten starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
 
 | Template | Calls reusable workflow | Trigger |
 |---|---|---|
@@ -279,14 +286,18 @@ All four mobile workflows have a `build` job (no gating) and a `release_with_env
 | `vite-cloudflare` | `vite-cloudflare-worker.yml` | `push` on `staging`, `main` + `workflow_dispatch` |
 | `android-app` | `android-build.yml` | `workflow_dispatch` only |
 | `ios-app` | `ios-build.yml` | `workflow_dispatch` only |
+| `flutter-android-app` | `flutter-android-build.yml` | `workflow_dispatch` only |
+| `flutter-ios-app` | `flutter-ios-build.yml` | `workflow_dispatch` only |
+| `critical-vuln-check` | `critical-vuln-gate.yml` | `pull_request` on `main`, `develop` |
+| `dependabot-auto-merge` | `critical-vuln-gate.yml` (+ inline auto-merge job) | `pull_request` on `main`, `develop` |
 
-**When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The two Cloudflare and the two Helm-service templates gate per-branch with `if: github.ref`/`github.ref_name`; the two mobile templates are `workflow_dispatch`-only and gate the dev/prod jobs on `github.ref_name`.
+**When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The two Cloudflare and the two Helm-service templates gate per-branch with `if: github.ref`/`github.ref_name`; the four mobile templates are `workflow_dispatch`-only and gate the dev/prod jobs on `github.ref_name`; the two Security templates trigger on `pull_request` only (never `push`) and call `critical-vuln-gate.yml` rather than gating on branch/environment.
 
 ---
 
 ## Composite Action Reference
 
-All 18 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
+All 19 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
 
 ### Versioning & Tagging
 - `determine-semver` — Computes the next `major.minor.patch` from git tags. Inputs: `major`, `minor`, `release-branch`, `current-ref`, `build-id`. Outputs: `version`, `git-tag`, `is-release`.
@@ -327,6 +338,7 @@ All 18 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ### Shared
 - `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` → ✅ SUCCESS / ❌ FAILED), `icon`, `details`. Used by every reusable workflow.
+- `check-critical-vulns` — Fails if the repository has any open critical-severity Dependabot alert (queries `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=critical`). Inputs: `github-token`, `repository` (defaults to the calling repo). Output: `critical-count`. Reused at three call sites: the `critical-vuln-gate` reusable workflow (PR-time check + auto-merge gate) and the build-time gate embedded in every deploy/build reusable workflow.
 
 ---
 

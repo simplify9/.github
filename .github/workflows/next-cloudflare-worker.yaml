@@ -109,10 +109,36 @@ on:
       cloudflare_account_id:
         description: Cloudflare Account ID
         required: true
+      github-token:
+        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
+        required: false
 
   workflow_dispatch:
 jobs:
+  critical-vuln-gate:
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
   deploy:
+    needs: critical-vuln-gate
+    if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
     name: Deploy ${{ inputs.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

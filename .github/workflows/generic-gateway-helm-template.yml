@@ -499,6 +499,28 @@ jobs:
             | Runner | ${{ runner.os }} |
             | Triggered by | ${{ github.actor }} |
 
+  critical-vuln-gate:
+    needs: version
+    if: ${{ needs.version.outputs.is-release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
   nuget:
     name: NuGet
     runs-on: ubuntu-latest
@@ -665,7 +687,7 @@ jobs:
     name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [version, build]
+    needs: [version, build, critical-vuln-gate]
     # Cluster access is via the kubeconfig secret, not GITHUB_TOKEN — only
     # checkout needs the token.
     permissions:
@@ -674,10 +696,17 @@ jobs:
     # whole dependency chain (deploy -> build -> nuget). A disabled nuget job
     # (package-nuget=false, result: skipped) poisons that chain and silently skips
     # deploy. Mirror the build/tag guards so a skipped nuget never blocks deploy.
+    # critical-vuln-gate is likewise conditionally skipped (non-release runs), so it
+    # must be allowed to be 'skipped' — but a 'failure' result (open critical alert on
+    # a release run) must block deploy, which is the whole point of the gate. A custom
+    # `if:` like this one replaces GitHub's implicit success()-over-all-needs check, so
+    # critical-vuln-gate's result has to be spelled out here explicitly or it would be
+    # a no-op scheduling dependency only.
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
-          && needs.build.result == 'success' }}
+          && needs.build.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
     outputs:
       helm-chart: ${{ steps.chartmeta.outputs.helm-chart }}
     steps:

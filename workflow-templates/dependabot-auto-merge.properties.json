@@ -1,0 +1,9 @@
+{
+    "name": "Dependabot Auto-Merge",
+    "description": "Auto-merges Dependabot PRs for patch-level semver bumps in npm/nuget/pub/bundler/github-actions (never docker, never minor/major), gated on the repository having no open critical Dependabot alert.",
+    "iconName": "octicon-git-merge",
+    "categories": [
+        "Security",
+        "Automation"
+    ]
+}

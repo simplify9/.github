@@ -292,6 +292,10 @@ on:
           the appstoreapi upload
         required: false
 
+      github-token:
+        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
+        required: false
+
     outputs:
       version:
         description: Marketing version used for this build
@@ -308,6 +312,27 @@ permissions:
   contents: read
 
 jobs:
+  critical-vuln-gate:
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
   build:
     name: Build
     runs-on: ${{ inputs.macos-runner }}
@@ -1037,7 +1062,7 @@ jobs:
     # backend: AppStoreAPI), so no macOS tooling is needed. ubuntu-latest is
     # ~10x cheaper than a macOS runner.
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, critical-vuln-gate]
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
 

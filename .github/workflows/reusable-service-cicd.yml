@@ -556,6 +556,28 @@ jobs:
             | Runner | ${{ runner.os }} |
             | Triggered by | ${{ github.actor }} |
 
+  critical-vuln-gate:
+    needs: version
+    if: ${{ needs.version.outputs.is-release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
   nuget:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1149,7 +1171,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [version, ci]
+    needs: [version, ci, critical-vuln-gate]
     # Deploy only when toggled on and the build/publish succeeded — there is no
     # point pulling a chart that was never published.
     if: ${{ inputs.deploy && needs.ci.result == 'success' }}
