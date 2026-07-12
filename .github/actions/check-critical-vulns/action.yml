@@ -10,15 +10,23 @@
 #
 # Deliberately NOT actions/dependency-review-action: that action's private-repo
 # enforcement guarantees have historically required a GitHub Advanced Security
-# license, and this org is on the Team plan. This action only needs Dependabot
-# alerts enabled on the repo (a free feature) plus a token with
-# `security-events: read`.
+# license, and this org is on the Team plan.
+#
+# IMPORTANT — confirmed by live testing (2026-07-12): the Dependabot Alerts API
+# rejects the ephemeral Actions GITHUB_TOKEN outright ("Resource not accessible
+# by integration"), even when the calling job grants `security-events: read`.
+# This is a token-TYPE restriction, not a permission-scope one -- no amount of
+# `permissions:` configuration on any caller fixes it. This action requires a
+# real Personal Access Token or GitHub App installation token with "Dependabot
+# alerts: read" instead, passed in via the `dependabot-alerts-token` input.
 #
 # Inputs:
-#   github-token  (required)  Token with security-events:read on the target
-#                             repo (the caller's job must grant this in its
-#                             own `permissions:` block — job-level permissions
-#                             override the workflow-level default).
+#   dependabot-alerts-token  (required)  A PAT/App token (NOT GITHUB_TOKEN) with
+#                             "Dependabot alerts: read" on the target repo.
+#                             Custom secrets are not automatically available to
+#                             a called reusable workflow -- every caller in the
+#                             chain must explicitly forward this (there is no
+#                             GITHUB_TOKEN-style fallback that works here).
 #   repository    (optional)  owner/repo to check. Default: the calling repo.
 #
 # Outputs (set on both pass and fail — unlike this repo's version/tag actions,
@@ -31,8 +39,8 @@ author: 'Simplify9'
 description: 'Fails if the repository has any open critical-severity Dependabot alert.'
 
 inputs:
-  github-token:
-    description: 'Token with security-events:read permission on the target repository.'
+  dependabot-alerts-token:
+    description: 'PAT/App token (NOT GITHUB_TOKEN) with "Dependabot alerts: read" on the target repository.'
     required: true
   repository:
     description: 'Target repository in owner/repo format. Defaults to the calling repository.'
@@ -58,12 +66,18 @@ runs:
       id: check
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        DEPENDABOT_TOKEN: ${{ inputs.dependabot-alerts-token }}
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
         set -uo pipefail
-        echo "::add-mask::$GITHUB_TOKEN"
+        echo "::add-mask::$DEPENDABOT_TOKEN"
         echo "::group::🔒 [CHECKPOINT 1/1] Query Open Critical Dependabot Alerts"
+
+        if [[ -z "$DEPENDABOT_TOKEN" ]]; then
+          echo "::error title=❌ [VULN-GATE] Missing dependabot-alerts-token::${REPOSITORY} — this gate requires a PAT/App token with 'Dependabot alerts: read', forwarded explicitly by the caller (GITHUB_TOKEN cannot access this API regardless of granted permissions). Add a dependabot-alerts-token entry (set to the DEPENDABOT_ALERTS_TOKEN org secret) to this job's secrets block in the caller workflow. Fails closed until forwarded."
+          echo "::endgroup::"
+          exit 1
+        fi
 
         # NOTE: this endpoint does NOT support page-number pagination (`page=N`
         # is rejected outright with HTTP 400 -- confirmed against a live repo).
@@ -85,7 +99,7 @@ runs:
             -D "$headers_file" \
             -o "$response_file" \
             -w '%{http_code}' \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Authorization: Bearer $DEPENDABOT_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "$url")"
@@ -99,7 +113,7 @@ runs:
           fi
 
           if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-            echo "::error title=❌ [VULN-GATE] Insufficient permission to query Dependabot alerts::${REPOSITORY} returned HTTP ${http_code}. The calling workflow's job must grant 'security-events: read' in its own permissions: block (job-level permissions override the workflow-level default) — this gate fails closed until that permission is granted. Response: $(cat "$response_file")"
+            echo "::error title=❌ [VULN-GATE] Dependabot Alerts token rejected::${REPOSITORY} returned HTTP ${http_code}. The dependabot-alerts-token input must be a real PAT/App token with 'Dependabot alerts: read' -- GITHUB_TOKEN cannot access this API regardless of granted permissions, confirmed by live testing. This gate fails closed until a valid token is forwarded. Response: $(cat "$response_file")"
             rm -f "$response_file" "$headers_file"
             echo "::endgroup::"
             exit 1

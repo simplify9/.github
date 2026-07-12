@@ -13,9 +13,11 @@ name: Critical Dependabot Vulnerability Gate
 on:
   workflow_call:
     secrets:
-      github-token:
-        description: 'Token with security-events:read on the calling repository. Pass
-          secrets.GITHUB_TOKEN.'
+      dependabot-alerts-token:
+        description: "PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot alerts: read'
+          on the calling repository -- GITHUB_TOKEN cannot access the Dependabot
+          Alerts API regardless of granted permissions (confirmed by live testing).
+          Pass secrets.DEPENDABOT_ALERTS_TOKEN."
         required: true
 
 permissions:
@@ -33,7 +35,7 @@ jobs:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
         with:
-          github-token: ${{ secrets.github-token }}
+          dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
           repository: ${{ github.repository }}
 
       - name: Write job summary
