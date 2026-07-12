@@ -8,7 +8,7 @@ updates:
       interval: "weekly"
       day: "tuesday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 10
     groups:
       npm-minor-patch:
@@ -24,7 +24,7 @@ updates:
       interval: "weekly"
       day: "tuesday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -37,7 +37,7 @@ updates:
       interval: "weekly"
       day: "tuesday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     groups:
       actions-minor-patch:

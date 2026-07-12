@@ -10,7 +10,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 10
     groups:
       nuget-minor-patch:
@@ -26,7 +26,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -39,7 +39,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     groups:
       actions-minor-patch:
