@@ -1,6 +1,6 @@
 {
     "name": "Flutter iOS App CI/CD",
-    "description": "Builds, signs, and uploads a Flutter iOS app to TestFlight using the Simplify9 reusable workflow.",
+    "description": "Builds, signs, versions, and uploads a Flutter iOS app to TestFlight using the Simplify9 reusable workflow.",
     "iconName": "octicon-device-mobile",
     "categories": [
         "Flutter",

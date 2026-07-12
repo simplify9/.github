@@ -548,7 +548,7 @@ jobs:
 
 #### `flutter-ios-build.yml`
 
-Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `flutter build ipa`, and uploads it to TestFlight from `ubuntu-latest` via the App Store Connect API (`apple-actions/upload-testflight-build@v5`). The marketing version + build number are derived from `pubspec.yaml` (`X.Y.Z+BUILD`) combined with `github.run_number` — nothing to pass in.
+Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `flutter build ipa`, and uploads it to TestFlight from `ubuntu-latest` via the App Store Connect API (`apple-actions/upload-testflight-build@v5`). Set the marketing version's major/minor through `marketing-prefix` (`X.Y`); the patch remains the `pubspec.yaml` patch plus `github.run_number`, and the build number remains the pubspec `+BUILD` plus `github.run_number`.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
@@ -560,6 +560,7 @@ Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `fl
 | `ios-dir` | | `ios` | iOS project directory (Podfile + Runner project) |
 | `pbxproj-path` | | `ios/Runner.xcodeproj/project.pbxproj` | project.pbxproj that gets the manual-signing rewrite |
 | `app-slug` | | `app` | Output IPA filename slug |
+| `marketing-prefix` | | `1.0` | Marketing version major/minor (`X.Y` only); patch stays automatic from pubspec + run number |
 | `export-method` | | `app-store-connect` | ExportOptions.plist distribution method |
 | `run-analyze` | | `false` | Run `flutter analyze` before building |
 | `ipa-name-pattern` | | `{app_slug}-{version}-{build_number}.ipa` | Output IPA name tokens |
@@ -579,6 +580,7 @@ jobs:
       macos-runner: macos-26
       xcode-version: "26.3"
       app-slug: myapp
+      marketing-prefix: "1.0"
       release-environment: ios-production
     secrets:
       ios-p12-base64: ${{ secrets.IOS_P12_BASE64 }}

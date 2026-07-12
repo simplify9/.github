@@ -13,8 +13,8 @@
 #   main    → triggers iOS Prod job → uploads to ios-production environment
 #
 # VERSIONING:
-#   The marketing version + build number come from your pubspec.yaml
-#   (X.Y.Z+BUILD) combined with github.run_number — no inputs to set.
+#   Set marketing-prefix to the app's major.minor version (X.Y). The patch
+#   remains the pubspec patch + github.run_number.
 #   Build number = pubspec "+N" + run_number (strictly increasing per run).
 #
 # INPUTS (only non-default values are declared — see the reusable workflow for
@@ -57,6 +57,9 @@ jobs:
       app-slug: app                   # REPLACE: e.g. laflef
       # ios-dir / pbxproj-path default to the Flutter standard (ios/Runner...)
 
+      # ── Versioning ───────────────────────────────────────────────────────
+      marketing-prefix: "1.0"        # REPLACE: major.minor only; patch stays automatic
+
       # ── Export & upload ───────────────────────────────────────────────────
       ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
       release-environment: ios-develop
@@ -82,6 +85,9 @@ jobs:
 
       # ── iOS project layout ────────────────────────────────────────────────
       app-slug: app                   # REPLACE
+
+      # ── Versioning ───────────────────────────────────────────────────────
+      marketing-prefix: "1.0"        # REPLACE: major.minor only; patch stays automatic
 
       # ── Export & upload ───────────────────────────────────────────────────
       ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
