@@ -1553,6 +1553,15 @@ Re-read both files end to end once more and confirm every new file from Tasks 1-
 
 ---
 
+## PHASE BOUNDARY — merge checkpoint (confirmed with Musa on 2026-07-12)
+
+Tasks 1-22 (Phase A) and Tasks 23-29 (Phase B) ship as **two separate PRs**, not one. Reason: every consumer repo in the org references `simplify9/.github/...@main`, so Task 28's pilot (and Task 29's full rollout) can only validate against the *real*, live `@main` versions of the new composite action / reusable workflow / workflow-templates — not a not-yet-merged branch. Sequencing:
+
+1. Execute Tasks 1-22 in this worktree/branch. Full task-by-task review + final whole-branch review + `finishing-a-development-branch` (merge to `main`) happens once Task 22 is done — treat that as this plan's first shipped unit.
+2. Only after Phase A is confirmed live on `main` (spot check: `curl -s https://raw.githubusercontent.com/simplify9/.github/main/workflow-templates/critical-vuln-check.yml` returns real content, not 404), start Phase B (Tasks 23-29), either continuing in a fresh worktree off the now-updated `main` or reusing this one after a rebase. Task 28's pilot step 1 (`curl .../main/workflow-templates/critical-vuln-check.yml`) depends on this — do not run Task 28 before confirming Phase A is live.
+
+---
+
 ### Task 23: Rollout script — repo enumeration + live template selection
 
 **Files:**
