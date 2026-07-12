@@ -29,8 +29,9 @@ name: Flutter iOS Build & TestFlight Release
 # token, not these permissions. A reusable workflow can only narrow the token,
 # never widen it, so this cannot break a caller that grants more.
 permissions:
-  contents: read
+  contents: write
 
+  security-events: read
 on:
   workflow_call:
     inputs:
@@ -179,11 +180,12 @@ on:
         description: App Store Connect issuer id (required only when releasing)
         required: false
       appstore-api-private-key-base64:
-        description: Base64-encoded App Store Connect API private key .p8 PEM
+        description: Base64-encoded App Store Connect API private key .p8 PEM 
           (required only when releasing)
         required: false
       github-token:
-        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
+        description: "Token used to query Dependabot alerts for the critical-vuln
+          gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
         required: false
 
     outputs:
@@ -206,6 +208,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main

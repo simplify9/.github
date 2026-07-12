@@ -441,8 +441,9 @@ concurrency:
 # Least-privilege default for every job (most just check out code). Jobs that
 # need more (build pushes images; tag writes tags) widen this explicitly below.
 permissions:
-  contents: read
+  contents: write
 
+  security-events: read
 env:
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.app-name || github.repository }}
@@ -453,7 +454,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write
+      security-events: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
       git-tag: ${{ steps.semver.outputs.git-tag }}
@@ -506,6 +508,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
@@ -527,7 +530,8 @@ jobs:
     if: ${{ inputs.package-nuget }}
     timeout-minutes: 30
     permissions:
-      contents: read
+      contents: write
+      security-events: read
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
       git-tag: ${{ steps.nuget-semver.outputs.git-tag }}
@@ -626,8 +630,9 @@ jobs:
     # packages: write covers the registry-password fallback to GITHUB_TOKEN when
     # pushing the image to GHCR; contents: read is for checkout.
     permissions:
-      contents: read
+      contents: write
       packages: write
+      security-events: read
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
@@ -691,7 +696,7 @@ jobs:
     # Cluster access is via the kubeconfig secret, not GITHUB_TOKEN — only
     # checkout needs the token.
     permissions:
-      contents: read
+      contents: write
     # Explicit guard required: without an `if`, the implicit success() evaluates the
     # whole dependency chain (deploy -> build -> nuget). A disabled nuget job
     # (package-nuget=false, result: skipped) poisons that chain and silently skips
@@ -702,11 +707,13 @@ jobs:
     # `if:` like this one replaces GitHub's implicit success()-over-all-needs check, so
     # critical-vuln-gate's result has to be spelled out here explicitly or it would be
     # a no-op scheduling dependency only.
+      security-events: read
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
           && needs.build.result == 'success'
-          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped') }}
     outputs:
       helm-chart: ${{ steps.chartmeta.outputs.helm-chart }}
     steps:
@@ -871,6 +878,7 @@ jobs:
       }}
     permissions:
       contents: write
+      security-events: read
     steps:
       - name: Tag new version on GitHub origin
         uses: simplify9/.github/.github/actions/tag-github-origin@main

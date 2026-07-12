@@ -81,12 +81,14 @@ on:
         default: true
         type: boolean
       validate-routing:
-        description: Validate default/ingress/gateway/dual routing rendering modes
+        description: Validate default/ingress/gateway/dual routing rendering 
+          modes
         required: false
         default: true
         type: boolean
       validate-configmap:
-        description: Validate ConfigMap gating and key routing (config.data → ConfigMap, environmentVariables → Secret)
+        description: Validate ConfigMap gating and key routing (config.data → 
+          ConfigMap, environmentVariables → Secret)
         required: false
         default: true
         type: boolean
@@ -98,7 +100,8 @@ on:
         description: ChartMuseum password or token
         required: true
       github-token:
-        description: Token used by the tag job to create the release git tag. Falls back to the built-in GITHUB_TOKEN when omitted.
+        description: Token used by the tag job to create the release git tag. 
+          Falls back to the built-in GITHUB_TOKEN when omitted.
         required: false
     outputs:
       version:
@@ -111,7 +114,8 @@ on:
         description: Packaged chart path in the runner workspace
         value: ${{ jobs.package-and-push.outputs.chart-package }}
       chart-repo-url:
-        description: ChartMuseum endpoint the chart package was uploaded to (an upload API URL, not a fetch URL)
+        description: ChartMuseum endpoint the chart package was uploaded to (an 
+          upload API URL, not a fetch URL)
         value: ${{ jobs.package-and-push.outputs.chart-repo-url }}
 
   workflow_dispatch:
@@ -153,23 +157,26 @@ on:
         default: true
         type: boolean
       validate-routing:
-        description: Validate default/ingress/gateway/dual routing rendering modes
+        description: Validate default/ingress/gateway/dual routing rendering 
+          modes
         required: false
         default: true
         type: boolean
       validate-configmap:
-        description: Validate ConfigMap gating and key routing (config.data → ConfigMap, environmentVariables → Secret)
+        description: Validate ConfigMap gating and key routing (config.data → 
+          ConfigMap, environmentVariables → Secret)
         required: false
         default: true
         type: boolean
 
 # Least privilege by default; the tag job opts up to contents: write locally.
 permissions:
-  contents: read
+  contents: write
 
 # Serialize runs per workflow+ref. Chart publishing must never be interrupted
 # mid-flight, and serializing closes the determine-semver read/modify/write
 # window so two runs cannot compute the same patch.
+  security-events: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -275,7 +282,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/helm
-          key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path), format('{0}/Chart.yaml', inputs.chart-path)) }}
+          key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', 
+            inputs.chart-path), format('{0}/Chart.yaml', inputs.chart-path)) }}
           restore-keys: |
             helm-${{ runner.os }}-
 
@@ -473,7 +481,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/helm
-          key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', inputs.chart-path), format('{0}/Chart.yaml', inputs.chart-path)) }}
+          key: helm-${{ runner.os }}-${{ hashFiles(format('{0}/Chart.lock', 
+            inputs.chart-path), format('{0}/Chart.yaml', inputs.chart-path)) }}
           restore-keys: |
             helm-${{ runner.os }}-
 
@@ -528,7 +537,8 @@ jobs:
           # workflow_dispatch run there is no mapping (and repo/org secret names can't
           # contain hyphens), so fall back to the org secrets CM_USER / CM_PASSWORD.
           CHARTMUSEUM_USER: ${{ secrets.registry-username || secrets.CM_USER }}
-          CHARTMUSEUM_PASSWORD: ${{ secrets.registry-password || secrets.CM_PASSWORD }}
+          CHARTMUSEUM_PASSWORD: ${{ secrets.registry-password || 
+            secrets.CM_PASSWORD }}
           DEST: ${{ inputs.package-destination }}
         run: |
           set -euo pipefail
@@ -640,6 +650,7 @@ jobs:
           && needs.package-and-push.result == 'success' }}
     permissions:
       contents: write
+      security-events: read
     steps:
       - name: Tag new version on GitHub origin
         uses: simplify9/.github/.github/actions/tag-github-origin@main

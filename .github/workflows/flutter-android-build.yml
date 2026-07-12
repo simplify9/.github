@@ -32,8 +32,9 @@ name: Flutter Android Build & Release
 # Actions runtime token, not these permissions. A reusable workflow can only
 # narrow the token, never widen it, so this cannot break a caller that grants more.
 permissions:
-  contents: read
+  contents: write
 
+  security-events: read
 on:
   workflow_call:
     inputs:
@@ -190,11 +191,12 @@ on:
         description: Signing key password
         required: true
       google-play-service-account-json:
-        description: Google Play service account JSON (required only when
+        description: Google Play service account JSON (required only when 
           releasing)
         required: false
       github-token:
-        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
+        description: "Token used to query Dependabot alerts for the critical-vuln
+          gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
         required: false
 
     outputs:
@@ -216,6 +218,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main

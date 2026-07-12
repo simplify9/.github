@@ -494,10 +494,11 @@ on:
 # Default to least privilege; each job escalates only what it needs.
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 
 # Serialize runs per ref so concurrent pushes cannot race the tag-based
 # semver computation.  Never cancel an in-flight publish mid-push.
+  security-events: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -512,7 +513,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write
+      security-events: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
       git-tag: ${{ steps.semver.outputs.git-tag }}
@@ -563,6 +565,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
@@ -584,8 +587,9 @@ jobs:
     needs: version
     if: ${{ inputs.nuget-projects != '' }}
     permissions:
-      contents: read
+      contents: write
       packages: write   # in case nuget-source targets a GitHub Packages feed
+      security-events: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -631,8 +635,9 @@ jobs:
     timeout-minutes: 60
     needs: version
     permissions:
-      contents: read
+      contents: write
       packages: write
+      security-events: read
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
       helm-chart: ${{ steps.helm_oci.outputs.chart-url || 
@@ -1177,8 +1182,9 @@ jobs:
     if: ${{ inputs.deploy && needs.ci.result == 'success' }}
     environment: ${{ inputs.deploy-environment }}
     permissions:
-      contents: read
+      contents: write
       packages: read   # pull the OCI chart from GHCR (github-oci source)
+      security-events: read
     steps:
       - name: Resolve deploy parameters and routing values
         id: params
@@ -1535,6 +1541,7 @@ jobs:
       }}
     permissions:
       contents: write
+      security-events: read
     steps:
       - name: Tag new version on GitHub origin
         uses: simplify9/.github/.github/actions/tag-github-origin@main
