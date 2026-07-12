@@ -25,7 +25,6 @@ on:
     branches: [main, develop]
 
 permissions:
-  security-events: read
   pull-requests: write
   contents: write
 
@@ -34,7 +33,7 @@ jobs:
     if: ${{ github.actor == 'dependabot[bot]' }}
     uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
     secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
   auto-merge:
     needs: vuln-gate

@@ -270,7 +270,9 @@ All four mobile workflows have a `build` job (no gating) and a `release_with_env
 
 | Workflow | Purpose | Key inputs |
 |---|---|---|
-| `critical-vuln-gate.yml` | Thin `workflow_call` wrapper around `check-critical-vulns` — fails if the calling repo has an open critical-severity Dependabot alert. Called from the `critical-vuln-check` and `dependabot-auto-merge` workflow-templates, and embedded as an early job in every deploy/build reusable workflow. | none (secret: `github-token`) |
+| `critical-vuln-gate.yml` | Thin `workflow_call` wrapper around `check-critical-vulns` — fails if the calling repo has an open critical-severity Dependabot alert. Called from the `critical-vuln-check` and `dependabot-auto-merge` workflow-templates, and embedded as an early job in every deploy/build reusable workflow. | none (secret: `dependabot-alerts-token`, required — see note below) |
+
+> **`dependabot-alerts-token` — GITHUB_TOKEN does not work here.** Confirmed by live testing (2026-07-12): the Dependabot Alerts REST API rejects the ephemeral Actions `GITHUB_TOKEN` outright ("Resource not accessible by integration"), regardless of what `permissions:` are granted anywhere in the call chain. This gate requires a real Personal Access Token or GitHub App installation token with "Dependabot alerts: read", stored as the org secret `DEPENDABOT_ALERTS_TOKEN`. Every caller — including every one of the ten reusable workflows this gate is embedded in — must explicitly forward it (`dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}` at each nesting level, ultimately sourced from `secrets.DEPENDABOT_ALERTS_TOKEN`), since custom secrets are never automatically available inside a called reusable workflow.
 
 ---
 
@@ -338,7 +340,7 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ### Shared
 - `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` → ✅ SUCCESS / ❌ FAILED), `icon`, `details`. Used by every reusable workflow.
-- `check-critical-vulns` — Fails if the repository has any open critical-severity Dependabot alert (queries `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=critical`). Inputs: `github-token`, `repository` (defaults to the calling repo). Output: `critical-count`. Reused at three call sites: the `critical-vuln-gate` reusable workflow (PR-time check + auto-merge gate) and the build-time gate embedded in every deploy/build reusable workflow.
+- `check-critical-vulns` — Fails if the repository has any open critical-severity Dependabot alert. Uses `Link`-header cursor pagination against `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=critical` — this endpoint does **not** support page-number pagination (`page=N` is rejected with HTTP 400). Inputs: `dependabot-alerts-token` (required — a PAT/App token, **not** `GITHUB_TOKEN`, which cannot access this API regardless of granted permissions; see the `critical-vuln-gate.yml` note above), `repository` (defaults to the calling repo). Output: `critical-count`. Fails closed on every error path (network failure, missing/rejected token, bad response, or a real critical alert). Reused at three call sites: the `critical-vuln-gate` reusable workflow (PR-time check + auto-merge gate) and the build-time gate embedded in every deploy/build reusable workflow.
 
 ---
 

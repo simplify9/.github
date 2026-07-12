@@ -405,6 +405,11 @@ on:
       github-token:
         description: GitHub token for tagging
         required: false
+      dependabot-alerts-token:
+        description: "PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot alerts: read'
+          for the critical-vuln gate -- GITHUB_TOKEN cannot access this API
+          regardless of granted permissions (confirmed by live testing)."
+        required: false
       NUGET_PACKAGE_PAT:
         description: GitHub Packages token for docker builds
         required: false
@@ -513,7 +518,7 @@ jobs:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
         with:
-          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
           repository: ${{ github.repository }}
 
       - name: Write job summary
