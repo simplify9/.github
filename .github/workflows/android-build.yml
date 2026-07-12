@@ -231,6 +231,10 @@ on:
         description: Google Play service account JSON
         required: false
 
+      github-token:
+        description: 'Token with security-events:read on the calling repository. Pass secrets.GITHUB_TOKEN.'
+        required: true
+
     outputs:
       version-name:
         description: Version name used for this release
@@ -247,6 +251,27 @@ permissions:
   contents: read
 
 jobs:
+  critical-vuln-gate:
+    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
   build:
     name: Build
     runs-on: ${{ inputs.ubuntu-runner }}
@@ -708,7 +733,7 @@ jobs:
   release_with_environment:
     name: Release
     runs-on: ${{ inputs.ubuntu-runner }}
-    needs: build
+    needs: [build, critical-vuln-gate]
     # Release path with GitHub Environment protection/approvals.
     if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
     environment: ${{ inputs.release-environment }}
