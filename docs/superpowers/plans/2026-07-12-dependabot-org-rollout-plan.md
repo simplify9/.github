@@ -29,6 +29,11 @@ The spec assumed all six Helm/Cloudflare deploy pipelines expose a `determine-se
 - `reusable-service-cicd.yml`, `generic-chart-helm.yml`, `generic-gateway-helm-template.yml` — all have a `version` job with `is-release: ${{ steps.semver.outputs.is-release }}`. Gate these on `needs.version.outputs.is-release == 'true'` as the spec intended (Tasks 5-7).
 - `helm-deploy-values.yml`, `next-cloudflare-worker.yaml`, `vite-cloudflare-worker.yml` are **deploy-only** pipelines with a single `deploy` job, no versioning, no `is-release` output — they deploy to whatever `environment`/`gh-environment` input the caller passes, with no ref-based release concept at all. There is nothing to delegate to. For these three, the gate condition inline-compares `github.ref_name == github.event.repository.default_branch` — the same underlying signal `determine-semver` uses internally (`release-branch: github.event.repository.default_branch`), just computed directly since no version job exists to source it from (Tasks 8-10). This is flagged here rather than silently deviating from the written spec.
 
+**Second deviation, found during Task 6's execution and verified across all remaining files before continuing (not in the original spec):** GitHub Actions disables its implicit `success()`-over-all-`needs` gating entirely once a job's own `if:` uses `always()`/`cancelled()`/`failure()` — the job's explicit condition becomes the *only* gating logic from that point on. This matters for two different reasons depending on the file:
+- `generic-chart-helm.yml` (Task 6) and `generic-gateway-helm-template.yml` (Task 7) already have a `!cancelled()`-based `if:` on `deploy` (to tolerate a skipped `nuget` job). Merely adding `critical-vuln-gate` to `needs:` without also adding an explicit `needs.critical-vuln-gate.result` check to that `if:` would make the new dependency a no-op — `deploy` would still run even after a failed gate. Both tasks' steps below spell out the required `if:` edit.
+- `helm-deploy-values.yml`, `next-cloudflare-worker.yaml`, `vite-cloudflare-worker.yml` (Tasks 8-10) currently have **no** `if:` on `deploy` at all. Their `critical-vuln-gate` job is itself conditionally skipped on non-default-branch runs (per the first deviation above) — and a *skipped* dependency with no explicit `if:` on the dependent job causes GitHub to skip the dependent job too, by default. Without an explicit `if:` added alongside the new `needs:`, every non-default-branch deploy through these three workflows would silently stop running entirely. Each task's steps below now add the required `!cancelled() && (... == 'success' || ... == 'skipped')` guard.
+- Verified NOT applicable to `reusable-service-cicd.yml` (Task 5, already committed) or the four mobile workflows (Tasks 11-14): all of these use a plain boolean `if:` with no `always()`/`cancelled()`/`failure()` function, so GitHub's implicit `success()`-over-all-`needs` gating applies automatically and correctly covers `critical-vuln-gate` once it's added to `needs:` — no `if:` change needed in those five files.
+
 ---
 
 ### Task 1: `check-critical-vulns` composite action
@@ -645,16 +650,47 @@ No local runner. Same consumer-repo-branch approach as Task 5, using a repo whos
           status: ${{ job.status }}
 ```
 
-- [ ] **Step 2: Update `deploy`'s `needs:`** (around line 659), change:
+- [ ] **Step 2: Update `deploy`'s `needs:` AND `if:`** — this file's `deploy` job already has a custom `if:` using `!cancelled()`. **This is load-bearing: per GitHub Actions semantics, once a job's `if:` uses any of `always()`/`cancelled()`/`failure()`, GitHub's implicit `success()`-over-all-`needs` check is disabled entirely — the job's own `if:` is now the ONLY gating logic. Merely adding `critical-vuln-gate` to `needs:` without also updating this `if:` would be a no-op scheduling dependency: `deploy` would still run even if the gate failed.** (Confirmed live in this exact file during Task 6's sibling file, `generic-chart-helm.yml`, which has the identical `!cancelled()` shape — verify your own copy of this reasoning against the current file before editing, don't just trust this brief text blindly.) Change (around line 655-659):
 
 ```yaml
     needs: [version, build]
+    # Cluster access is via the kubeconfig secret, not GITHUB_TOKEN — only
+    # checkout needs the token.
+    permissions:
+      contents: read
+    # Explicit guard required: without an `if`, the implicit success() evaluates the
+    # whole dependency chain (deploy -> build -> nuget). A disabled nuget job
+    # (package-nuget=false, result: skipped) poisons that chain and silently skips
+    # deploy. Mirror the build/tag guards so a skipped nuget never blocks deploy.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.build.result == 'success' }}
 ```
 
 to:
 
 ```yaml
     needs: [version, build, critical-vuln-gate]
+    # Cluster access is via the kubeconfig secret, not GITHUB_TOKEN — only
+    # checkout needs the token.
+    permissions:
+      contents: read
+    # Explicit guard required: without an `if`, the implicit success() evaluates the
+    # whole dependency chain (deploy -> build -> nuget). A disabled nuget job
+    # (package-nuget=false, result: skipped) poisons that chain and silently skips
+    # deploy. Mirror the build/tag guards so a skipped nuget never blocks deploy.
+    # critical-vuln-gate is likewise conditionally skipped (non-release runs), so it
+    # must be allowed to be 'skipped' — but a 'failure' result (open critical alert on
+    # a release run) must block deploy, which is the whole point of the gate. A custom
+    # `if:` like this one replaces GitHub's implicit success()-over-all-needs check, so
+    # critical-vuln-gate's result has to be spelled out here explicitly or it would be
+    # a no-op scheduling dependency only.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.build.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
 ```
 
 - [ ] **Step 3: Confirm the `github-token` secret exists**:
@@ -712,9 +748,12 @@ jobs:
 
   deploy:
     needs: critical-vuln-gate
+    if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
 ```
 
-(The existing `deploy:` job's own body — `runs-on`, `timeout-minutes`, `environment`, `concurrency`, `steps:` — is unchanged; only the `needs: critical-vuln-gate` line is newly inserted directly under `deploy:`.)
+(The existing `deploy:` job's own body — `runs-on`, `timeout-minutes`, `environment`, `concurrency`, `steps:` — is unchanged; only the `needs: critical-vuln-gate` and `if:` lines are newly inserted directly under `deploy:`.)
+
+**Why the explicit `if:` is required here (not just `needs:`):** this job currently has NO `if:` at all. Without one, GitHub's *default* job behavior is to require `success()` over the ENTIRE `needs:` graph — including tolerating no exceptions for a *skipped* dependency. `critical-vuln-gate` is deliberately skipped on every non-default-branch run (its own `if: github.ref_name == github.event.repository.default_branch}}`). A skipped dependency with no explicit `if:` on the dependent job causes the dependent job to be **skipped too** (skip cascades by default) — which would silently break every non-default-branch deploy through this workflow. The `!cancelled() && (... == 'success' || ... == 'skipped')` guard is what prevents that: it explicitly tolerates a skipped gate while still blocking on a genuine `failure`.
 
 - [ ] **Step 2: Add a `github-token` secret to this workflow's `on.workflow_call.secrets:` block** — this workflow currently has no `tag`/versioning job, so it has never needed one. Add, in the `secrets:` block (near line 35+ where `on: workflow_call:` is declared):
 
@@ -773,9 +812,12 @@ jobs:
 
   deploy:
     needs: critical-vuln-gate
+    if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
 ```
 
-(All existing `deploy:` job content — `name: Deploy ${{ inputs.environment }}`, `runs-on`, `timeout-minutes`, `concurrency`, `permissions`, `steps:` — stays as-is; only `needs: critical-vuln-gate` is newly added directly under `deploy:`.)
+(All existing `deploy:` job content — `name: Deploy ${{ inputs.environment }}`, `runs-on`, `timeout-minutes`, `concurrency`, `permissions`, `steps:` — stays as-is; only `needs: critical-vuln-gate` and `if:` are newly added directly under `deploy:`.)
+
+**Why the explicit `if:` is required here (not just `needs:`):** this job currently has NO `if:` at all. Without one, GitHub's default job behavior requires `success()` over the entire `needs:` graph with no tolerance for a *skipped* dependency. `critical-vuln-gate` is deliberately skipped on every non-default-branch run. A skipped dependency with no explicit `if:` on the dependent job causes the dependent job to be skipped too (skip cascades by default) — silently breaking every non-default-branch deploy through this workflow. The `!cancelled() && (... == 'success' || ... == 'skipped')` guard tolerates a skipped gate while still blocking on a genuine `failure`.
 
 - [ ] **Step 2: Add a `github-token` secret** to this workflow's `on.workflow_call.secrets:` block (alongside the existing `cloudflare_api_token`/`cloudflare_account_id`):
 
@@ -834,7 +876,10 @@ jobs:
 
   deploy:
     needs: critical-vuln-gate
+    if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
 ```
+
+**Why the explicit `if:` is required here (not just `needs:`):** this job currently has NO `if:` at all. Without one, GitHub's default job behavior requires `success()` over the entire `needs:` graph with no tolerance for a *skipped* dependency. `critical-vuln-gate` is deliberately skipped on every non-default-branch run. A skipped dependency with no explicit `if:` on the dependent job causes the dependent job to be skipped too (skip cascades by default) — silently breaking every non-default-branch deploy through this workflow. The `!cancelled() && (... == 'success' || ... == 'skipped')` guard tolerates a skipped gate while still blocking on a genuine `failure`.
 
 - [ ] **Step 2: Add a `github-token` secret** to this workflow's `on.workflow_call.secrets:` block (alongside `cloudflare_api_token`/`cloudflare_account_id`):
 
