@@ -61,49 +61,73 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
-        set -euo pipefail
+        set -uo pipefail
         echo "::add-mask::$GITHUB_TOKEN"
         echo "::group::🔒 [CHECKPOINT 1/1] Query Open Critical Dependabot Alerts"
 
-        page=1
+        # NOTE: this endpoint does NOT support page-number pagination (`page=N`
+        # is rejected outright with HTTP 400 -- confirmed against a live repo).
+        # It uses Link-header cursor pagination like most current GitHub list
+        # endpoints: follow the `rel="next"` URL from the response headers
+        # until there isn't one.
+        url="https://api.github.com/repos/${REPOSITORY}/dependabot/alerts?state=open&severity=critical&per_page=100"
         total_critical=0
         summary_rows=""
+        page_num=1
 
-        while :; do
+        while [[ -n "$url" ]]; do
           response_file="$(mktemp)"
+          headers_file="$(mktemp)"
           http_code="$(curl -sS \
             --max-time 30 \
             --retry 3 \
             --retry-connrefused \
+            -D "$headers_file" \
             -o "$response_file" \
             -w '%{http_code}' \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${REPOSITORY}/dependabot/alerts?state=open&severity=critical&per_page=100&page=${page}")"
+            "$url")"
+          curl_exit=$?
+
+          if [[ $curl_exit -ne 0 ]]; then
+            echo "::error title=❌ [VULN-GATE] Dependabot Alerts API request failed::Network/transport error (curl exit ${curl_exit}) querying ${REPOSITORY} on page ${page_num}. This gate fails closed on any error, including connectivity issues."
+            rm -f "$response_file" "$headers_file"
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+            echo "::error title=❌ [VULN-GATE] Insufficient permission to query Dependabot alerts::${REPOSITORY} returned HTTP ${http_code}. The calling workflow's job must grant 'security-events: read' in its own permissions: block (job-level permissions override the workflow-level default) — this gate fails closed until that permission is granted. Response: $(cat "$response_file")"
+            rm -f "$response_file" "$headers_file"
+            echo "::endgroup::"
+            exit 1
+          fi
 
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error title=❌ [VULN-GATE] Dependabot Alerts API call failed::HTTP ${http_code} on page ${page} for ${REPOSITORY}. Response: $(cat "$response_file")"
-            rm -f "$response_file"
+            echo "::error title=❌ [VULN-GATE] Dependabot Alerts API call failed::HTTP ${http_code} on page ${page_num} for ${REPOSITORY}. Response: $(cat "$response_file")"
+            rm -f "$response_file" "$headers_file"
+            echo "::endgroup::"
             exit 1
           fi
 
           page_count="$(jq 'length' "$response_file")"
-          if [[ "$page_count" -eq 0 ]]; then
-            rm -f "$response_file"
-            break
+          if [[ "$page_count" -gt 0 ]]; then
+            total_critical=$((total_critical + page_count))
+            summary_rows+="$(jq -r '.[] | "| " + (.security_advisory.ghsa_id // "unknown") + " | " + (.dependency.package.name // "unknown") + " | [" + (.html_url // "") + "](" + (.html_url // "") + ") |"' "$response_file")"
+            summary_rows+=$'\n'
           fi
 
-          total_critical=$((total_critical + page_count))
-          summary_rows+="$(jq -r '.[] | "| " + (.security_advisory.ghsa_id // "unknown") + " | " + (.dependency.package.name // "unknown") + " | [" + (.html_url // "") + "](" + (.html_url // "") + ") |"' "$response_file")"
-          summary_rows+=$'\n'
-          rm -f "$response_file"
+          next_url="$(grep -i '^link:' "$headers_file" | grep -o '<[^>]*>; *rel="next"' | sed -E 's/^<(.*)>; *rel="next"$/\1/')"
+          rm -f "$response_file" "$headers_file"
 
-          if [[ "$page_count" -lt 100 ]]; then
+          if [[ -z "$next_url" ]]; then
             break
           fi
-          page=$((page + 1))
-          if [[ "$page" -gt 10 ]]; then
+          url="$next_url"
+          page_num=$((page_num + 1))
+          if [[ "$page_num" -gt 10 ]]; then
             echo "::warning title=⚠️ [VULN-GATE] Pagination cap reached::Stopped after 10 pages (1000 alerts) for ${REPOSITORY} — true count may be higher."
             break
           fi
@@ -117,14 +141,16 @@ runs:
           echo "$EOF"
         } >> "$GITHUB_OUTPUT"
 
-        echo "VULN_GATE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
         echo "::endgroup::"
 
         if [[ "$total_critical" -gt 0 ]]; then
+          echo "VULN_GATE_CP1_STATUS=❌ CRITICAL ALERT FOUND" >> "$GITHUB_ENV"
           echo "::error title=❌ [VULN-GATE] Blocked by critical Dependabot alert(s)::${REPOSITORY} has ${total_critical} open CRITICAL-severity Dependabot alert(s) — this check/pipeline is blocked until they are resolved or dismissed."
           printf '%s\n' "$summary_rows"
           exit 1
         fi
+
+        echo "VULN_GATE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
     - name: Report failure
       if: failure()
