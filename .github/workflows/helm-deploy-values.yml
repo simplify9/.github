@@ -192,6 +192,12 @@ on:
       helm-set-secret-values:
         required: false
 
+      github-token:
+        description: "Unused by this workflow -- kept only so a caller already
+          passing it doesn't break with an undeclared-secret error. The critical-vuln
+          gate uses dependabot-alerts-token instead (GITHUB_TOKEN cannot access the
+          Dependabot Alerts API regardless of permissions granted)."
+        required: false
       dependabot-alerts-token:
         description: "PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot alerts: read'
           for the critical-vuln gate -- GITHUB_TOKEN cannot access this API

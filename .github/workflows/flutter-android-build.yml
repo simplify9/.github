@@ -194,6 +194,12 @@ on:
         description: Google Play service account JSON (required only when 
           releasing)
         required: false
+      github-token:
+        description: "Unused by this workflow -- kept only so a caller already
+          passing it doesn't break with an undeclared-secret error. The critical-vuln
+          gate uses dependabot-alerts-token instead (GITHUB_TOKEN cannot access the
+          Dependabot Alerts API regardless of permissions granted)."
+        required: false
       dependabot-alerts-token:
         description: "PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot alerts: read'
           for the critical-vuln gate -- GITHUB_TOKEN cannot access this API
@@ -239,6 +245,16 @@ jobs:
     name: Android Build
     runs-on: ${{ inputs.ubuntu-runner }}
     timeout-minutes: 60
+    needs: critical-vuln-gate
+    # critical-vuln-gate is conditionally skipped (build-only runs, or
+    # release-environment unset), so 'skipped' must be allowed here or every
+    # build-only run would break. A gate failure (open critical alert) blocks
+    # the build itself, so CI stops wasting time on a release that can't ship.
+    if: >-
+      ${{ !cancelled()
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped')
+      }}
     # Superseded builds on the same ref are cancelled to save runner minutes.
     # Scoped per caller workflow + ref so unrelated runs never collide.
     concurrency:
@@ -619,7 +635,20 @@ jobs:
   release_with_environment:
     name: Android Release (Google Play)
     needs: [build, critical-vuln-gate]
-    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    # FIX: the previous `if` only checked the input flags, never needs.*.result —
+    # since any custom `if` replaces GitHub's implicit success()-over-needs check,
+    # this meant a failed build OR a failed critical-vuln-gate (open critical
+    # alert) would NOT actually block this job from running the Play Store
+    # upload. Both are now explicit; 'skipped' is allowed for the gate because
+    # it is conditionally skipped on build-only runs.
+    if: >-
+      ${{ !cancelled()
+          && inputs.release-environment != ''
+          && !inputs.disable-release
+          && needs.build.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped')
+      }}
     runs-on: ${{ inputs.ubuntu-runner }}
     timeout-minutes: 20
     environment: ${{ inputs.release-environment }}

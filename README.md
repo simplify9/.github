@@ -89,7 +89,7 @@ Set these as **Organization** or repository secrets. Names below are the secret 
 ```text
 cloudflare_api_token     # API token with Workers + DNS permissions
 cloudflare_account_id    # Cloudflare account ID
-github-token             # Token with security-events:read, for the build-time critical-vuln gate (pass secrets.GITHUB_TOKEN)
+dependabot-alerts-token  # PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate (pass secrets.DEPENDABOT_ALERTS_TOKEN — GITHUB_TOKEN cannot access this API)
 ```
 
 ### Service / Backend (Kubernetes + Container Registry + Helm)
@@ -102,7 +102,8 @@ kubeconfig-gateway       # Base64 kubeconfig for the gateway-api routing mode (r
 chartmuseum-username     # ChartMuseum username (when publishing/pulling via ChartMuseum)
 chartmuseum-password     # ChartMuseum password/token
 helm-set-secret-values   # Sensitive Helm values, applied with --set-string
-github-token             # Tags the origin after deploy (falls back to built-in GITHUB_TOKEN); also required by the build-time critical-vuln gate (security-events:read) — `helm-deploy-values.yml` uses it only for the gate
+github-token             # Tags the origin after deploy (falls back to built-in GITHUB_TOKEN) — not used by `helm-deploy-values.yml`
+dependabot-alerts-token  # PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate (pass secrets.DEPENDABOT_ALERTS_TOKEN — GITHUB_TOKEN cannot access this API)
 nuget-api-key            # NuGet API key (only if publishing packages)
 ```
 
@@ -202,7 +203,7 @@ Builds a Next.js app with the **OpenNext.js** Cloudflare adapter and deploys it 
 | `build_script` | | `build` | Build npm script |
 | `run_lint` | | `true` | Run lint step |
 
-**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `github-token` (security-events:read, for the build-time critical-vuln gate — pass `secrets.GITHUB_TOKEN`)
+**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — pass `secrets.DEPENDABOT_ALERTS_TOKEN`; `GITHUB_TOKEN` cannot access this API regardless of granted permissions)
 
 ```yaml
 jobs:
@@ -215,7 +216,7 @@ jobs:
     secrets:
       cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 ---
@@ -236,7 +237,7 @@ Builds a Vite single-page app and deploys it to Cloudflare Workers **static asse
 | `pre_build_commands` | | `''` | Optional shell commands run before the build |
 | `run_lint` | | `true` | Run lint step |
 
-**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `github-token` (security-events:read, for the build-time critical-vuln gate — pass `secrets.GITHUB_TOKEN`)
+**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — pass `secrets.DEPENDABOT_ALERTS_TOKEN`; `GITHUB_TOKEN` cannot access this API regardless of granted permissions)
 
 > Unlike the Next.js workflow, `route` is **required** here.
 
@@ -270,7 +271,7 @@ The consolidated service pipeline: compute semver → optionally publish NuGet �
 | `gateway-hostnames` | | `''` | Hostnames for the HTTPRoute (gateway-api) |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
-**Secrets** (conditionally required): `registry-username`, `registry-password`, `chartmuseum-username` + `chartmuseum-password` (for `chartmuseum`/`both`), `kubeconfig` (deploy + ingress-nginx) or `kubeconfig-gateway` (deploy + gateway-api), `helm-set-secret-values`, `nuget-api-key`, `github-token`.
+**Secrets** (conditionally required): `registry-username`, `registry-password`, `chartmuseum-username` + `chartmuseum-password` (for `chartmuseum`/`both`), `kubeconfig` (deploy + ingress-nginx) or `kubeconfig-gateway` (deploy + gateway-api), `helm-set-secret-values`, `nuget-api-key`, `github-token` (tags the origin after deploy), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API).
 
 **Outputs:** `version`, `docker-image`, `helm-chart`.
 
@@ -286,6 +287,7 @@ jobs:
       minor-version: '1'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
       chartmuseum-username: ${{ secrets.CM_USER }}
       chartmuseum-password: ${{ secrets.CM_PASSWORD }}
       nuget-api-key: ${{ secrets.NUGET_API_KEY }}   # omit to skip NuGet
@@ -316,7 +318,7 @@ Full CI/CD that builds a Docker image and deploys the shared **`s9genericchart`*
 | `init-job-secret-name` | | `''` | Secret holding the migration connection string |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
-**Secrets:** `registry-username`, `registry-password`, `kubeconfig`, `github-token`, `helm-set-secret-values`, `nuget-api-key`, `nuget-source`, `NUGET_PACKAGE_PAT`.
+**Secrets:** `registry-username`, `registry-password`, `kubeconfig`, `github-token` (tags the origin after deploy), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API), `helm-set-secret-values`, `nuget-api-key`, `nuget-source`, `NUGET_PACKAGE_PAT`.
 
 **Outputs:** `version`, `docker-image`, `nuget-version`.
 
@@ -348,7 +350,7 @@ Gateway-first CI/CD: semver → Docker build/push → Gateway listener + TLS cer
 | `helm-set-values` | | — | Extra non-secret `--set` values |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
-**Secrets:** `registry-username`, `registry-password`, `kubeconfig`, `github-token`, `helm-set-secret-values`, `nuget-api-key`, `nuget-source`, `NUGET_PACKAGE_PAT`.
+**Secrets:** `registry-username`, `registry-password`, `kubeconfig`, `github-token` (tags the origin after deploy), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API), `helm-set-secret-values`, `nuget-api-key`, `nuget-source`, `NUGET_PACKAGE_PAT`.
 
 **Outputs:** `version`, `docker-image`, `helm-chart`, `nuget-version`.
 
@@ -423,7 +425,7 @@ Deploy-only: deploys an already-published chart from a ChartMuseum-style repo us
 | `helm-version` | | `v4.2.0` | Helm CLI version |
 | `kubectl-version` | | `v1.33.0` | kubectl CLI version |
 
-**Secrets:** `kubeconfig` (or `kubeconfig64` alias), `helm-set-secret-values`, `github-token` (required — security-events:read, for the build-time critical-vuln gate; pass `secrets.GITHUB_TOKEN`).
+**Secrets:** `kubeconfig` (or `kubeconfig64` alias), `helm-set-secret-values`, `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate; pass `secrets.DEPENDABOT_ALERTS_TOKEN` — `GITHUB_TOKEN` cannot access this API regardless of granted permissions).
 
 ---
 
@@ -455,7 +457,7 @@ CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git ta
 
 ### Mobile · iOS & Android
 
-There are two flavors: **React Native** (`ios-build.yml` / `android-build.yml`) and **Flutter** (`flutter-ios-build.yml` / `flutter-android-build.yml`). All four share the same shape — a **build** job (runs unconditionally) and a **release** job (`release_with_environment`) gated by `if: release-environment != '' && !disable-release` and bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the matching starter templates). The Flutter and RN iOS workflows reuse the same `ios-install-cert` / `ios-install-profile` composite actions for signing.
+There are two flavors: **React Native** (`ios-build.yml` / `android-build.yml`) and **Flutter** (`flutter-ios-build.yml` / `flutter-android-build.yml`). All four share the same shape — a **build** job that itself `needs` the critical-vuln gate (a critical alert blocks the build, not just the release, so CI never spends a runner building something that can't ship) and a **release** job (`release_with_environment`) gated on the input flags AND on both the build and the gate having actually succeeded (or the gate having been skipped), bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the matching starter templates). The Flutter and RN iOS workflows reuse the same `ios-install-cert` / `ios-install-profile` composite actions for signing.
 
 ---
 
@@ -483,6 +485,8 @@ Builds, signs, and archives a React Native / native iOS app on a macOS runner, e
 
 **Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64`, `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` (and optional `ios-team-id`).
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which now blocks the `build` job itself (not just the TestFlight upload) — no signing/archiving happens until the gate resolves.
+
 **Outputs:** `version`, `build-number`, `ipa-file`.
 
 ```yaml
@@ -501,6 +505,7 @@ jobs:
       appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
       appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** manual signing only (automatic signing needs an interactive Xcode session); CocoaPods spec repo + Pods dir are cached on `Podfile.lock`; ccache speeds ObjC/C++ rebuilds (no Swift benefit). Use the **iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
@@ -530,6 +535,8 @@ Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishe
 
 **Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which now blocks the `build` job itself (not just the Play upload) — no signing/building happens until the gate resolves.
+
 **Outputs:** `version-name`, `version-code`, `aab-file`.
 
 ```yaml
@@ -549,6 +556,7 @@ jobs:
       android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
       android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** Gradle uses `gradle/actions/setup-gradle@v5` (do not use the archived `gradle/gradle-build-action`, and do not add `cache: gradle` to `setup-java` — it conflicts). The workflow sets `org.gradle.caching=true` itself, so callers no longer need to. NDK `27.1.12297006` (r27b LTS) is pinned and installed via `sdkmanager` (not `actions/cache` — the Android SDK dir is root-owned). Use the **Android App CI/CD** starter template for a `workflow_dispatch` entry point.
@@ -579,6 +587,8 @@ Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `fl
 
 **Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64` (plus `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` for the upload, and optional `ios-team-id`).
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which blocks the `build` job itself (not just the TestFlight upload) — no signing/archiving happens until the gate resolves.
+
 **Outputs:** `version`, `build-number`, `ipa-file`.
 
 ```yaml
@@ -599,6 +609,7 @@ jobs:
       appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
       appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** manual signing only — keychain/cert/profile install is delegated to the shared `ios-install-cert` / `ios-install-profile` composite actions, then the `pbxproj` is rewritten to manual signing (`Apple Distribution`) with fail-loud `grep` asserts and a generated `ExportOptions.plist`. The pub package cache is handled by `subosito/flutter-action`'s `cache: true` (no separate `actions/cache` step), and `ios/Pods` is cached on `Podfile.lock`; `pod install` deliberately avoids `deintegrate`/`--repo-update` to preserve the cache. Use the **Flutter iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
@@ -631,6 +642,8 @@ Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbu
 
 **Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which blocks the `build` job itself (not just the Play upload) — no signing/building happens until the gate resolves.
+
 **Outputs:** `version-name`, `version-code`, `aab-file`.
 
 ```yaml
@@ -650,6 +663,7 @@ jobs:
       android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
       android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 → 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK plumbing — Flutter owns the actual build — but the Gradle User Home is cached via `gradle/actions/setup-gradle@v5` (which applies to the `gradlew` Flutter invokes), and both jobs opt JS-based actions onto Node 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`. The keystore and generated `android/key.properties` are removed by an `always()` cleanup step. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.
@@ -664,7 +678,7 @@ jobs:
 
 Thin `workflow_call` wrapper around the `check-critical-vulns` composite action: fails if the calling repository has any open **critical-severity** Dependabot alert. Has no `inputs:` — only a required secret. Called by the `critical-vuln-check` and `dependabot-auto-merge` starter templates, and the same underlying check is embedded as an early gating job inside 10 of the 11 other reusable workflows in this repo (both Cloudflare workflows, all four Service & Backend workflows, and all four mobile workflows) — everything except the chart-lint-only `gateway-chart-cicd.yml`.
 
-**Required secrets:** `github-token` (security-events:read on the calling repo — pass `secrets.GITHUB_TOKEN`).
+**Required secrets:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" on the calling repo — pass `secrets.DEPENDABOT_ALERTS_TOKEN`; `GITHUB_TOKEN` cannot access the Dependabot Alerts API regardless of granted permissions, confirmed by live testing).
 
 **Outputs:** none directly from the workflow; the underlying `check-critical-vulns` action's `critical-count` output is available to the job that calls it.
 
@@ -673,7 +687,7 @@ jobs:
   vuln-gate:
     uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
     secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed).
@@ -749,7 +763,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
-| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`github-token`, `repository`; output `critical-count`). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
+| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; output `critical-count`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
 
 ---
 
