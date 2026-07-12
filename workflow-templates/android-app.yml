@@ -61,7 +61,7 @@ jobs:
       app-slug: app                        # REPLACE: e.g. mealivery-customer
 
       # ── Versioning ────────────────────────────────────────────────────────
-      version-prefix: "1.0.0"             # REPLACE: your X.Y.Z start version
+      version-prefix: "1.0"             # REPLACE: your X.Y start version
       version-code-offset: "80000"      # REPLACE: set above last shipped versionCode
 
       # ── Build ─────────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ jobs:
       app-slug: app                        # REPLACE
 
       # ── Versioning ────────────────────────────────────────────────────────
-      version-prefix: "1.0.0"             # REPLACE
+      version-prefix: "1.0"             # REPLACE
       version-code-offset: "80000"      # REPLACE
 
       # ── Build ─────────────────────────────────────────────────────────────

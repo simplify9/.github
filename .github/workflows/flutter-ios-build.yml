@@ -12,7 +12,8 @@
 #                              disable-release.
 #
 # Drop-in replacement for laflef-mobile/.github/workflows/testflight.yml — same
-# Flutter setup, SemVer patch-counter versioning from pubspec, manual
+# Flutter setup, caller-controlled major/minor + pubspec-backed SemVer patch
+# counter versioning, manual
 # signing (sed pbxproj rewrite + generated ExportOptions.plist) and
 # `flutter build ipa` invocation, generalized behind inputs/secrets. Keychain /
 # certificate / profile install is delegated to the shared composite actions
@@ -86,6 +87,16 @@ on:
         required: false
         type: string
         default: "."
+
+      # ── Versioning ─────────────────────────────────────────────────
+      marketing-prefix:
+        description: >
+          Marketing version major.minor prefix in X.Y format (for example
+          1.0 or 2.3). The patch remains the pubspec patch plus
+          github.run_number.
+        required: false
+        type: string
+        default: "1.0"
 
       # ── Static analysis ─────────────────────────────────────────────────────
       run-analyze:
@@ -195,11 +206,12 @@ jobs:
         env:
           IOS_DIR: ${{ inputs.ios-dir }}
           EXPORT_METHOD: ${{ inputs.export-method }}
+          MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
           MACOS_RUNNER: ${{ inputs.macos-runner }}
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Flutter build starting::ios-dir=${IOS_DIR} export-method=${EXPORT_METHOD} runner=${MACOS_RUNNER} actor=${ACTOR}"
+          echo "::notice title=🍎 [IOS] Flutter build starting::ios-dir=${IOS_DIR} marketing-prefix=${MARKETING_PREFIX} export-method=${EXPORT_METHOD} runner=${MACOS_RUNNER} actor=${ACTOR}"
           {
             echo "CHECKPOINT_1_STATUS=⏳ Pending"
             echo "CHECKPOINT_2_STATUS=⏳ Pending"
@@ -290,12 +302,15 @@ jobs:
         id: version
         working-directory: ${{ inputs.project-directory }}
         shell: bash
+        env:
+          MARKETING_PREFIX: ${{ inputs.marketing-prefix }}
         run: |
           set -euo pipefail
           echo "::group::🏷️ [VERSION] Compute marketing version / build number"
 
-          # Versioning strategy: SemVer patch counter. For Flutter the source
-          # of truth is pubspec.yaml (X.Y.Z+BUILD): the iOS Info.plist resolves
+          # Versioning strategy: SemVer patch counter. The caller controls
+          # major.minor through marketing-prefix; pubspec.yaml (X.Y.Z+BUILD)
+          # supplies the base patch and build number. The iOS Info.plist resolves
           # CFBundleShortVersionString / CFBundleVersion from $(FLUTTER_BUILD_NAME)
           # / $(FLUTTER_BUILD_NUMBER), which the `flutter build ipa --build-name
           # --build-number` step injects from VERSION / BUILD_NUMBER below.
@@ -309,24 +324,29 @@ jobs:
           fi
 
           echo "pubspec version: ${PUBSPEC_VERSION}"
+          echo "marketing-prefix input: ${MARKETING_PREFIX}"
           echo "github.run_number: ${GITHUB_RUN_NUMBER}"
           echo "Original base build (pubspec +N): ${BASE_BUILD}"
 
-          PREFIX_RAW="${PUBSPEC_SEMVER}"
-          if [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            BASE_MAJOR="${BASH_REMATCH[1]}"
-            BASE_MINOR="${BASH_REMATCH[2]}"
+          if [[ "${PUBSPEC_SEMVER}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             BASE_PATCH="${BASH_REMATCH[3]}"
-          elif [[ "${PREFIX_RAW}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-            BASE_MAJOR="${BASH_REMATCH[1]}"
-            BASE_MINOR="${BASH_REMATCH[2]}"
+          elif [[ "${PUBSPEC_SEMVER}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
             BASE_PATCH="0"
           else
-            echo "ERROR: pubspec marketing version must be in X.Y or X.Y.Z format. Got '${PREFIX_RAW}'."
+            echo "ERROR: pubspec marketing version must be in X.Y or X.Y.Z format. Got '${PUBSPEC_SEMVER}'."
             exit 1
           fi
 
-          # major.minor stay exactly as set in pubspec; patch = base patch +
+          if [[ "${MARKETING_PREFIX}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+          else
+            echo "ERROR: marketing-prefix must be in X.Y format. Got '${MARKETING_PREFIX}'."
+            exit 1
+          fi
+
+          # major.minor stay exactly as set by marketing-prefix; patch = the
+          # existing pubspec patch +
           # run_number — by exactly 1 per run, monotonic, unbounded, with no
           # roll-over into minor/major (… 1.1.69 -> 1.1.70 -> …).
           INCREMENT=$((GITHUB_RUN_NUMBER))
@@ -360,7 +380,8 @@ jobs:
             echo "| Field | Value |"
             echo "|-------|-------|"
             echo "| strategy | SemVer patch counter (patch = base + run_number; build = pubspec base + run_number) |"
-            echo "| marketing prefix | ${PREFIX_RAW} |"
+            echo "| marketing prefix | ${MARKETING_PREFIX} |"
+            echo "| base patch from pubspec | ${BASE_PATCH} |"
             echo "| github.run_number | ${GITHUB_RUN_NUMBER} |"
             echo "| computed version | ${VERSION} |"
             echo "| base build from pubspec | ${BASE_BUILD} |"
