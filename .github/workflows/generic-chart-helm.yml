@@ -312,7 +312,7 @@ jobs:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
         with:
-          github-token: ${{ secrets.github-token }}
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
 
       - name: Write job summary

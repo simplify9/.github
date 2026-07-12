@@ -183,8 +183,8 @@ on:
           (required only when releasing)
         required: false
       github-token:
-        description: 'Token with security-events:read on the calling repository. Pass secrets.GITHUB_TOKEN.'
-        required: true
+        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
+        required: false
 
     outputs:
       version:
@@ -210,7 +210,7 @@ jobs:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
         with:
-          github-token: ${{ secrets.github-token }}
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
 
       - name: Write job summary
