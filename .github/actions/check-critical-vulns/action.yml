@@ -92,6 +92,16 @@ runs:
         while [[ -n "$url" ]]; do
           response_file="$(mktemp)"
           headers_file="$(mktemp)"
+          # IMPORTANT: `shell: bash` composite-action steps run as
+          # `bash --noprofile --norc -e -o pipefail {0}` -- `-e` is baked into
+          # the invocation itself and `set -uo pipefail` above does NOT (and
+          # cannot) cancel it. Any command below that can legitimately return
+          # non-zero (curl transport failure, a grep/pipeline finding no
+          # match) MUST be guarded with `|| ...`/`|| true`, or the whole
+          # script dies silently the instant that happens -- confirmed live:
+          # this exact bug silently killed the gate on every real repo with
+          # no Link "next" header, i.e. almost every real repo.
+          curl_exit=0
           http_code="$(curl -sS \
             --max-time 30 \
             --retry 3 \
@@ -102,8 +112,7 @@ runs:
             -H "Authorization: Bearer $DEPENDABOT_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$url")"
-          curl_exit=$?
+            "$url")" || curl_exit=$?
 
           if [[ $curl_exit -ne 0 ]]; then
             echo "::error title=❌ [VULN-GATE] Dependabot Alerts API request failed::Network/transport error (curl exit ${curl_exit}) querying ${REPOSITORY} on page ${page_num}. This gate fails closed on any error, including connectivity issues."
@@ -126,14 +135,15 @@ runs:
             exit 1
           fi
 
-          page_count="$(jq 'length' "$response_file")"
+          page_count="$(jq 'length' "$response_file" 2>/dev/null)" || page_count=0
+          page_count="${page_count:-0}"
           if [[ "$page_count" -gt 0 ]]; then
             total_critical=$((total_critical + page_count))
-            summary_rows+="$(jq -r '.[] | "| " + (.security_advisory.ghsa_id // "unknown") + " | " + (.dependency.package.name // "unknown") + " | [" + (.html_url // "") + "](" + (.html_url // "") + ") |"' "$response_file")"
+            summary_rows+="$(jq -r '.[] | "| " + (.security_advisory.ghsa_id // "unknown") + " | " + (.dependency.package.name // "unknown") + " | [" + (.html_url // "") + "](" + (.html_url // "") + ") |"' "$response_file" 2>/dev/null)" || true
             summary_rows+=$'\n'
           fi
 
-          next_url="$(grep -i '^link:' "$headers_file" | grep -o '<[^>]*>; *rel="next"' | sed -E 's/^<(.*)>; *rel="next"$/\1/')"
+          next_url="$(grep -i '^link:' "$headers_file" | grep -o '<[^>]*>; *rel="next"' | sed -E 's/^<(.*)>; *rel="next"$/\1/')" || true
           rm -f "$response_file" "$headers_file"
 
           if [[ -z "$next_url" ]]; then
