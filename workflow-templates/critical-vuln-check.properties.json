@@ -1,0 +1,8 @@
+{
+    "name": "Critical Vulnerability Check",
+    "description": "Fails a PR check if the repository has any open critical-severity Dependabot alert. Mark this check required on main's branch protection to block merges; leave it optional on develop to only warn.",
+    "iconName": "octicon-shield",
+    "categories": [
+        "Security"
+    ]
+}
