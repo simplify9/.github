@@ -37,7 +37,6 @@ inputs:
   repository:
     description: 'Target repository in owner/repo format. Defaults to the calling repository.'
     required: false
-    default: ${{ github.repository }}
 
 outputs:
   critical-count:
@@ -50,7 +49,7 @@ runs:
     - name: Announce critical-vuln check
       shell: bash
       env:
-        REPOSITORY: ${{ inputs.repository }}
+        REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
         echo "::notice title=🔒 [VULN-GATE] Critical Vulnerability Check::repository: ${REPOSITORY}"
         echo "VULN_GATE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
@@ -60,7 +59,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        REPOSITORY: ${{ inputs.repository }}
+        REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
         set -euo pipefail
         echo "::add-mask::$GITHUB_TOKEN"
@@ -131,7 +130,7 @@ runs:
       if: failure()
       shell: bash
       env:
-        REPOSITORY: ${{ inputs.repository }}
+        REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
         echo "::error title=❌ [VULN-GATE] Critical vulnerability gate failed::${REPOSITORY} is blocked — either the Dependabot Alerts API call failed, or an open CRITICAL-severity alert exists. Checkpoint — 1) Query alerts: ${VULN_GATE_CP1_STATUS:-⏭️ Not reached}. See the step above for affected package(s)/advisory ID(s)."
 
@@ -139,24 +138,23 @@ runs:
       if: always()
       shell: bash
       env:
-        REPOSITORY: ${{ inputs.repository }}
+        REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
         CRITICAL_COUNT: ${{ steps.check.outputs.critical-count }}
       run: |
-        EOF="$(dd if=/dev/urandom bs=15 count=1 status=none | base64)"
-        cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-        ## 🔒 Critical Dependabot Vulnerability Check
-
-        | Field | Value |
-        |-------|-------|
-        | Repository | ${{ inputs.repository }} |
-        | Open critical alerts found | ${CRITICAL_COUNT:-unknown} |
-
-        ## 📋 Checkpoint Summary
-
-        | # | Checkpoint | Status |
-        |---|------------|--------|
-        | 1 | Query open critical Dependabot alerts | ${VULN_GATE_CP1_STATUS:-⏭️ Not reached} |
-        $EOF
+        {
+          echo "## 🔒 Critical Dependabot Vulnerability Check"
+          echo ""
+          echo "| Field | Value |"
+          echo "|-------|-------|"
+          echo "| Repository | ${REPOSITORY} |"
+          echo "| Open critical alerts found | ${CRITICAL_COUNT:-unknown} |"
+          echo ""
+          echo "## 📋 Checkpoint Summary"
+          echo ""
+          echo "| # | Checkpoint | Status |"
+          echo "|---|------------|--------|"
+          echo "| 1 | Query open critical Dependabot alerts | ${VULN_GATE_CP1_STATUS:-⏭️ Not reached} |"
+        } >> "$GITHUB_STEP_SUMMARY"
 
 branding:
   icon: 'shield'
