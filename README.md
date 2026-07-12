@@ -29,6 +29,7 @@
   - [Service & Backend · Kubernetes](#service--backend--kubernetes)
   - [Helm Chart CI/CD](#helm-chart-cicd)
   - [Mobile · iOS & Android](#mobile--ios--android)
+  - [Security](#security)
 - [Composite Action Reference](#composite-action-reference)
 - [Core Architecture & Conventions](#core-architecture--conventions)
 - [Troubleshooting](#troubleshooting)
@@ -51,6 +52,7 @@
 | Android app (React Native) | Google Play | [`android-build.yml`](#android-buildyml) |
 | iOS app (Flutter) | TestFlight | [`flutter-ios-build.yml`](#flutter-ios-buildyml) |
 | Android app (Flutter) | Google Play | [`flutter-android-build.yml`](#flutter-android-buildyml) |
+| Any repo — block on open critical Dependabot alerts | PR check / Dependabot auto-merge gate | [`critical-vuln-gate.yml`](#critical-vuln-gateyml) |
 
 All workflows are **reusable** (`on: workflow_call:`). Call them from your repo:
 
@@ -74,6 +76,8 @@ This repo also ships **org workflow templates** (`workflow-templates/`) that app
 | iOS App CI/CD | `ios-build.yml` | `workflow_dispatch` |
 | Flutter Android App CI/CD | `flutter-android-build.yml` | `workflow_dispatch` |
 | Flutter iOS App CI/CD | `flutter-ios-build.yml` | `workflow_dispatch` |
+| Critical Vulnerability Check | `critical-vuln-gate.yml` | `pull_request` → `main`, `develop` |
+| Dependabot Auto-Merge | `critical-vuln-gate.yml` | `pull_request` → `main`, `develop` |
 
 ---
 
@@ -86,6 +90,7 @@ Set these as **Organization** or repository secrets. Names below are the secret 
 ```text
 cloudflare_api_token     # API token with Workers + DNS permissions
 cloudflare_account_id    # Cloudflare account ID
+github-token             # Token with security-events:read, for the build-time critical-vuln gate (pass secrets.GITHUB_TOKEN)
 ```
 
 ### Service / Backend (Kubernetes + Container Registry + Helm)
@@ -98,7 +103,7 @@ kubeconfig-gateway       # Base64 kubeconfig for the gateway-api routing mode (r
 chartmuseum-username     # ChartMuseum username (when publishing/pulling via ChartMuseum)
 chartmuseum-password     # ChartMuseum password/token
 helm-set-secret-values   # Sensitive Helm values, applied with --set-string
-github-token             # Token for tagging the origin (falls back to built-in GITHUB_TOKEN)
+github-token             # Tags the origin after deploy (falls back to built-in GITHUB_TOKEN); also required by the build-time critical-vuln gate (security-events:read) — `helm-deploy-values.yml` uses it only for the gate
 nuget-api-key            # NuGet API key (only if publishing packages)
 ```
 
@@ -142,27 +147,31 @@ google-play-service-account-json  # Google Play service account JSON
 │   │   ├── ios-build.yml
 │   │   ├── android-build.yml
 │   │   ├── flutter-ios-build.yml
-│   │   └── flutter-android-build.yml
-│   └── actions/                  ← composite actions
-│       ├── determine-semver/
-│       ├── tag-github-origin/
-│       ├── docker-build-push/
-│       ├── helm-deploy/
-│       ├── helm-deploy-s9generic/
-│       ├── helm-generic/
-│       ├── helm-package-push/
-│       ├── gateway-routing/      (render.sh)
-│       ├── gateway-onboard/      (onboard.sh)
-│       ├── dotnet-build/
-│       ├── dotnet-pack-push/
-│       ├── generate-wrangler-config/
-│       ├── setup-cloudflare-domain/
-│       ├── ios-install-cert/
-│       ├── ios-install-profile/
-│       ├── xcode-build/
-│       ├── xcode-export/
-│       └── write-job-summary/
-└── workflow-templates/           ← org starter templates (*.yml + *.properties.json)
+│   │   ├── flutter-android-build.yml
+│   │   └── critical-vuln-gate.yml
+│   ├── actions/                  ← composite actions
+│   │   ├── determine-semver/
+│   │   ├── tag-github-origin/
+│   │   ├── docker-build-push/
+│   │   ├── helm-deploy/
+│   │   ├── helm-deploy-s9generic/
+│   │   ├── helm-generic/
+│   │   ├── helm-package-push/
+│   │   ├── gateway-routing/      (render.sh)
+│   │   ├── gateway-onboard/      (onboard.sh)
+│   │   ├── dotnet-build/
+│   │   ├── dotnet-pack-push/
+│   │   ├── generate-wrangler-config/
+│   │   ├── setup-cloudflare-domain/
+│   │   ├── ios-install-cert/
+│   │   ├── ios-install-profile/
+│   │   ├── xcode-build/
+│   │   ├── xcode-export/
+│   │   ├── write-job-summary/
+│   │   └── check-critical-vulns/
+│   └── dependabot.yml            ← this repo's own Dependabot config (github-actions only)
+├── workflow-templates/           ← org starter templates (*.yml + *.properties.json)
+└── dependabot-templates/         ← ready-made per-category `dependabot.yml` configs for consumer repos to copy
 ```
 
 ---
@@ -194,7 +203,7 @@ Builds a Next.js app with the **OpenNext.js** Cloudflare adapter and deploys it 
 | `build_script` | | `build` | Build npm script |
 | `run_lint` | | `true` | Run lint step |
 
-**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`
+**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `github-token` (security-events:read, for the build-time critical-vuln gate — pass `secrets.GITHUB_TOKEN`)
 
 ```yaml
 jobs:
@@ -207,6 +216,7 @@ jobs:
     secrets:
       cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ---
@@ -227,7 +237,7 @@ Builds a Vite single-page app and deploys it to Cloudflare Workers **static asse
 | `pre_build_commands` | | `''` | Optional shell commands run before the build |
 | `run_lint` | | `true` | Run lint step |
 
-**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`
+**Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `github-token` (security-events:read, for the build-time critical-vuln gate — pass `secrets.GITHUB_TOKEN`)
 
 > Unlike the Next.js workflow, `route` is **required** here.
 
@@ -414,7 +424,7 @@ Deploy-only: deploys an already-published chart from a ChartMuseum-style repo us
 | `helm-version` | | `v4.2.0` | Helm CLI version |
 | `kubectl-version` | | `v1.33.0` | kubectl CLI version |
 
-**Secrets:** `kubeconfig` (or `kubeconfig64` alias), `helm-set-secret-values`.
+**Secrets:** `kubeconfig` (or `kubeconfig64` alias), `helm-set-secret-values`, `github-token` (required — security-events:read, for the build-time critical-vuln gate; pass `secrets.GITHUB_TOKEN`).
 
 ---
 
@@ -647,6 +657,30 @@ jobs:
 
 ---
 
+### Security
+
+---
+
+#### `critical-vuln-gate.yml`
+
+Thin `workflow_call` wrapper around the `check-critical-vulns` composite action: fails if the calling repository has any open **critical-severity** Dependabot alert. Has no `inputs:` — only a required secret. Called by the `critical-vuln-check` and `dependabot-auto-merge` starter templates, and the same underlying check is embedded as an early gating job inside 10 of the 11 other reusable workflows in this repo (both Cloudflare workflows, all four Service & Backend workflows, and all four mobile workflows) — everything except the chart-lint-only `gateway-chart-cicd.yml`.
+
+**Required secrets:** `github-token` (security-events:read on the calling repo — pass `secrets.GITHUB_TOKEN`).
+
+**Outputs:** none directly from the workflow; the underlying `check-critical-vulns` action's `critical-count` output is available to the job that calls it.
+
+```yaml
+jobs:
+  vuln-gate:
+    uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed).
+
+---
+
 ## Composite Action Reference
 
 Call composite actions directly in job steps:
@@ -655,7 +689,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 18 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`) and `gateway-routing` (`render.sh`) keep logic in a sibling script; the rest is inline bash.
+All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`) and `gateway-routing` (`render.sh`) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -716,6 +750,7 @@ All 18 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
+| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`github-token`, `repository`; output `critical-count`). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
 
 ---
 
