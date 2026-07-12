@@ -485,6 +485,8 @@ Builds, signs, and archives a React Native / native iOS app on a macOS runner, e
 
 **Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64`, `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` (and optional `ios-team-id`).
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the `release_with_environment` job's critical-vuln gate fails closed (blocks the TestFlight upload) on every run — the `build` job is unaffected either way.
+
 **Outputs:** `version`, `build-number`, `ipa-file`.
 
 ```yaml
@@ -503,6 +505,7 @@ jobs:
       appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
       appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** manual signing only (automatic signing needs an interactive Xcode session); CocoaPods spec repo + Pods dir are cached on `Podfile.lock`; ccache speeds ObjC/C++ rebuilds (no Swift benefit). Use the **iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
@@ -532,6 +535,8 @@ Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishe
 
 **Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the `release_with_environment` job's critical-vuln gate fails closed (blocks the Play upload) on every run — the `build` job is unaffected either way.
+
 **Outputs:** `version-name`, `version-code`, `aab-file`.
 
 ```yaml
@@ -551,6 +556,7 @@ jobs:
       android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
       android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** Gradle uses `gradle/actions/setup-gradle@v5` (do not use the archived `gradle/gradle-build-action`, and do not add `cache: gradle` to `setup-java` — it conflicts). The workflow sets `org.gradle.caching=true` itself, so callers no longer need to. NDK `27.1.12297006` (r27b LTS) is pinned and installed via `sdkmanager` (not `actions/cache` — the Android SDK dir is root-owned). Use the **Android App CI/CD** starter template for a `workflow_dispatch` entry point.
