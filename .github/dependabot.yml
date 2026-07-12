@@ -10,9 +10,9 @@ updates:
     target-branch: "main"
     schedule:
       interval: "weekly"
-      day: "friday"
+      day: "sunday"
       time: "06:00"
-      timezone: "UTC"
+      timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     groups:
       actions-minor-patch:
