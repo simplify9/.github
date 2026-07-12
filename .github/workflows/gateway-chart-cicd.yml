@@ -103,6 +103,9 @@ on:
         description: Token used by the tag job to create the release git tag. 
           Falls back to the built-in GITHUB_TOKEN when omitted.
         required: false
+      dependabot-alerts-token:
+        description: Token used to read Dependabot alerts
+        required: false
     outputs:
       version:
         description: Generated chart semantic version
