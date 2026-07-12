@@ -14,10 +14,13 @@ on:
   workflow_call:
     secrets:
       github-token:
-        description: 'Token with security-events:read on the calling repository. Pass secrets.GITHUB_TOKEN.'
+        description: 'Token with security-events:read on the calling repository. Pass
+          secrets.GITHUB_TOKEN.'
         required: true
 
-permissions: {}
+permissions:
+  contents: write
+  security-events: read
 
 jobs:
   check:
@@ -25,6 +28,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main

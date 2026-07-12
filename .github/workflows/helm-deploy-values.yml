@@ -193,13 +193,15 @@ on:
         required: false
 
       github-token:
-        description: "Token used to query Dependabot alerts for the critical-vuln gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
+        description: "Token used to query Dependabot alerts for the critical-vuln
+          gate (defaults to the caller's GITHUB_TOKEN with security-events:read)."
         required: false
 
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 
+  security-events: read
 jobs:
   critical-vuln-gate:
     if: ${{ github.ref_name == github.event.repository.default_branch }}
@@ -207,6 +209,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
@@ -224,7 +227,8 @@ jobs:
 
   deploy:
     needs: critical-vuln-gate
-    if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
+    if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || 
+      needs.critical-vuln-gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     # Optional GitHub Environment. Empty string => no environment binding, so

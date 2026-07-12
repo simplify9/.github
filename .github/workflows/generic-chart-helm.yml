@@ -232,7 +232,9 @@ on:
 
 # Deny-all by default; every job opts into exactly the scopes it needs below.
   workflow_dispatch:
-permissions: {}
+permissions:
+  contents: write
+  security-events: read
 
 # Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
 concurrency:
@@ -250,7 +252,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write
+      security-events: read
     outputs:
       version: ${{ steps.semver.outputs.version }}
       git-tag: ${{ steps.semver.outputs.git-tag }}
@@ -308,6 +311,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       security-events: read
+      contents: write
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
@@ -329,8 +333,9 @@ jobs:
     if: ${{ inputs.package-nuget }}
     timeout-minutes: 30
     permissions:
-      contents: read
+      contents: write
       packages: write   # publish to GitHub Packages feed when nuget-source targets pkg.github.com
+      security-events: read
     outputs:
       version: ${{ steps.nuget-semver.outputs.version }}
       git-tag: ${{ steps.nuget-semver.outputs.git-tag }}
@@ -426,8 +431,9 @@ jobs:
     timeout-minutes: 30
     needs: [version, nuget]
     permissions:
-      contents: read
+      contents: write
       packages: write   # push image to ghcr.io when falling back to GITHUB_TOKEN
+      security-events: read
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
@@ -507,12 +513,15 @@ jobs:
       ${{ !cancelled()
           && needs.version.result == 'success'
           && needs.build.result == 'success'
-          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result == 'skipped') }}
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped') }}
     environment: ${{ inputs.deploy-environment }}
     # Deny-all: this job only runs helm-generic against the cluster (kubeconfig
     # secret) — it never checks out code or calls the GitHub API, so it needs no
     # GITHUB_TOKEN scopes.
-    permissions: {}
+    permissions:
+      contents: write
+      security-events: read
     steps:
       - name: Announce deploy job
         env:
@@ -697,6 +706,7 @@ jobs:
       }}
     permissions:
       contents: write
+      security-events: read
     steps:
       - name: Tag new version on GitHub origin
         uses: simplify9/.github/.github/actions/tag-github-origin@main
