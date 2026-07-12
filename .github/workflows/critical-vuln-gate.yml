@@ -1,0 +1,41 @@
+# =============================================================================
+# Critical Dependabot Vulnerability Gate — reusable workflow
+# =============================================================================
+# Thin wrapper around the check-critical-vulns composite action. Called from:
+#   - workflow-templates/critical-vuln-check.yml (PR-time check, enforced via
+#     branch protection: required on main, present-but-not-required on develop)
+#   - workflow-templates/dependabot-auto-merge.yml (gates auto-merge)
+# Never called with on: push/pull_request itself — those triggers live only
+# in workflow-templates/, per this repo's convention.
+# =============================================================================
+name: Critical Dependabot Vulnerability Gate
+
+on:
+  workflow_call:
+    secrets:
+      github-token:
+        description: 'Token with security-events:read on the calling repository. Pass secrets.GITHUB_TOKEN.'
+        required: true
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          github-token: ${{ secrets.github-token }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          icon: '🔒'
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
