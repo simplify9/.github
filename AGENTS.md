@@ -76,6 +76,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `subosito/flutter-action` | `@v2` | Flutter SDK setup (Flutter iOS/Android workflows). Version selector via `flutter-version` input, default `3.x` |
 | `maxim-lobanov/setup-xcode` | `@v1` | iOS Xcode version selection |
 | `apple-actions/upload-testflight-build` | `@v5` | iOS TestFlight upload (App Store Connect API) — runs on `ubuntu-latest` |
+| `dependabot/fetch-metadata` | `@v2` | Reads Dependabot PR metadata (`update-type`, `package-ecosystem`) for the auto-merge template |
 | `r0adkll/upload-google-play` | `@v1` | Android Google Play upload |
 
 **Helm / kubectl CLI versions:** the composite actions (`helm-deploy`, `helm-deploy-s9generic`, `helm-package-push`) default their `helm-version` / `kubectl-version` inputs to `latest`. Some reusable workflows pin a specific CLI: `helm-deploy-values.yml` defaults Helm `v4.2.0` / kubectl `v1.33.0`; `gateway-chart-cicd.yml` defaults Helm `v4.2.2`. There is no single global CLI pin — check the specific workflow/action input.
