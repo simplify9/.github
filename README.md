@@ -457,7 +457,7 @@ CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git ta
 
 ### Mobile · iOS & Android
 
-There are two flavors: **React Native** (`ios-build.yml` / `android-build.yml`) and **Flutter** (`flutter-ios-build.yml` / `flutter-android-build.yml`). All four share the same shape — a **build** job (runs unconditionally) and a **release** job (`release_with_environment`) gated by `if: release-environment != '' && !disable-release` and bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the matching starter templates). The Flutter and RN iOS workflows reuse the same `ios-install-cert` / `ios-install-profile` composite actions for signing.
+There are two flavors: **React Native** (`ios-build.yml` / `android-build.yml`) and **Flutter** (`flutter-ios-build.yml` / `flutter-android-build.yml`). All four share the same shape — a **build** job that itself `needs` the critical-vuln gate (a critical alert blocks the build, not just the release, so CI never spends a runner building something that can't ship) and a **release** job (`release_with_environment`) gated on the input flags AND on both the build and the gate having actually succeeded (or the gate having been skipped), bound to a named GitHub Environment for approvals. Per-branch dev/prod selection is done by the `workflow_dispatch` caller (see the matching starter templates). The Flutter and RN iOS workflows reuse the same `ios-install-cert` / `ios-install-profile` composite actions for signing.
 
 ---
 
@@ -485,7 +485,7 @@ Builds, signs, and archives a React Native / native iOS app on a macOS runner, e
 
 **Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64`, `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` (and optional `ios-team-id`).
 
-**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the `release_with_environment` job's critical-vuln gate fails closed (blocks the TestFlight upload) on every run — the `build` job is unaffected either way.
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which now blocks the `build` job itself (not just the TestFlight upload) — no signing/archiving happens until the gate resolves.
 
 **Outputs:** `version`, `build-number`, `ipa-file`.
 
@@ -535,7 +535,7 @@ Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishe
 
 **Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
 
-**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the `release_with_environment` job's critical-vuln gate fails closed (blocks the Play upload) on every run — the `build` job is unaffected either way.
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which now blocks the `build` job itself (not just the Play upload) — no signing/building happens until the gate resolves.
 
 **Outputs:** `version-name`, `version-code`, `aab-file`.
 
@@ -587,6 +587,8 @@ Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `fl
 
 **Required secrets:** `ios-p12-base64`, `ios-p12-password`, `ios-mobileprovision-base64` (plus `appstore-api-key-id`, `appstore-issuer-id`, `appstore-api-private-key-base64` for the upload, and optional `ios-team-id`).
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which blocks the `build` job itself (not just the TestFlight upload) — no signing/archiving happens until the gate resolves.
+
 **Outputs:** `version`, `build-number`, `ipa-file`.
 
 ```yaml
@@ -607,6 +609,7 @@ jobs:
       appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
       appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** manual signing only — keychain/cert/profile install is delegated to the shared `ios-install-cert` / `ios-install-profile` composite actions, then the `pbxproj` is rewritten to manual signing (`Apple Distribution`) with fail-loud `grep` asserts and a generated `ExportOptions.plist`. The pub package cache is handled by `subosito/flutter-action`'s `cache: true` (no separate `actions/cache` step), and `ios/Pods` is cached on `Podfile.lock`; `pod install` deliberately avoids `deintegrate`/`--repo-update` to preserve the cache. Use the **Flutter iOS App CI/CD** starter template for a `workflow_dispatch` entry point.
@@ -639,6 +642,8 @@ Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbu
 
 **Required secrets:** `android-keystore-base64`, `android-keystore-password`, `android-key-alias`, `android-key-password`, `google-play-service-account-json`.
 
+**Recommended secret:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" — sourced from the org secret `DEPENDABOT_ALERTS_TOKEN`, **not** `GITHUB_TOKEN`, which cannot access the Dependabot Alerts API). Without it, the critical-vuln gate fails closed on every run, which blocks the `build` job itself (not just the Play upload) — no signing/building happens until the gate resolves.
+
 **Outputs:** `version-name`, `version-code`, `aab-file`.
 
 ```yaml
@@ -658,6 +663,7 @@ jobs:
       android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
       android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
 **Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 → 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK plumbing — Flutter owns the actual build — but the Gradle User Home is cached via `gradle/actions/setup-gradle@v5` (which applies to the `gradlew` Flutter invokes), and both jobs opt JS-based actions onto Node 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`. The keystore and generated `android/key.properties` are removed by an `always()` cleanup step. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.

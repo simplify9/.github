@@ -235,6 +235,17 @@ jobs:
     name: iOS Build
     runs-on: ${{ inputs.macos-runner }}
     timeout-minutes: 60
+    needs: critical-vuln-gate
+    # critical-vuln-gate is conditionally skipped (build-only runs, or
+    # release-environment unset), so 'skipped' must be allowed here or every
+    # build-only run would break. A gate failure (open critical alert) blocks
+    # the build itself, so CI stops wasting a macOS runner on a release that
+    # can't ship.
+    if: >-
+      ${{ !cancelled()
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped')
+      }}
     # Superseded builds on the same ref are cancelled to save expensive macOS
     # minutes. Scoped per caller workflow + ref so unrelated runs never collide.
     concurrency:
@@ -630,7 +641,20 @@ jobs:
   release_with_environment:
     name: iOS Release (TestFlight)
     needs: [build, critical-vuln-gate]
-    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    # FIX: the previous `if` only checked the input flags, never needs.*.result —
+    # since any custom `if` replaces GitHub's implicit success()-over-needs check,
+    # this meant a failed build OR a failed critical-vuln-gate (open critical
+    # alert) would NOT actually block this job from running the TestFlight
+    # upload. Both are now explicit; 'skipped' is allowed for the gate because
+    # it is conditionally skipped on build-only runs.
+    if: >-
+      ${{ !cancelled()
+          && inputs.release-environment != ''
+          && !inputs.disable-release
+          && needs.build.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ inputs.release-environment }}

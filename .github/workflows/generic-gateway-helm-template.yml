@@ -631,17 +631,23 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [version, nuget]
+    needs: [version, nuget, critical-vuln-gate]
     # packages: write covers the registry-password fallback to GITHUB_TOKEN when
     # pushing the image to GHCR; contents: read is for checkout.
     permissions:
       contents: write
       packages: write
       security-events: read
+    # critical-vuln-gate is added to needs so a critical alert blocks the build
+    # itself (not just the deploy step) and CI stops wasting build time on a
+    # release that can't ship. It is conditionally skipped (non-release runs),
+    # so 'skipped' must be allowed here or every non-release build would break.
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
           && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped')
+          && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
+      == 'skipped')
       }}
     outputs:
       docker-image: ${{ steps.docker.outputs.image-tags }}
