@@ -261,6 +261,7 @@ permissions:
   security-events: read
 jobs:
   critical-vuln-gate:
+    name: Dependabot Check
     # Only runs on the repo's actual default branch (its release/Prod path) --
     # matches the same skip pattern every other reusable workflow already
     # uses (is-release/github.ref_name checks), so develop/staging builds are

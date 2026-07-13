@@ -27,6 +27,7 @@ on:
 permissions:
   pull-requests: write
   contents: write
+  security-events: read
 
 jobs:
   vuln-gate:
