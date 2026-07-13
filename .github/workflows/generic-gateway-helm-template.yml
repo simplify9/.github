@@ -507,6 +507,7 @@ jobs:
             | Triggered by | ${{ github.actor }} |
 
   critical-vuln-gate:
+    name: Dependabot Check
     needs: version
     if: ${{ needs.version.outputs.is-release == 'true' }}
     runs-on: ubuntu-latest
