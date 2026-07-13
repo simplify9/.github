@@ -55,6 +55,7 @@ on:
 permissions:
   contents: write
   packages: write
+  security-events: read
 
 concurrency:
   group: cicd-${{ github.workflow }}-${{ github.ref }}
@@ -117,6 +118,8 @@ jobs:
       # ── Required for 'both' and 'chartmuseum' publish methods: ───────────────
       chartmuseum-username: ${{ secrets.CM_USER }}
       chartmuseum-password: ${{ secrets.CM_PASSWORD }}
+
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
       # ── Push the Docker image to a NON-GHCR registry? Provide these: ─────────
       # registry-username: ${{ secrets.DOCKERHUB_USERNAME }}

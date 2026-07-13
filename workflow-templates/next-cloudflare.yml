@@ -39,6 +39,7 @@ on:
 # API token; no write scopes are needed.
 permissions:
   contents: read
+  security-events: read
 
 concurrency:
   group: next-cf-${{ github.workflow }}-${{ github.ref }}
@@ -65,6 +66,7 @@ jobs:
     secrets:
       cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
   Prod:
     if: github.ref == 'refs/heads/main'
@@ -86,3 +88,4 @@ jobs:
     secrets:
       cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}

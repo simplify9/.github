@@ -50,6 +50,7 @@ on:
 permissions:
   contents: write
   packages: write
+  security-events: read
 
 # No concurrency block here: the reusable workflow (generic-chart-helm.yml)
 # already serializes runs per ref to protect its semver tag computation.
@@ -116,6 +117,7 @@ jobs:
       registry-password: ${{ secrets.MY_REGISTRY_TOKEN }}      # REPLACE secret name
       kubeconfig: ${{ secrets.MY_KUBECONFIG }}                 # REPLACE secret name
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
       # helm-set-secret-values: ${{ secrets.HELM_SET_SECRET_VALUES }}  # masked --set-string pairs
       # nuget-api-key: ${{ secrets.NUGET_API_KEY }}                    # only with package-nuget: true
       # nuget-source: ${{ secrets.NUGET_SOURCE }}
@@ -182,6 +184,7 @@ jobs:
       registry-password: ${{ secrets.MY_REGISTRY_TOKEN }}      # REPLACE
       kubeconfig: ${{ secrets.MY_KUBECONFIG }}                 # REPLACE
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
       # helm-set-secret-values: ${{ secrets.HELM_SET_SECRET_VALUES }}
       # nuget-api-key: ${{ secrets.NUGET_API_KEY }}
       # nuget-source: ${{ secrets.NUGET_SOURCE }}

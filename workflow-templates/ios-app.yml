@@ -32,6 +32,7 @@ on:
 
 permissions:
   contents: read
+  security-events: read
 
 concurrency:
   group: ios-${{ github.workflow }}-${{ github.ref }}
@@ -73,6 +74,7 @@ jobs:
       appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
       appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
   production:
     name: iOS Prod
@@ -109,3 +111,4 @@ jobs:
       appstore-api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
       appstore-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
       appstore-api-private-key-base64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}

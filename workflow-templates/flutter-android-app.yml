@@ -45,6 +45,7 @@ on:
 
 permissions:
   contents: read
+  security-events: read
 
 concurrency:
   group: android-${{ github.workflow }}-${{ github.ref }}
@@ -80,6 +81,7 @@ jobs:
       android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
       android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
   production:
     name: Android Prod
@@ -110,3 +112,4 @@ jobs:
       android-key-alias: ${{ secrets.ANDROID_KEY_ALIAS }}
       android-key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}
       google-play-service-account-json: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
