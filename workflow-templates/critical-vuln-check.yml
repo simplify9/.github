@@ -16,12 +16,23 @@
 #     - On `develop`: leave this check NOT required — it still shows as a
 #                     failing/red check (a visible warning) without blocking
 #                     the merge.
+#
+#   Uses pull_request_target, not pull_request: GitHub treats Dependabot's
+#   own PRs like fork PRs for secrets/token purposes -- a plain pull_request
+#   trigger gets NO repository secrets and a read-only GITHUB_TOKEN for a
+#   dependabot[bot]-authored PR, no matter what `permissions:` requests. That
+#   silently broke this gate for its actual primary purpose (confirmed live:
+#   every real Dependabot PR failed with "missing dependabot-alerts-token").
+#   pull_request_target evaluates from the trusted base branch instead, so
+#   secrets/write-token access work correctly. Safe here specifically because
+#   nothing in this workflow (or check-critical-vulns) ever checks out or
+#   executes the PR's own code -- it's a pure Dependabot Alerts API query.
 # =============================================================================
 name: Critical Vulnerability Check
 run-name: vuln-check-${{ github.event.pull_request.number }}
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main, develop]
 
 # critical-vuln-gate.yml's own job requests these two scopes -- a caller can

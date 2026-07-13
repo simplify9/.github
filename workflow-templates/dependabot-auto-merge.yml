@@ -17,11 +17,23 @@
 #   "Auto-merge" here means GitHub's native auto-merge feature: it still
 #   waits for the repo's actual required status checks (build/test) to pass
 #   before merging — this workflow does not bypass those.
+#
+#   Uses pull_request_target, not pull_request: every run of this workflow
+#   that actually matters is triggered by dependabot[bot] BY DEFINITION (both
+#   jobs gate on github.actor == 'dependabot[bot]'), and GitHub gives PRs from
+#   Dependabot NO repository secrets and a read-only GITHUB_TOKEN under a
+#   plain pull_request trigger -- same restriction as fork PRs, regardless of
+#   the permissions: block. That made both jobs fail-closed on every real
+#   Dependabot PR (confirmed live). pull_request_target evaluates from the
+#   trusted base branch, restoring real secrets/write-token access. Safe here
+#   specifically because neither job checks out or executes the PR's own
+#   code: fetch-metadata reads commit-message metadata via the API, and
+#   `gh pr merge` acts on the PR by URL.
 # =============================================================================
 name: Dependabot Auto-Merge
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main, develop]
 
 permissions:
