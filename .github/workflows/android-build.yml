@@ -261,7 +261,15 @@ permissions:
   security-events: read
 jobs:
   critical-vuln-gate:
-    if: ${{ inputs.release-environment != '' && !inputs.disable-release }}
+    # Only runs on the repo's actual default branch (its release/Prod path) --
+    # matches the same skip pattern every other reusable workflow already
+    # uses (is-release/github.ref_name checks), so develop/staging builds are
+    # never gated, same as everywhere else. build/release_with_environment
+    # already tolerate this job's 'skipped' result.
+    if: >-
+      ${{ inputs.release-environment != ''
+          && !inputs.disable-release
+          && github.ref_name == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
