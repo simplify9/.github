@@ -11,12 +11,22 @@
 #     - The update is a semver PATCH bump (never minor/major)
 #     - The ecosystem is npm, nuget, pub, bundler, or github-actions
 #       (NEVER docker — base image bumps always need manual review)
-#     - This repo currently has no open critical Dependabot alert (re-checked
-#       here explicitly — see workflow-templates/critical-vuln-check.yml's
-#       header for why this can't just `needs:` that file's job)
+#     - If (and only if) the PR targets main: this repo currently has no open
+#       critical Dependabot alert (re-checked here explicitly — see
+#       workflow-templates/critical-vuln-check.yml's header for why this
+#       can't just `needs:` that file's job)
 #   "Auto-merge" here means GitHub's native auto-merge feature: it still
 #   waits for the repo's actual required status checks (build/test) to pass
 #   before merging — this workflow does not bypass those.
+#
+#   The critical-alert check is scoped to main only, matching this repo's own
+#   two-layer enforcement policy: on develop, critical-vuln-check.yml is
+#   present but NOT required, so a human merging a patch bump into develop by
+#   hand is never blocked by an open alert. Auto-merge must not be stricter
+#   than that -- gating it on the same repo-wide alert for a develop-bound PR
+#   would silently refuse to arm auto-merge there for no enforced reason, and
+#   since Dependabot alerts only clear once a fix lands on the DEFAULT branch,
+#   an unrelated open alert could stall a develop-bound patch bump forever.
 #
 #   Uses pull_request_target, not pull_request: every run of this workflow
 #   that actually matters is triggered by dependabot[bot] BY DEFINITION (both
@@ -43,14 +53,21 @@ permissions:
 
 jobs:
   vuln-gate:
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    if: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main' }}
     uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
     secrets:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 
   auto-merge:
     needs: vuln-gate
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    # needs: vuln-gate normally skips this job if vuln-gate itself was skipped
+    # (base.ref != 'main') -- always() overrides that, then the boolean logic
+    # below re-applies the real gate: a develop-bound PR never needed
+    # vuln-gate to run at all, a main-bound PR still requires it to succeed.
+    if: |
+      always() &&
+      github.actor == 'dependabot[bot]' &&
+      (github.event.pull_request.base.ref != 'main' || needs.vuln-gate.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
