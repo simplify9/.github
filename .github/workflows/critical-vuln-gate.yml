@@ -7,6 +7,12 @@
 #   - workflow-templates/dependabot-auto-merge.yml (gates auto-merge)
 # Never called with on: push/pull_request itself — those triggers live only
 # in workflow-templates/, per this repo's convention.
+#
+# Passes github-token: secrets.GITHUB_TOKEN so check-critical-vulns can verify
+# npm alerts against the PR's own HEAD branch (see that action's header) --
+# this job's own `permissions: contents: write` already covers the read this
+# needs. Composite actions can't read the secrets context directly, so this
+# must be forwarded explicitly even though it's just the ambient token.
 # =============================================================================
 name: Critical Dependabot Vulnerability Gate
 
@@ -37,6 +43,7 @@ jobs:
         with:
           dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
           repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write job summary
         if: always()

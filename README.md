@@ -692,7 +692,7 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
-**Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed).
+**Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed). Also forwards `github-token: secrets.GITHUB_TOKEN` to `check-critical-vulns` so it can verify npm alerts against the PR's own branch — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock) below.
 
 ---
 
@@ -704,7 +704,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`) and `gateway-routing` (`render.sh`) keep logic in a sibling script; the rest is inline bash.
+All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py`, for its PR-branch npm verification — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -765,7 +765,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
-| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; output `critical-count`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
+| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; output `critical-count`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR's own HEAD branch lockfile (`parse_yarn_lock.py` sibling script for `yarn.lock`; `package-lock.json` handled inline via `jq`) — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
 
 ---
 
@@ -891,6 +891,51 @@ explicit branch-aware logic so it isn't skipped when `vuln-gate` itself was skip
 
 - **PR-time** (`critical-vuln-check.yml` + branch protection): on `main`, mark the check **required** in branch protection — merge is physically blocked while any critical alert is open. On `develop`, leave it present but **not required** — a visible red check, no block.
 - **Build-time** (embedded directly as an early job in 10 of the 11 other reusable workflows in this repo — everything except the chart-lint-only `gateway-chart-cicd.yml` — triggered on `push`, not `pull_request`): re-checks at actual deploy time. This is **not** subject to the Dependabot secrets restriction below (that restriction is specific to `pull_request`-family events; `push` never carries it), and it's the real safety net on any repo where branch protection can't enforce anything at all — e.g. private repos on a plan tier below GitHub Team/Enterprise, where classic branch protection is unavailable outright (`403: Upgrade to GitHub Pro`). The build-time gate still blocks an actual release even with zero branch protection configured.
+
+### PR-branch verification (npm only) — breaking the fix-your-own-block deadlock
+
+A critical alert only clears once its fix lands on the **default** branch — GitHub never
+re-scans a PR's own branch. That's a real deadlock on `main`: a PR that itself contains the
+fix for the only open critical alert could never merge, because the alert was still "open"
+by definition until that exact merge happened.
+
+`check-critical-vulns` breaks this for **npm** specifically. When it runs under
+`pull_request_target` (i.e. from `critical-vuln-gate.yml`, not the build-time embedded uses,
+which run on `push` and have no PR to compare against), it re-checks every open
+npm-ecosystem alert against the PR's own HEAD branch: it reads the flagged package's
+**lockfile** (`package-lock.json` or `yarn.lock` — not the manifest, which shows a requested
+range, not the resolved version) at the PR head ref, and if **every** resolved occurrence of
+that package falls outside the alert's `vulnerable_version_range`, that alert no longer
+counts against this PR. Checking every occurrence matters: the same package commonly
+resolves to different versions at different points in the dependency tree (confirmed live:
+`form-data` resolved to both a patched version nested under one dependency and a vulnerable
+version at the top level, in the same lockfile) — one unpatched occurrence still means the
+vulnerability is present.
+
+Version comparison uses the real `semver` npm package (`npx semver <version> -r <range>`),
+not string comparison — GitHub's `vulnerable_version_range` uses comma-separated AND clauses
+(e.g. `">= 1.0.0, < 2.3.4"`), converted to node-semver's space-separated form before evaluation.
+
+**Scope, deliberately narrow:** this only applies to the npm ecosystem for now (NuGet,
+Composer, pip, Maven, GitHub Actions, and Docker all still fail closed, exactly as before —
+a genuinely open, unrelated critical alert still blocks the PR, whatever ecosystem it's in).
+An org-wide audit (2026-07-14) found npm makes up 96% of open critical alerts here, so this
+covers the overwhelming majority of real cases; the rest still need the manual `fix_started`
+dismissal path (see **Known pitfalls** below) as a fallback.
+
+**Fails closed, always:** non-npm ecosystem, no lockfile match at the PR head, an
+unsupported/unrecognized lockfile format, a parse failure, or a missing `github-token` input
+— any of these leaves that alert counted as still-blocking, same as before this feature
+existed. Nothing here can silently let a genuinely-still-vulnerable PR merge.
+
+**Safety under `pull_request_target`:** this is pure static text parsing of the lockfile via
+the Contents API — it never checks out or executes the PR's own code (no `npm ci`, no
+`dotnet restore`, no package-manager invocation against untrusted content), so it doesn't
+reintroduce the code-injection risk `pull_request_target` is normally dangerous for.
+`github-token` (forwarded as `secrets.GITHUB_TOKEN` from `critical-vuln-gate.yml`, which
+already grants `contents: write`) is used only to read the lockfile — composite actions
+can't read the `secrets` context directly, so it must be passed in explicitly even though
+it's just the workflow's own ambient token.
 
 ### Secrets — why a real PAT, not `GITHUB_TOKEN`
 
