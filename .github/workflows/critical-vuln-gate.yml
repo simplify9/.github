@@ -39,7 +39,7 @@ jobs:
       contents: write
     steps:
       - name: Check for open critical Dependabot alerts
-        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        uses: simplify9/.github/.github/actions/check-critical-vulns@feat/npm-pr-branch-vuln-verification
         with:
           dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
           repository: ${{ github.repository }}
