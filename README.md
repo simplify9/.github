@@ -870,11 +870,22 @@ reusable-workflow/template pairing. Both caller templates trigger on `pull_reque
 - Actor is `dependabot[bot]` (both jobs gate on this explicitly)
 - [`dependabot/fetch-metadata@v2`](https://github.com/dependabot/fetch-metadata) reports a **patch**-level semver bump (never minor/major)
 - Ecosystem is npm, NuGet, pub, Bundler, or GitHub Actions — **never Docker** (base-image bumps always need a human)
-- No open critical Dependabot alert on the repo (re-checked here explicitly via its own `vuln-gate` job — reusable-workflow jobs can't `needs:` a job defined in a *different* workflow file, so this can't just piggyback on the check template's result)
+- **If, and only if, the PR targets `main`:** no open critical Dependabot alert on the repo (re-checked here explicitly via its own `vuln-gate` job — reusable-workflow jobs can't `needs:` a job defined in a *different* workflow file, so this can't just piggyback on the check template's result)
 
 "Auto-merge" arms GitHub's native auto-merge feature (`gh pr merge --auto --squash`) — it
 still waits for the repo's own required status checks (build/test) to pass before actually
 merging. It does not bypass CI.
+
+**Why the critical-alert check is scoped to `main` only:** matches the two-layer policy
+below — `develop`'s branch protection never requires `critical-vuln-check.yml`, so a human
+merging a patch bump into `develop` by hand is never blocked by an open alert. Auto-merge
+must not be stricter than a human would be: gating it on the same repo-wide alert for a
+`develop`-bound PR would refuse to arm auto-merge there for no enforced reason, and since
+alerts only clear once a fix lands on the **default** branch, an unrelated open alert could
+stall a `develop`-bound patch bump indefinitely. `vuln-gate`'s own `if:` now checks
+`github.event.pull_request.base.ref == 'main'`; `auto-merge`'s `if:` uses `always()` plus
+explicit branch-aware logic so it isn't skipped when `vuln-gate` itself was skipped for a
+`develop`-bound PR, while still requiring `vuln-gate` to have succeeded for a `main`-bound one.
 
 ### Enforcement is two layers, deliberately redundant
 
