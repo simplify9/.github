@@ -771,9 +771,9 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 
 ## Dependabot
 
-This is the org-wide reference for how Dependabot is implemented across every `simplify9`,
-`Mabda-jo`, and `AVTR-Recycling-Treatment` repository. It covers two genuinely different
-systems that are easy to conflate — read the first section before anything else.
+This is the org-wide reference for how Dependabot is implemented across every `simplify9`
+repository. It covers two genuinely different systems that are easy to conflate — read the
+first section before anything else.
 
 ### Two separate systems
 
@@ -837,7 +837,7 @@ groups:
 ```
 
 A grouped batch of minor+patch bumps opens as **one** PR and counts as **one** toward
-`open-pull-requests-limit` — this is what keeps PR volume manageable at 243-repo scale.
+`open-pull-requests-limit` — this is what keeps PR volume manageable at org scale.
 
 ### `open-pull-requests-limit` — how it actually behaves
 
@@ -920,8 +920,7 @@ its `permissions:` block** (`critical-vuln-check.yml`: `contents: write`,
 
 ### Current scope
 
-- Deployed to every active repo across three orgs: `simplify9`, `Mabda-jo`, `AVTR-Recycling-Treatment`.
-- Two repos still need `DEPENDABOT_ALERTS_TOKEN` added manually (requires a real org/repo-admin-issued PAT or App token — not something a workflow can self-provision).
+- Deployed to every active repo in the `simplify9` org.
 - Repos with a genuine open critical alert correctly gate `main` (or show a non-blocking warning on `develop`) until the alert is resolved or dismissed — this is expected behavior, not a bug.
 
 ---
