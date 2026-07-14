@@ -31,7 +31,9 @@
   - [Mobile · iOS & Android](#mobile--ios--android)
   - [Security](#security)
 - [Composite Action Reference](#composite-action-reference)
+- [Dependabot](#dependabot)
 - [Core Architecture & Conventions](#core-architecture--conventions)
+- [Repository Metadata Standard](#repository-metadata-standard)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
@@ -767,6 +769,163 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 
 ---
 
+## Dependabot
+
+This is the org-wide reference for how Dependabot is implemented across every `simplify9`,
+`Mabda-jo`, and `AVTR-Recycling-Treatment` repository. It covers two genuinely different
+systems that are easy to conflate — read the first section before anything else.
+
+### Two separate systems
+
+**1. The Dependabot *service*.** Not a GitHub Actions workflow — a backend GitHub runs on
+your behalf. It reads `.github/dependabot.yml` from a repo's **default branch only**. This
+is fixed and non-configurable: the file's own `target-branch:` field controls where
+*update* PRs get opened, never where the config file itself must live. On the schedule you
+set, the service:
+
+- Parses manifest files (`package.json`, `*.csproj`, `Dockerfile`, `pubspec.yaml`, `Gemfile`, `action.yml`, …)
+- Diffs current versions against the registry's latest and against the GitHub Advisory Database
+- Opens one PR per update (or per group) directly as `dependabot[bot]`, based on/against whatever `target-branch:` says
+
+Two independent triggers feed it, both toggled per-repo in **Settings → Code security**:
+
+- **Version updates** — scheduled (the `schedule:` block below), routine bumps regardless of vulnerability status.
+- **Security updates** — event-driven, fires immediately when a new advisory affecting something in the dependency graph is published, independent of schedule.
+
+**2. GitHub Actions.** The workflows that *react* to what the service produces — this is
+where the gate/auto-merge logic and the one non-obvious secrets restriction (below) live.
+
+### The three-file pattern
+
+Every onboarded repo gets the same three files:
+
+| File | Role |
+|---|---|
+| `.github/dependabot.yml` | Service config — which ecosystems, schedule, limits, grouping. Category-specific, rendered from a template below. |
+| `.github/workflows/critical-vuln-check.yml` | PR-time gate — see [Starter Templates](#starter-templates) / [`critical-vuln-gate.yml`](#critical-vuln-gateyml). |
+| `.github/workflows/dependabot-auto-merge.yml` | Auto-merge for safe bumps — see below. |
+
+Both workflow files are thin callers of this repo's [`critical-vuln-gate.yml`](#critical-vuln-gateyml)
+reusable workflow, which wraps the [`check-critical-vulns`](#composite-action-reference)
+composite action — one source of truth reused at three call sites: the PR-time gate, the
+build-time gate embedded in 10 of the 11 other reusable workflows in this repo, and as a
+dependency of auto-merge.
+
+### `dependabot.yml` templates (`dependabot-templates/`)
+
+Ready-made per-category configs live in [`dependabot-templates/`](./dependabot-templates)
+for copying into a consumer repo, with `{{TARGET_BRANCH}}` replaced by `develop` (if the
+repo has that branch) or the repo's actual default branch otherwise:
+
+| Template | Ecosystems | Schedule (all `Asia/Amman`) | Primary limit | Docker/Actions limit |
+|---|---|---|---|---|
+| `nuget-api.yml` | nuget, docker, github-actions | Monday 06:00 | 10 | 5 |
+| `npm-frontend.yml` | npm, docker, github-actions | Tuesday 06:00 | 10 | 5 |
+| `react-native-mobile.yml` | npm, bundler, github-actions | Wednesday 06:00 | 10 | 5 |
+| `flutter-mobile.yml` | pub, github-actions | Wednesday 06:00 | 10 | 5 |
+| `infra-actions-only.yml` | github-actions, docker | Thursday 06:00 | 5 | 5 |
+| `github-repo.yml` | github-actions (`/` + `/.github/actions/*`) | Sunday 06:00 | 5 | — |
+
+Schedule days are deliberately staggered by category (and land on the `Asia/Amman`
+Sunday–Thursday work week) so Dependabot PR volume doesn't land on every repo the same
+morning. Every primary-ecosystem block also groups same-update-type bumps:
+
+```yaml
+groups:
+  npm-minor-patch:      # (or nuget-/pub-/actions-minor-patch, per ecosystem)
+    update-types: ["minor", "patch"]
+```
+
+A grouped batch of minor+patch bumps opens as **one** PR and counts as **one** toward
+`open-pull-requests-limit` — this is what keeps PR volume manageable at 243-repo scale.
+
+### `open-pull-requests-limit` — how it actually behaves
+
+- Scoped **per `updates:` block** (i.e., per ecosystem + directory + branch), not per repo — a repo with 3 `updates:` blocks has 3 independent limits.
+- Only throttles **version updates**. Security updates always fire regardless of how many PRs are already open — the limit never blocks a real vulnerability fix.
+- It doesn't queue skipped updates — Dependabot just doesn't open a new PR for that slot until an existing one is closed or merged, then backfills on the next scheduled run (or immediately for security updates).
+- Closing a PR without merging does **not** permanently suppress that dependency version — Dependabot will reopen it on the next run unless you comment `@dependabot ignore this major/minor version` (or this dependency) on the PR, or add it to the config's `ignore:` list.
+
+### Where the file must live vs. `target-branch`
+
+Many repos have a `develop` branch that diverges from `main`. `target-branch` is set to
+`develop` for these, so Dependabot's own update PRs land where normal dev flow expects
+them. But `dependabot.yml` itself — the file the service reads to know `target-branch`
+exists at all — **must be committed to the default branch**, always, regardless of what
+`target-branch` says inside it. These are two independent facts that are easy to conflate:
+"which branch gets the file commit" (always default) vs. "what the file's `target-branch`
+field says" (`develop`, when it exists). Committing the config to `develop` instead of the
+default branch leaves it completely undiscovered by the service — no error, no PRs, just
+silence.
+
+### PR-time gate & auto-merge
+
+See [`critical-vuln-gate.yml`](#critical-vuln-gateyml) and the **Critical Vulnerability
+Check** / **Dependabot Auto-Merge** rows in [Starter Templates](#starter-templates) for the
+reusable-workflow/template pairing. Both caller templates trigger on `pull_request_target`
+(not `pull_request` — see **Known pitfalls** below), scoped to `branches: [main, develop]`.
+
+**`dependabot-auto-merge.yml` merges a Dependabot PR only when all of:**
+
+- Actor is `dependabot[bot]` (both jobs gate on this explicitly)
+- [`dependabot/fetch-metadata@v2`](https://github.com/dependabot/fetch-metadata) reports a **patch**-level semver bump (never minor/major)
+- Ecosystem is npm, NuGet, pub, Bundler, or GitHub Actions — **never Docker** (base-image bumps always need a human)
+- No open critical Dependabot alert on the repo (re-checked here explicitly via its own `vuln-gate` job — reusable-workflow jobs can't `needs:` a job defined in a *different* workflow file, so this can't just piggyback on the check template's result)
+
+"Auto-merge" arms GitHub's native auto-merge feature (`gh pr merge --auto --squash`) — it
+still waits for the repo's own required status checks (build/test) to pass before actually
+merging. It does not bypass CI.
+
+### Enforcement is two layers, deliberately redundant
+
+- **PR-time** (`critical-vuln-check.yml` + branch protection): on `main`, mark the check **required** in branch protection — merge is physically blocked while any critical alert is open. On `develop`, leave it present but **not required** — a visible red check, no block.
+- **Build-time** (embedded directly as an early job in 10 of the 11 other reusable workflows in this repo — everything except the chart-lint-only `gateway-chart-cicd.yml` — triggered on `push`, not `pull_request`): re-checks at actual deploy time. This is **not** subject to the Dependabot secrets restriction below (that restriction is specific to `pull_request`-family events; `push` never carries it), and it's the real safety net on any repo where branch protection can't enforce anything at all — e.g. private repos on a plan tier below GitHub Team/Enterprise, where classic branch protection is unavailable outright (`403: Upgrade to GitHub Pro`). The build-time gate still blocks an actual release even with zero branch protection configured.
+
+### Secrets — why a real PAT, not `GITHUB_TOKEN`
+
+The Dependabot Alerts REST API (`GET /repos/{owner}/{repo}/dependabot/alerts`) rejects the
+ephemeral Actions `GITHUB_TOKEN` outright ("Resource not accessible by integration") —
+confirmed by live testing, not a `permissions:` scoping issue. No amount of `permissions:`
+configuration anywhere in the call chain fixes it. `DEPENDABOT_ALERTS_TOKEN` — a PAT or
+GitHub App installation token with **"Dependabot alerts: read"** — must be forwarded
+explicitly through every caller in the chain (`secrets: inherit` does not apply to custom
+secrets crossing a `workflow_call` boundary the same way it does for `GITHUB_TOKEN`).
+Missing/empty token → the gate fails closed with an explicit `Missing dependabot-alerts-token`
+error rather than silently passing.
+
+### Known pitfalls (already fixed org-wide — do not reintroduce)
+
+**1. `pull_request` silently strips secrets from Dependabot's own PRs.** GitHub treats any
+PR authored by `dependabot[bot]` like a fork PR for token/secrets purposes: a plain
+`pull_request` trigger gets **zero repository secrets and a read-only `GITHUB_TOKEN`**, no
+matter what `permissions:` requests — and since both gate workflows exist specifically to
+react to Dependabot's own PRs, this broke their entire reason for existing. It went
+unnoticed as long as testing only exercised human-authored PRs. Fix: both workflows use
+`pull_request_target` instead, which evaluates from the trusted base branch and gets full
+secrets/token access. This is safe here specifically because neither workflow ever checks
+out or executes the PR's own code — every step is a pure API call (Dependabot Alerts API,
+PR metadata via `fetch-metadata`, `gh pr merge` by URL) — which is exactly the case where
+`pull_request_target` doesn't carry its usual code-injection risk. **Never revert either
+gate template back to a plain `pull_request` trigger.**
+
+**2. A missing `permissions:` block causes total, invisible silence — not a loud failure.**
+`critical-vuln-gate.yml`'s own job requests `contents: write` + `security-events: read`. A
+reusable-workflow call can only **narrow** permissions from what its caller grants, never
+widen them — so a caller file missing its own top-level `permissions:` block doesn't fail
+at runtime, it fails to **parse**, and GitHub never triggers the workflow at all: no error,
+no failed check, nothing in the Actions tab, zero run history. The only symptom is a repo
+with zero check runs where there should be dozens. **Every caller template copy must keep
+its `permissions:` block** (`critical-vuln-check.yml`: `contents: write`,
+`security-events: read`; `dependabot-auto-merge.yml`: adds `pull-requests: write`).
+
+### Current scope
+
+- Deployed to every active repo across three orgs: `simplify9`, `Mabda-jo`, `AVTR-Recycling-Treatment`.
+- Two repos still need `DEPENDABOT_ALERTS_TOKEN` added manually (requires a real org/repo-admin-issued PAT or App token — not something a workflow can self-provision).
+- Repos with a genuine open critical alert correctly gate `main` (or show a non-blocking warning on `develop`) until the alert is resolved or dismissed — this is expected behavior, not a bug.
+
+---
+
 ## Core Architecture & Conventions
 
 ### Two-Layer Pattern
@@ -846,6 +1005,49 @@ with:
 | `r0adkll/upload-google-play` | `@v1` |
 
 Helm/kubectl CLI: the deploy/package actions default to `latest`; some workflows pin (`helm-deploy-values.yml`: Helm `v4.2.0` / kubectl `v1.33.0`; `gateway-chart-cicd.yml`: Helm `v4.2.2`). `gradle/actions/setup-gradle` is pinned to `@v5`; do not switch to the archived `gradle/gradle-build-action` and do not add `cache: gradle` to `setup-java` (it conflicts with `setup-gradle`).
+
+---
+
+## Repository Metadata Standard
+
+Every active repo in the org **must** have a one-line **description** and 3–6 **topics**.
+They are the org's lightweight service catalog: the repo list becomes self-explanatory,
+and GitHub search / the API can filter by facet (e.g. `org:simplify9 topic:api topic:dotnet`,
+`org:simplify9 topic:mobile`).
+
+### Description
+
+- One sentence, sentence case, **no trailing period**, ≤ 120 characters.
+- Says what the repo **is** and **for which product**: `Backend REST API for the <Product> platform` — never `<Product> repo.`
+- No secrets, hostnames, or contract details — descriptions are visible to every org member.
+
+### Topics
+
+3–6 lowercase topics, one per facet, in this order (minimum 2 only where a facet is
+genuinely unknowable — empty stubs, org-config repos):
+
+| # | Facet | Values |
+|---|-------|--------|
+| 1 | Product / client | The product prefix of the repo name (lowercase). Org-level repos (`SW-*` libraries, `infrastructure-*`, this repo) use `simplify9` |
+| 2 | Sub-product | Only when present in the name (e.g. `iot`, `last-mile`) |
+| 3 | Component (exactly one) | `api`, `web`, `website`, `mobile`, `cms`, `library`, `integration`, `infrastructure`, `docs`, `desktop`, `monorepo`, `data` |
+| 4 | Stack (1–2) | `dotnet`, `react`, `nextjs`, `react-native`, `expo`, `flutter`, `nodejs`, `nestjs`, `strapi`, `medusa`, `php`, `laravel`, `python`, `java`, `kotlin`, `swift`, `kubernetes`, `helm`, `terraform`, `ansible`, `rabbitmq`, `mqtt`, `elasticsearch`, … |
+| 5 | Lifecycle (when true) | `legacy`, `poc`, `nuget`, `open-source` |
+
+Example (public library repo): **SW-CloudFiles** → description
+`.NET abstraction over cloud file storage providers (S3, Azure, GCS, OCI) using streams and ASP.NET Core DI`,
+topics `simplify9 library dotnet nuget open-source`.
+
+**Rules:**
+
+- Controlled vocabulary only — new topics require updating the standard first. A
+  half-consistent taxonomy is worse than none.
+- Public repos may add up to 3 extra ecosystem topics (e.g. `actions`, `reusable-workflows`)
+  for external discoverability.
+- **New repos must be created with description + topics.** Drift is corrected with
+  [`scripts/backfill-repo-metadata.py`](./scripts/backfill-repo-metadata.py) (dry-run by
+  default, `--apply` to write), driven by an internal reviewed CSV — the mapping CSV and
+  the full client vocabulary are internal-only and are **not** committed to this public repo.
 
 ---
 
