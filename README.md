@@ -845,12 +845,29 @@ groups:
 A grouped batch of minor+patch bumps opens as **one** PR and counts as **one** toward
 `open-pull-requests-limit` — this is what keeps PR volume manageable at org scale.
 
+### Labels — explicit `labels:` requires the label to already exist
+
+Every template above sets `labels:` explicitly (`dependencies` plus one ecosystem-specific
+label — `npm`, `docker`, `nuget`, `github-actions`, `pub`, or `fastlane`). This is a real
+GitHub quirk, not a bug in the templates: if `dependabot.yml` omits `labels:` entirely,
+Dependabot auto-applies (and auto-creates) a generic `dependencies` label on its own — but
+the moment you specify `labels:` yourself, that auto-creation stops. Dependabot then requires
+every listed label to already exist in the repo; if one doesn't, it posts a comment ("The
+following labels could not be found: ... Please create them before Dependabot can add them to
+a pull request") and simply skips labeling that PR. This is cosmetic, not a gate failure — the
+PR itself still opens and is still gated/auto-merged normally.
+
+Since a repo's label set isn't created by this rollout, every one of the 7 labels above needs
+to exist before its first Dependabot PR opens. Any newly onboarded repo needs the same
+one-time label creation if it doesn't already have them — creating a label a given repo
+doesn't actually reference is harmless, it just sits unused.
+
 ### `open-pull-requests-limit` — how it actually behaves
 
 - Scoped **per `updates:` block** (i.e., per ecosystem + directory + branch), not per repo — a repo with 3 `updates:` blocks has 3 independent limits.
 - Only throttles **version updates**. Security updates always fire regardless of how many PRs are already open — the limit never blocks a real vulnerability fix.
 - It doesn't queue skipped updates — Dependabot just doesn't open a new PR for that slot until an existing one is closed or merged, then backfills on the next scheduled run (or immediately for security updates).
-- Closing a PR without merging does **not** permanently suppress that dependency version — Dependabot will reopen it on the next run unless you comment `@dependabot ignore this major/minor version` (or this dependency) on the PR, or add it to the config's `ignore:` list.
+- Closing a PR without merging does **not** reliably regenerate it on the next scheduled run — confirmed by live testing: a plain close deletes Dependabot's own branch and Dependabot states it won't notify again about that release until a newer version ships, with no guaranteed reopen path once the branch is gone. `@dependabot ignore this major/minor version` (or this dependency) — or the config's `ignore:` list — is the actual mechanism for permanently suppressing a version; that is not what happens by default on a plain close. To force Dependabot to re-evaluate an **existing** PR (e.g. under a newly fixed pipeline) with zero risk of losing it, comment `@dependabot rebase`: it force-pushes onto the same PR/branch, never closes or deletes anything, and re-triggers `pull_request_target` so the PR gets fully re-checked. Only actually close/delete a PR when Dependabot itself asks for it (see **Orphaned PRs** below) or you're deliberately accepting the loss of that specific version.
 
 ### Where the file must live vs. `target-branch`
 
@@ -863,6 +880,31 @@ exists at all — **must be committed to the default branch**, always, regardles
 field says" (`develop`, when it exists). Committing the config to `develop` instead of the
 default branch leaves it completely undiscovered by the service — no error, no PRs, just
 silence.
+
+### Orphaned PRs — when a `dependabot.yml` entry changes shape
+
+Dependabot matches an open PR back to the specific `dependabot.yml` entry that created it —
+by `package-ecosystem` + `directory`/`directories` + `target-branch`, not by name or position
+in the file. If that entry's identity changes after the PR was opened (adding an explicit
+`target-branch`, restructuring `directories`, splitting or merging ecosystem blocks),
+Dependabot can no longer match the old PR to any current entry. It won't rebase or update
+that PR; instead it posts: "The dependabot.yml entry that created this PR has been deleted so
+this PR can't be rebased. Please close the PR so Dependabot can create a new one with the
+current dependabot.yml."
+
+This is the **one case where a plain close is safe and Dependabot-sanctioned** — the opposite
+of the general close behavior above. Dependabot is explicitly asking for the close because it
+will recreate the PR fresh under the current config, not because the version is being
+suppressed. Live-tested at rollout scale: rolling out an explicit `target-branch` org-wide
+orphaned a real batch of pre-existing PRs across two sweeps, all closed with zero recreation
+issues.
+
+Because this comment only appears after Dependabot has actually tried and failed to match an
+entry (e.g. in response to `@dependabot rebase`), a config change doesn't retroactively
+surface every orphaned PR by itself — something has to prompt Dependabot to re-check each PR
+first. Scan open Dependabot PRs' own comments for this exact message to find every orphaned
+PR org-wide, rather than assuming a config change orphaned nothing just because no comments
+have appeared yet.
 
 ### PR-time gate & auto-merge
 
@@ -979,6 +1021,15 @@ no failed check, nothing in the Actions tab, zero run history. The only symptom 
 with zero check runs where there should be dozens. **Every caller template copy must keep
 its `permissions:` block** (`critical-vuln-check.yml`: `contents: write`,
 `security-events: read`; `dependabot-auto-merge.yml`: adds `pull-requests: write`).
+
+**3. Bulk `@dependabot rebase` (or any mass PR-comment action) hits GitHub's secondary rate
+limit far sooner than bulk file commits do.** Comment/issue-creation endpoints are far more
+aggressively throttled than the Contents API (`PUT .../contents/{path}`, used by the
+`packages: write` and permissions-block rollouts above) — those never tripped this. Even a
+handful of concurrent workers posting comments can trip a rolling-window secondary limit that
+then blocks further comment creation regardless of how slowly you retry afterward. Keep bulk
+comment-posting single-threaded, paced at 2+ seconds between requests, and don't run other
+write-heavy scripts concurrently with it — they likely share the same abuse-detection budget.
 
 ### Current scope
 
