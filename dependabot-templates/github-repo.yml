@@ -15,8 +15,10 @@ updates:
       timezone: "Asia/Amman"
     open-pull-requests-limit: 5
     groups:
-      actions-minor-patch:
-        update-types: ["minor", "patch"]
+      actions-patch:
+        update-types: ["patch"]
+      actions-minor:
+        update-types: ["minor"]
     labels:
       - "dependencies"
       - "github-actions"

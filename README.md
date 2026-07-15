@@ -834,16 +834,25 @@ repo has that branch) or the repo's actual default branch otherwise:
 
 Schedule days are deliberately staggered by category (and land on the `Asia/Amman`
 Sunday–Thursday work week) so Dependabot PR volume doesn't land on every repo the same
-morning. Every primary-ecosystem block also groups same-update-type bumps:
+morning. Every primary-ecosystem block also groups bumps **by semver level, kept separate**:
 
 ```yaml
 groups:
-  npm-minor-patch:      # (or nuget-/pub-/actions-minor-patch, per ecosystem)
-    update-types: ["minor", "patch"]
+  npm-patch:      # (or nuget-/pub-/actions-patch, per ecosystem)
+    update-types: ["patch"]
+  npm-minor:      # (or nuget-/pub-/actions-minor, per ecosystem)
+    update-types: ["minor"]
 ```
 
-A grouped batch of minor+patch bumps opens as **one** PR and counts as **one** toward
+Patch bumps bundle into one PR, minor bumps bundle into a separate PR — the two are
+deliberately never mixed into the same group, so a patch-only release isn't held up
+behind an unrelated minor bump (or vice versa) in review. **Major bumps are never
+grouped at all** — each major bump always opens as its own individual PR, since combining
+major (potentially breaking) bumps into a shared PR risks masking which specific dependency
+needs the closer review. A grouped PR still counts as **one** toward
 `open-pull-requests-limit` — this is what keeps PR volume manageable at org scale.
+`docker` and `bundler` entries have no `groups:` block at all, so their updates were
+already one-PR-per-dependency before this distinction mattered.
 
 ### Labels — explicit `labels:` requires the label to already exist
 
