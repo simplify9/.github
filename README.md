@@ -1040,10 +1040,45 @@ then blocks further comment creation regardless of how slowly you retry afterwar
 comment-posting single-threaded, paced at 2+ seconds between requests, and don't run other
 write-heavy scripts concurrently with it — they likely share the same abuse-detection budget.
 
+### Patch/minor group split — rolled out org-wide
+
+Every grouped ecosystem (`npm`, `nuget`, `pub`, `github-actions` — see **`dependabot.yml`
+templates** above) originally grouped `["minor", "patch"]` bumps into one shared PR. Rolled
+out org-wide as a plain config edit to each repo's default-branch `dependabot.yml` (no code
+change, so pushed with `[skip ci]` to avoid triggering all 242 repos' build/deploy pipelines
+for zero code reason): each `{ecosystem}-minor-patch` group split into two —
+`{ecosystem}-patch` (patch only) and `{ecosystem}-minor` (minor only). `docker` and `bundler`
+were never grouped and are unaffected — they were already one-PR-per-dependency.
+
+**Side effect on auto-merge coverage, not just PR hygiene:** `dependabot/fetch-metadata`
+reports a grouped PR's update-type as the *highest* semver level present in the group. Under
+the old combined group, a batch that was mostly patch bumps plus a single minor bump would
+report as `minor` — never eligible for [auto-merge](#pr-time-gate--auto-merge) — even though
+most of its contents were trivial. Since `{ecosystem}-patch` groups are now patch-only by
+construction, a genuinely all-patch batch reports correctly as `patch` and **now auto-merges
+where it previously wouldn't have** (still subject to the existing eligibility rules above —
+required checks, main-only critical-alert gate, never Docker).
+
+**Renaming the group is itself a `dependabot.yml` entry identity change** — every PR still
+open under the old `{ecosystem}-minor-patch` group name became orphaned by this rollout (see
+**Orphaned PRs** above) and was closed for Dependabot to recreate fresh under the new groups.
+Any future change to a group's name/`update-types` will orphan its in-flight PRs the same
+way — expect and budget for that scan-and-close step as part of the change, not as a surprise
+afterward.
+
+**`dependabot.yml` must not exist on `develop`, only the default branch** (reiterating
+**Where the file must live vs. `target-branch`** above) — a rollout mistake earlier in this
+project's history left a stray copy on `develop` in 131 repos. It was inert (Dependabot never
+reads it from there) but if `develop` were later merged into `main` through a normal
+merge/PR, that stale copy could have silently overwritten the current, correct config. Fixed
+by deleting the stray copies outright rather than keeping them in sync — there is never a
+reason for this file to exist outside the default branch.
+
 ### Current scope
 
 - Deployed to every active repo in the `simplify9` org.
 - Repos with a genuine open critical alert correctly gate `main` (or show a non-blocking warning on `develop`) until the alert is resolved or dismissed — this is expected behavior, not a bug.
+- Patch and minor bumps group separately per ecosystem (never combined); major bumps are always individual, ungrouped PRs.
 
 ---
 
