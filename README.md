@@ -834,7 +834,30 @@ repo has that branch) or the repo's actual default branch otherwise:
 
 Schedule days are deliberately staggered by category (and land on the `Asia/Amman`
 Sunday–Thursday work week) so Dependabot PR volume doesn't land on every repo the same
-morning. Every primary-ecosystem block also groups bumps **by semver level, kept separate**:
+morning.
+
+### Cooldown — explicit, tuned per semver level
+
+GitHub made a repo-wide `cooldown` default-on for every Dependabot user org-wide, starting
+2026-07-14: a flat 3-day wait after a version is published before Dependabot opens a
+*version-update* PR for it (security updates are exempt and still fire immediately). Every
+template sets this explicitly rather than relying on the silent uniform default, so the wait
+scales with how much a bump should be trusted to have surfaced problems already:
+
+```yaml
+cooldown:
+  default-days: 3
+  semver-patch-days: 1
+  semver-minor-days: 3
+  semver-major-days: 7
+```
+
+Patch bumps move fast (low risk, most value in landing quickly); major bumps get a full
+week of soak time before we even open a PR for them, on top of never being auto-merged
+regardless. This applies to every `updates:` entry (primary ecosystem, `docker`,
+`github-actions`) in every template — cooldown is scoped per-entry, not repo-wide.
+
+Every primary-ecosystem block also groups bumps **by semver level, kept separate**:
 
 ```yaml
 groups:
