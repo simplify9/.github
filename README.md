@@ -925,7 +925,7 @@ reusable-workflow/template pairing. Both caller templates trigger on `pull_reque
 **`dependabot-auto-merge.yml` merges a Dependabot PR only when all of:**
 
 - Actor is `dependabot[bot]` (both jobs gate on this explicitly)
-- [`dependabot/fetch-metadata@v2`](https://github.com/dependabot/fetch-metadata) reports a **patch**-level semver bump (never minor/major)
+- [`dependabot/fetch-metadata@v3`](https://github.com/dependabot/fetch-metadata) reports a **patch**-level semver bump (never minor/major)
 - Ecosystem is npm, NuGet, pub, Bundler, or GitHub Actions — **never Docker** (base-image bumps always need a human)
 - **If, and only if, the PR targets `main`:** no open critical Dependabot alert on the repo (re-checked here explicitly via its own `vuln-gate` job — reusable-workflow jobs can't `needs:` a job defined in a *different* workflow file, so this can't just piggyback on the check template's result)
 
