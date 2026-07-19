@@ -901,6 +901,58 @@ doesn't actually reference is harmless, it just sits unused.
 - It doesn't queue skipped updates — Dependabot just doesn't open a new PR for that slot until an existing one is closed or merged, then backfills on the next scheduled run (or immediately for security updates).
 - Closing a PR without merging does **not** reliably regenerate it on the next scheduled run — confirmed by live testing: a plain close deletes Dependabot's own branch and Dependabot states it won't notify again about that release until a newer version ships, with no guaranteed reopen path once the branch is gone. `@dependabot ignore this major/minor version` (or this dependency) — or the config's `ignore:` list — is the actual mechanism for permanently suppressing a version; that is not what happens by default on a plain close. To force Dependabot to re-evaluate an **existing** PR (e.g. under a newly fixed pipeline) with zero risk of losing it, comment `@dependabot rebase`: it force-pushes onto the same PR/branch, never closes or deletes anything, and re-triggers `pull_request_target` so the PR gets fully re-checked. Only actually close/delete a PR when Dependabot itself asks for it (see **Orphaned PRs** below) or you're deliberately accepting the loss of that specific version.
 
+### Multi-project .NET solutions — Dependabot doesn't sync duplicate `PackageReference`s across sibling `.csproj` files
+
+If a solution has multiple `.csproj` files that each pin the **same** NuGet package
+independently (e.g. an integration-test project that duplicates the main API project's
+`PackageReference`s instead of relying solely on its `<ProjectReference>` for the transitive
+closure), Dependabot's NuGet updater can bump the package in **one** project's manifest and
+silently leave the other(s) at the old pinned version — even though `directory: "/"` already
+parses the `.sln` and discovers every referencing project up front. This isn't a scanning gap
+in our config: confirmed via the updater's own discovery logs (dependabot-core#9444), it *finds*
+every occurrence correctly. The bug is in the write-back step, and a maintainer has confirmed
+it directly: "If the projects have the same dependency but with a different version that's a
+scenario that the current updater can't handle" (dependabot-core#9444, also #9088) — open,
+unfixed, no ETA as of this writing.
+
+**Do not try to work around this by splitting a solution's NuGet entry into multiple
+`directories:` (one per project folder).** The failure is in the write, not the directory
+scope, so splitting doesn't fix the sync — it makes it worse: each `directories:` entry runs
+as its own independent update job, and `groups:` applies **per job**, not across directories,
+so you'd get separate PRs per project each proposing the same package bump on its own schedule,
+actively reproducing the drift instead of preventing it.
+
+**The only fix that categorically removes the risk: NuGet Central Package Management**
+(`Directory.Packages.props` at the repo root, `ManagePackageVersionsCentrally=true`, every
+`.csproj` drops its `Version=` attribute). This isn't a Dependabot config change — it's an
+app-repo code change, and Dependabot already understands it natively (bumps the one shared
+props file, so every project moves together by construction; there's no second writable
+location left for the updater to miss). Repos with more than one `.csproj` referencing
+overlapping packages should migrate to this rather than relying on manual re-sync after every
+drift-induced build failure. This is the same "hidden duplicate manifest" shape as a
+polyglot repo templated for one ecosystem (e.g. NuGet-only) that has a subdirectory using a
+different one (e.g. npm) with its own out-of-band manifest Dependabot was never configured to
+see — both cases are a manifest Dependabot can't (or wasn't told to) keep in lockstep with its
+sibling.
+
+**Org-wide exposure (scanned across all 3 orgs, 241 NuGet repos):** 67 repos have 2+ `.csproj`
+files; 44 of those duplicate at least one `PackageReference` across sibling projects; of those,
+21 are mismatched *right now*. But most of that risk is currently dormant, not active — whether
+a mismatch actually breaks a pipeline depends entirely on whether CI builds the sibling project
+at all. Only **5 of the 44** repos actually build/publish a test project as part of their
+CI/Docker pipeline (`SW-CloudFiles`, `Bitween-api`, `SW-Mtm-api`, `mealivery-api`,
+`gig-insureapp-api`); the other 39 have test projects that sit in the solution untouched by CI,
+so a version mismatch there won't fail a pipeline — it'll only surface if a developer runs a
+full solution build locally, or if CI is later changed to include tests. Cross-referencing
+"CI-active" against "mismatched now" narrows the truly urgent set to just **`SW-CloudFiles` and
+`Bitween-api`** — everything else mismatched today is a real but currently-invisible risk. Two
+of the 44 repos (`gig-aiusecasespoc-api`, `wisewell-api`) don't have a test project at all — the
+duplication there is between other sibling projects (SDK/adapters, not tests). And one repo's
+test project (`avtr-api`) isn't even listed in its `.sln`, so it's fully orphaned — not part of
+any build, mismatched or not. **Don't assume "has a duplicate-pinned test project" ⇒ "CI is
+broken" — check whether that project is actually in the `.sln` and actually built/published by
+the pipeline before treating a repo as urgent.**
+
 ### Where the file must live vs. `target-branch`
 
 Many repos have a `develop` branch that diverges from `main`. `target-branch` is set to
