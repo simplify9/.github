@@ -51,14 +51,33 @@
 # reflect that -- confirmed live on gig-insureapp-survey-mobile#40, where the
 # alert still pointed at a package-lock.json the PR had deleted, so the gate
 # stayed blocking even though yarn.lock already resolved every flagged
-# package to a patched version. If the alert's own manifest_path 404s/empty
-# at the PR head, this now also tries the sibling package-lock.json/yarn.lock
-# in the same directory before giving up -- same directory scope as the
-# original manifest, just a different filename, so it can't cross into an
-# unrelated sub-package's lockfile in a monorepo. Whichever file actually
-# supplied content is what gets parsed (by ITS format, not the alert's
-# recorded one) and is logged explicitly so a passing gate is still
-# auditable.
+# package to a patched version. If the alert's own manifest_path returns a
+# CONFIRMED 404 at the PR head, this now also tries the sibling
+# package-lock.json/yarn.lock in the same directory before giving up -- same
+# directory scope as the original manifest, just a different filename, so it
+# can't cross into an unrelated sub-package's lockfile in a monorepo.
+# Whichever file actually supplied content is what gets parsed (by ITS format,
+# not the alert's recorded one) and is logged explicitly so a passing gate is
+# still auditable.
+#
+# IMPORTANT -- 404 only, never "empty content": the Contents API also returns
+# HTTP 200 with `encoding: "none"` and an empty `.content` for a file that
+# still EXISTS but exceeds its ~1MB inline-read cap (confirmed live against a
+# real 1.7MB yarn.lock) -- indistinguishable from a deletion by content alone.
+# Treating that as "deleted" would let a stale/coexisting sibling lockfile of
+# a different package manager silently stand in for a real, still-vulnerable,
+# merely-too-large manifest: a false clear on a genuinely open critical alert.
+# The fetch loop checks the actual HTTP status before ever looking at content
+# -- only a real 404 advances to the next candidate; a 200-with-encoding:none,
+# a 403 "too large" (files over the API's ~100MB hard limit), or any other
+# non-2xx stops the search immediately and leaves the alert blocking.
+#
+# The per-alert semver check is also probed upfront (`npx semver 1.2.3 -r
+# '>=1.0.0'` must print `1.2.3`) before trusting any of its "not vulnerable"
+# results: the semver CLI prints nothing and exits non-zero both when a
+# version is genuinely out of range AND when npx itself can't run at all (no
+# network/registry), so an unprobed failure would silently clear every npm
+# alert in the run instead of failing closed.
 #
 # Inputs:
 #   dependabot-alerts-token  (required)  A PAT/App token (NOT GITHUB_TOKEN) with
@@ -226,6 +245,18 @@ runs:
             echo "Not a pull_request_target run with a PR head available -- skipping (this only applies to PR-time gates; build-time/push runs always evaluate the repo as merged, which is already correct)."
           elif [[ -z "$GITHUB_READ_TOKEN" ]]; then
             echo "::warning title=⚠️ [VULN-GATE] No github-token forwarded::Cannot verify whether this PR's branch already resolves flagged alerts -- skipping, all ${total_critical} alert(s) stay blocking."
+          elif [[ "$(npx --yes semver 1.2.3 -r '>=1.0.0' 2>/dev/null)" != "1.2.3" ]]; then
+            # The `semver` CLI prints the version + exits 0 when in-range, and
+            # prints NOTHING + exits non-zero when out-of-range -- the per-alert
+            # loop below treats empty output as "not vulnerable". If npx/semver
+            # can't even run (no network, registry down, no node on the runner),
+            # it produces that exact same empty-output/non-zero-exit signature,
+            # which would otherwise silently read as "not vulnerable" for EVERY
+            # npm alert this run and clear them all. Probing a known in-range
+            # case upfront catches that failure mode before it can be confused
+            # with a real range check, and fails closed for the whole PR-branch
+            # verification pass instead (same as the missing-token case above).
+            echo "::warning title=⚠️ [VULN-GATE] semver tool unavailable::Could not execute 'npx semver' (registry/network issue?) -- skipping PR-branch verification entirely this run, all ${total_critical} alert(s) stay blocking."
           else
             declare -A LOCKFILE_CACHE
             declare -A LOCKFILE_PATH_CACHE
@@ -274,13 +305,47 @@ runs:
                 lf_content=""
                 for candidate_path in "${candidates[@]}"; do
                   enc_path="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe='/@'))" "$candidate_path" 2>/dev/null)" || enc_path="$candidate_path"
-                  lf_response="$(curl -sS --max-time 30 --retry 2 --retry-connrefused -H "Authorization: Bearer $GITHUB_READ_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${REPOSITORY}/contents/${enc_path}?ref=${PR_HEAD_SHA}" 2>/dev/null)" || lf_response=""
-                  candidate_content="$(printf '%s' "$lf_response" | jq -r '.content // empty' 2>/dev/null | base64 -d 2>/dev/null)" || candidate_content=""
+                  lf_body_file="$(mktemp)"
+                  lf_curl_exit=0
+                  lf_http_code="$(curl -sS --max-time 30 --retry 2 --retry-connrefused -o "$lf_body_file" -w '%{http_code}' -H "Authorization: Bearer $GITHUB_READ_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${REPOSITORY}/contents/${enc_path}?ref=${PR_HEAD_SHA}" 2>/dev/null)" || lf_curl_exit=$?
+                  if [[ $lf_curl_exit -ne 0 ]]; then
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  # A 404 is the ONLY signal that means "genuinely not present,
+                  # safe to try the next sibling" -- confirmed live (2026-07-23):
+                  # the Contents API returns HTTP 200 with `encoding: "none"` and
+                  # an EMPTY `.content` for a file that still exists but exceeds
+                  # its ~1MB inline-read cap (real lockfiles routinely do), which
+                  # is otherwise indistinguishable from a deleted file. Treating
+                  # that the same as a 404 would let a stale/coexisting sibling
+                  # lockfile of a different package manager stand in for a real,
+                  # still-vulnerable, merely-too-large manifest -- a false clear
+                  # on a genuinely open critical alert. So any non-404 failure
+                  # (this size cap, a 403 "too large" on files >100MB, a 5xx,
+                  # anything else non-2xx) stops the search entirely rather than
+                  # advancing to the next candidate.
+                  if [[ "$lf_http_code" == "404" ]]; then
+                    rm -f "$lf_body_file"
+                    continue
+                  fi
+                  if [[ "$lf_http_code" != "200" ]]; then
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  lf_encoding="$(jq -r '.encoding // empty' "$lf_body_file" 2>/dev/null)" || lf_encoding=""
+                  if [[ "$lf_encoding" == "none" ]]; then
+                    echo "::warning title=⚠️ [VULN-GATE] Lockfile too large to verify::${candidate_path} at PR head ${PR_HEAD_SHA} exceeds the Contents API's inline size cap -- this is NOT the same as the file being deleted, so no sibling is substituted for it. Stays blocking."
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  candidate_content="$(jq -r '.content // empty' "$lf_body_file" 2>/dev/null | base64 -d 2>/dev/null)" || candidate_content=""
+                  rm -f "$lf_body_file"
                   if [[ -n "$candidate_content" ]]; then
                     fetched_path="$candidate_path"
                     lf_content="$candidate_content"
                     if [[ "$candidate_path" != "$manifest_path" ]]; then
-                      echo "::notice title=🔎 [VULN-GATE] Lockfile migrated::${manifest_path} no longer exists at PR head ${PR_HEAD_SHA} -- found ${candidate_path} in its place, using that instead."
+                      echo "::notice title=🔎 [VULN-GATE] Lockfile migrated::${manifest_path} no longer exists (confirmed 404) at PR head ${PR_HEAD_SHA} -- found ${candidate_path} in its place, using that instead."
                     fi
                     break
                   fi
