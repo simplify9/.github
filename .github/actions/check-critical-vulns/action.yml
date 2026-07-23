@@ -69,8 +69,9 @@
 # merely-too-large manifest: a false clear on a genuinely open critical alert.
 # The fetch loop checks the actual HTTP status before ever looking at content
 # -- only a real 404 advances to the next candidate; a 200-with-encoding:none,
-# a 403 "too large" (files over the API's ~100MB hard limit), or any other
-# non-2xx stops the search immediately and leaves the alert blocking.
+# a 403 "too large" (files over the API's ~100MB hard limit), a 200 whose body
+# isn't a single "file" (a directory listing, symlink, or submodule), or any
+# other non-2xx stops the search immediately and leaves the alert blocking.
 #
 # The per-alert semver check is also probed upfront (`npx semver 1.2.3 -r
 # '>=1.0.0'` must print `1.2.3`) before trusting any of its "not vulnerable"
@@ -330,6 +331,19 @@ runs:
                     continue
                   fi
                   if [[ "$lf_http_code" != "200" ]]; then
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  # A 200 body isn't necessarily a single file: the Contents API
+                  # returns a JSON ARRAY for a directory listing, and a
+                  # non-"file" type (symlink/submodule) for other path kinds --
+                  # neither is a confirmed absence of the original manifest, so
+                  # neither should fall through to content extraction below
+                  # (jq erroring on `.encoding`/`.content` against an array
+                  # happens to degrade safely today, but only by accident).
+                  lf_type="$(jq -r 'if type == "array" then "directory" else (.type // "unknown") end' "$lf_body_file" 2>/dev/null)" || lf_type="unknown"
+                  if [[ "$lf_type" != "file" ]]; then
+                    echo "::warning title=⚠️ [VULN-GATE] Unexpected content type at ${candidate_path}::PR head ${PR_HEAD_SHA} returned type '${lf_type}' (expected 'file') -- not a confirmed absence, so no sibling is substituted for it. Stays blocking."
                     rm -f "$lf_body_file"
                     break
                   fi

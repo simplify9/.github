@@ -1008,9 +1008,11 @@ against a real 1.7MB `yarn.lock`), which would otherwise be indistinguishable fr
 Treating that the same as a 404 would let a stale/coexisting sibling lockfile of a different
 package manager silently stand in for a real, still-vulnerable, merely-too-large manifest — a
 false clear on a genuinely open critical alert. So the fetch loop checks the actual HTTP status
-first: only a real 404 advances to the next candidate; a 200-with-`encoding:none`, a 403
-"too large" (files over the API's ~100MB hard limit), or any other non-2xx logs a warning and
-stops the search immediately, leaving the alert blocking exactly as before this feature existed.
+first: only a real 404 advances to the next candidate. A 200-with-`encoding:none`, a 403
+"too large" (files over the API's ~100MB hard limit), a 200 whose body isn't a single `"file"`
+(a directory listing comes back as a JSON array; a symlink/submodule has no `.content` either),
+or any other non-2xx logs a warning and stops the search immediately, leaving the alert blocking
+exactly as before this feature existed.
 
 Version comparison uses the real `semver` npm package (`npx semver <version> -r <range>`),
 not string comparison — GitHub's `vulnerable_version_range` uses comma-separated AND clauses
