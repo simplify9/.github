@@ -45,6 +45,41 @@
 # block-scalar indentation rules. package-lock.json needs no such script
 # since it's real JSON, handled inline via jq.
 #
+# LOCKFILE FALLBACK (added 2026-07-23): a PR can migrate package managers as
+# part of its fix (e.g. delete package-lock.json, add yarn.lock + a
+# `resolutions` pin) before the alert's recorded manifest_path catches up to
+# reflect that -- confirmed live on gig-insureapp-survey-mobile#40, where the
+# alert still pointed at a package-lock.json the PR had deleted, so the gate
+# stayed blocking even though yarn.lock already resolved every flagged
+# package to a patched version. If the alert's own manifest_path returns a
+# CONFIRMED 404 at the PR head, this now also tries the sibling
+# package-lock.json/yarn.lock in the same directory before giving up -- same
+# directory scope as the original manifest, just a different filename, so it
+# can't cross into an unrelated sub-package's lockfile in a monorepo.
+# Whichever file actually supplied content is what gets parsed (by ITS format,
+# not the alert's recorded one) and is logged explicitly so a passing gate is
+# still auditable.
+#
+# IMPORTANT -- 404 only, never "empty content": the Contents API also returns
+# HTTP 200 with `encoding: "none"` and an empty `.content` for a file that
+# still EXISTS but exceeds its ~1MB inline-read cap (confirmed live against a
+# real 1.7MB yarn.lock) -- indistinguishable from a deletion by content alone.
+# Treating that as "deleted" would let a stale/coexisting sibling lockfile of
+# a different package manager silently stand in for a real, still-vulnerable,
+# merely-too-large manifest: a false clear on a genuinely open critical alert.
+# The fetch loop checks the actual HTTP status before ever looking at content
+# -- only a real 404 advances to the next candidate; a 200-with-encoding:none,
+# a 403 "too large" (files over the API's ~100MB hard limit), a 200 whose body
+# isn't a single "file" (a directory listing, symlink, or submodule), or any
+# other non-2xx stops the search immediately and leaves the alert blocking.
+#
+# The per-alert semver check is also probed upfront (`npx semver 1.2.3 -r
+# '>=1.0.0'` must print `1.2.3`) before trusting any of its "not vulnerable"
+# results: the semver CLI prints nothing and exits non-zero both when a
+# version is genuinely out of range AND when npx itself can't run at all (no
+# network/registry), so an unprobed failure would silently clear every npm
+# alert in the run instead of failing closed.
+#
 # Inputs:
 #   dependabot-alerts-token  (required)  A PAT/App token (NOT GITHUB_TOKEN) with
 #                             "Dependabot alerts: read" on the target repo.
@@ -211,8 +246,21 @@ runs:
             echo "Not a pull_request_target run with a PR head available -- skipping (this only applies to PR-time gates; build-time/push runs always evaluate the repo as merged, which is already correct)."
           elif [[ -z "$GITHUB_READ_TOKEN" ]]; then
             echo "::warning title=⚠️ [VULN-GATE] No github-token forwarded::Cannot verify whether this PR's branch already resolves flagged alerts -- skipping, all ${total_critical} alert(s) stay blocking."
+          elif [[ "$(npx --yes semver 1.2.3 -r '>=1.0.0' 2>/dev/null)" != "1.2.3" ]]; then
+            # The `semver` CLI prints the version + exits 0 when in-range, and
+            # prints NOTHING + exits non-zero when out-of-range -- the per-alert
+            # loop below treats empty output as "not vulnerable". If npx/semver
+            # can't even run (no network, registry down, no node on the runner),
+            # it produces that exact same empty-output/non-zero-exit signature,
+            # which would otherwise silently read as "not vulnerable" for EVERY
+            # npm alert this run and clear them all. Probing a known in-range
+            # case upfront catches that failure mode before it can be confused
+            # with a real range check, and fails closed for the whole PR-branch
+            # verification pass instead (same as the missing-token case above).
+            echo "::warning title=⚠️ [VULN-GATE] semver tool unavailable::Could not execute 'npx semver' (registry/network issue?) -- skipping PR-branch verification entirely this run, all ${total_critical} alert(s) stay blocking."
           else
             declare -A LOCKFILE_CACHE
+            declare -A LOCKFILE_PATH_CACHE
             npm_alerts_json="$(jq -c '[.[] | select(.dependency.package.ecosystem == "npm")]' "$alerts_file" 2>/dev/null)" || npm_alerts_json="[]"
             npm_alert_count="$(printf '%s' "$npm_alerts_json" | jq 'length' 2>/dev/null)" || npm_alert_count=0
             cleared_count=0
@@ -237,19 +285,93 @@ runs:
                 continue
               fi
 
-              # Cache lockfile fetches by path -- multiple alerts commonly
-              # share the same lockfile. Pure read via the Contents API, never
-              # executed -- safe under pull_request_target.
+              # Cache lockfile fetches by the alert's manifest_path -- multiple
+              # alerts commonly share the same lockfile. Pure read via the
+              # Contents API, never executed -- safe under pull_request_target.
               if [[ -z "${LOCKFILE_CACHE[$manifest_path]+x}" ]]; then
-                enc_path="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe='/@'))" "$manifest_path" 2>/dev/null)" || enc_path="$manifest_path"
-                lf_response="$(curl -sS --max-time 30 --retry 2 --retry-connrefused -H "Authorization: Bearer $GITHUB_READ_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${REPOSITORY}/contents/${enc_path}?ref=${PR_HEAD_SHA}" 2>/dev/null)" || lf_response=""
-                lf_content="$(printf '%s' "$lf_response" | jq -r '.content // empty' 2>/dev/null | base64 -d 2>/dev/null)" || lf_content=""
+                manifest_dir="${manifest_path%/*}"
+                [[ "$manifest_dir" == "$manifest_path" ]] && manifest_dir=""
+                # Try the alert's own manifest first, then sibling
+                # package-lock.json/yarn.lock in the same directory -- covers
+                # a mid-fix package-manager migration in either direction.
+                candidates=("$manifest_path")
+                for sibling in "package-lock.json" "yarn.lock"; do
+                  candidate_path="${manifest_dir:+$manifest_dir/}${sibling}"
+                  if [[ "$candidate_path" != "$manifest_path" ]]; then
+                    candidates+=("$candidate_path")
+                  fi
+                done
+
+                fetched_path=""
+                lf_content=""
+                for candidate_path in "${candidates[@]}"; do
+                  enc_path="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe='/@'))" "$candidate_path" 2>/dev/null)" || enc_path="$candidate_path"
+                  lf_body_file="$(mktemp)"
+                  lf_curl_exit=0
+                  lf_http_code="$(curl -sS --max-time 30 --retry 2 --retry-connrefused -o "$lf_body_file" -w '%{http_code}' -H "Authorization: Bearer $GITHUB_READ_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${REPOSITORY}/contents/${enc_path}?ref=${PR_HEAD_SHA}" 2>/dev/null)" || lf_curl_exit=$?
+                  if [[ $lf_curl_exit -ne 0 ]]; then
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  # A 404 is the ONLY signal that means "genuinely not present,
+                  # safe to try the next sibling" -- confirmed live (2026-07-23):
+                  # the Contents API returns HTTP 200 with `encoding: "none"` and
+                  # an EMPTY `.content` for a file that still exists but exceeds
+                  # its ~1MB inline-read cap (real lockfiles routinely do), which
+                  # is otherwise indistinguishable from a deleted file. Treating
+                  # that the same as a 404 would let a stale/coexisting sibling
+                  # lockfile of a different package manager stand in for a real,
+                  # still-vulnerable, merely-too-large manifest -- a false clear
+                  # on a genuinely open critical alert. So any non-404 failure
+                  # (this size cap, a 403 "too large" on files >100MB, a 5xx,
+                  # anything else non-2xx) stops the search entirely rather than
+                  # advancing to the next candidate.
+                  if [[ "$lf_http_code" == "404" ]]; then
+                    rm -f "$lf_body_file"
+                    continue
+                  fi
+                  if [[ "$lf_http_code" != "200" ]]; then
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  # A 200 body isn't necessarily a single file: the Contents API
+                  # returns a JSON ARRAY for a directory listing, and a
+                  # non-"file" type (symlink/submodule) for other path kinds --
+                  # neither is a confirmed absence of the original manifest, so
+                  # neither should fall through to content extraction below
+                  # (jq erroring on `.encoding`/`.content` against an array
+                  # happens to degrade safely today, but only by accident).
+                  lf_type="$(jq -r 'if type == "array" then "directory" else (.type // "unknown") end' "$lf_body_file" 2>/dev/null)" || lf_type="unknown"
+                  if [[ "$lf_type" != "file" ]]; then
+                    echo "::warning title=⚠️ [VULN-GATE] Unexpected content type at ${candidate_path}::PR head ${PR_HEAD_SHA} returned type '${lf_type}' (expected 'file') -- not a confirmed absence, so no sibling is substituted for it. Stays blocking."
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  lf_encoding="$(jq -r '.encoding // empty' "$lf_body_file" 2>/dev/null)" || lf_encoding=""
+                  if [[ "$lf_encoding" == "none" ]]; then
+                    echo "::warning title=⚠️ [VULN-GATE] Lockfile too large to verify::${candidate_path} at PR head ${PR_HEAD_SHA} exceeds the Contents API's inline size cap -- this is NOT the same as the file being deleted, so no sibling is substituted for it. Stays blocking."
+                    rm -f "$lf_body_file"
+                    break
+                  fi
+                  candidate_content="$(jq -r '.content // empty' "$lf_body_file" 2>/dev/null | base64 -d 2>/dev/null)" || candidate_content=""
+                  rm -f "$lf_body_file"
+                  if [[ -n "$candidate_content" ]]; then
+                    fetched_path="$candidate_path"
+                    lf_content="$candidate_content"
+                    if [[ "$candidate_path" != "$manifest_path" ]]; then
+                      echo "::notice title=🔎 [VULN-GATE] Lockfile migrated::${manifest_path} no longer exists (confirmed 404) at PR head ${PR_HEAD_SHA} -- found ${candidate_path} in its place, using that instead."
+                    fi
+                    break
+                  fi
+                done
                 LOCKFILE_CACHE["$manifest_path"]="$lf_content"
+                LOCKFILE_PATH_CACHE["$manifest_path"]="$fetched_path"
               fi
               lockfile_content="${LOCKFILE_CACHE[$manifest_path]}"
+              resolved_lockfile_path="${LOCKFILE_PATH_CACHE[$manifest_path]}"
 
               if [[ -z "$lockfile_content" ]]; then
-                echo "ℹ️ ${ghsa}: could not read ${manifest_path} from PR head ${PR_HEAD_SHA} -- stays blocking."
+                echo "ℹ️ ${ghsa}: could not read ${manifest_path}, nor a sibling package-lock.json/yarn.lock, from PR head ${PR_HEAD_SHA} -- stays blocking."
                 continue
               fi
 
@@ -262,17 +384,17 @@ runs:
               # top level in the same lockfile) -- one unpatched occurrence
               # still means the vulnerability is present.
               versions_found=""
-              if [[ "$manifest_path" == *"package-lock.json" ]]; then
+              if [[ "$resolved_lockfile_path" == *"package-lock.json" ]]; then
                 versions_found="$(printf '%s' "$lockfile_content" | jq -r --arg suffix "node_modules/${pkg_name}" '(.packages // {}) | to_entries[] | select(.key | endswith($suffix)) | .value.version' 2>/dev/null)" || versions_found=""
-              elif [[ "$manifest_path" == *"yarn.lock" ]]; then
+              elif [[ "$resolved_lockfile_path" == *"yarn.lock" ]]; then
                 versions_found="$(printf '%s' "$lockfile_content" | python3 "$GITHUB_ACTION_PATH/parse_yarn_lock.py" "$pkg_name" 2>/dev/null)" || versions_found=""
               else
-                echo "ℹ️ ${ghsa}: unsupported lockfile type (${manifest_path}) -- npm verification only supports package-lock.json/yarn.lock. Stays blocking."
+                echo "ℹ️ ${ghsa}: unsupported lockfile type (${resolved_lockfile_path:-$manifest_path}) -- npm verification only supports package-lock.json/yarn.lock. Stays blocking."
                 continue
               fi
 
               if [[ -z "$versions_found" ]]; then
-                echo "ℹ️ ${ghsa}: could not locate ${pkg_name} in ${manifest_path} at the PR head -- stays blocking."
+                echo "ℹ️ ${ghsa}: could not locate ${pkg_name} in ${resolved_lockfile_path:-$manifest_path} at the PR head -- stays blocking."
                 continue
               fi
 
@@ -295,9 +417,9 @@ runs:
                 cleared_count=$((cleared_count + 1))
                 total_critical=$((total_critical - 1))
                 cleared_numbers+="${alert_number}"$'\n'
-                echo "::notice title=✅ [VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} in ${manifest_path} is patched in this branch (checked version(s): $(printf '%s' "$versions_found" | tr '\n' ' ')) -- no longer counted against this PR."
+                echo "::notice title=✅ [VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} in ${resolved_lockfile_path} is patched in this branch (checked version(s): $(printf '%s' "$versions_found" | tr '\n' ' ')) -- no longer counted against this PR."
               else
-                echo "::notice title=❌ [VULN-GATE] ${ghsa} still open::${pkg_name} in ${manifest_path} still resolves to a vulnerable version in this branch."
+                echo "::notice title=❌ [VULN-GATE] ${ghsa} still open::${pkg_name} in ${resolved_lockfile_path} still resolves to a vulnerable version in this branch."
               fi
             done
 

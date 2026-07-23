@@ -992,9 +992,38 @@ resolves to different versions at different points in the dependency tree (confi
 version at the top level, in the same lockfile) — one unpatched occurrence still means the
 vulnerability is present.
 
+**Lockfile fallback:** if the alert's recorded `manifest_path` genuinely 404s at the PR head
+(the PR deleted it — e.g. it migrated `package-lock.json` → `yarn.lock` as part of the fix,
+confirmed live on `gig-insureapp-survey-mobile#40`), the action also tries the sibling
+`package-lock.json`/`yarn.lock` in the same directory before giving up, and parses whichever
+one actually returned content by *its* format, not the alert's originally-recorded one. A
+`Lockfile migrated` notice is logged whenever the fallback path fires, so a passing gate stays
+auditable. Same directory scope as the original manifest either way, so this can't cross into
+an unrelated sub-package's lockfile in a monorepo.
+
+**Only a confirmed 404 triggers the fallback — not merely "empty content."** The Contents API
+also returns HTTP 200 with `encoding: "none"` and an empty `.content` for a file that still
+*exists* but exceeds its ~1MB inline-read cap (real lockfiles routinely do — confirmed live
+against a real 1.7MB `yarn.lock`), which would otherwise be indistinguishable from a deletion.
+Treating that the same as a 404 would let a stale/coexisting sibling lockfile of a different
+package manager silently stand in for a real, still-vulnerable, merely-too-large manifest — a
+false clear on a genuinely open critical alert. So the fetch loop checks the actual HTTP status
+first: only a real 404 advances to the next candidate. A 200-with-`encoding:none`, a 403
+"too large" (files over the API's ~100MB hard limit), a 200 whose body isn't a single `"file"`
+(a directory listing comes back as a JSON array; a symlink/submodule has no `.content` either),
+or any other non-2xx logs a warning and stops the search immediately, leaving the alert blocking
+exactly as before this feature existed.
+
 Version comparison uses the real `semver` npm package (`npx semver <version> -r <range>`),
 not string comparison — GitHub's `vulnerable_version_range` uses comma-separated AND clauses
 (e.g. `">= 1.0.0, < 2.3.4"`), converted to node-semver's space-separated form before evaluation.
+Before trusting any per-alert result, the action first probes `npx semver` against a known
+in-range case (`semver 1.2.3 -r '>=1.0.0'` must print `1.2.3`) — the CLI prints nothing and
+exits non-zero both when a version is genuinely out of range *and* when `npx` itself can't run
+at all (registry unreachable, no network), so an unchecked failure here would silently read as
+"not vulnerable" for every npm alert in the run. If the probe fails, PR-branch verification is
+skipped entirely for that run (all alerts stay blocking), the same fail-closed fallback as a
+missing `github-token`.
 
 **Scope, deliberately narrow:** this only applies to the npm ecosystem for now (NuGet,
 Composer, pip, Maven, GitHub Actions, and Docker all still fail closed, exactly as before —
@@ -1003,10 +1032,12 @@ An org-wide audit (2026-07-14) found npm makes up 96% of open critical alerts he
 covers the overwhelming majority of real cases; the rest still need the manual `fix_started`
 dismissal path (see **Known pitfalls** below) as a fallback.
 
-**Fails closed, always:** non-npm ecosystem, no lockfile match at the PR head, an
-unsupported/unrecognized lockfile format, a parse failure, or a missing `github-token` input
-— any of these leaves that alert counted as still-blocking, same as before this feature
-existed. Nothing here can silently let a genuinely-still-vulnerable PR merge.
+**Fails closed, always:** non-npm ecosystem, no lockfile match at the PR head (even after the
+sibling-file fallback above), a lockfile that exists but is too large for the Contents API to
+return inline, an unsupported/unrecognized lockfile format (`pnpm-lock.yaml` has no parser
+yet), a parse failure, a broken/unreachable `npx semver`, or a missing `github-token` input —
+any of these leaves that alert counted as still-blocking, same as before this feature existed.
+Nothing here can silently let a genuinely-still-vulnerable PR merge.
 
 **Safety under `pull_request_target`:** this is pure static text parsing of the lockfile via
 the Contents API — it never checks out or executes the PR's own code (no `npm ci`, no
@@ -1062,6 +1093,20 @@ handful of concurrent workers posting comments can trip a rolling-window seconda
 then blocks further comment creation regardless of how slowly you retry afterward. Keep bulk
 comment-posting single-threaded, paced at 2+ seconds between requests, and don't run other
 write-heavy scripts concurrently with it — they likely share the same abuse-detection budget.
+
+**4. A PR that fixes a critical npm alert by migrating lockfile format keeps failing the gate
+even though the vulnerability is actually gone.** Confirmed live on
+`gig-insureapp-survey-mobile#40`: the dev deleted `package-lock.json` and moved to
+`yarn.lock` + `resolutions` as part of the fix. The alert's recorded `manifest_path` still
+said `package-lock.json` — [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock)
+tried to read that exact file at the PR head, got nothing (it no longer existed), and per its
+fail-closed design left all 5 alerts blocking, even though every flagged package was already
+resolved to a patched version in the new `yarn.lock`. Fixed org-wide (2026-07-23):
+`check-critical-vulns` now also tries the sibling `package-lock.json`/`yarn.lock` in the same
+directory before giving up, and parses whichever one actually has content — see **Lockfile
+fallback** above. Still fails closed for anything neither file can explain (e.g. a migration
+to `pnpm-lock.yaml`, which has no parser) — dismiss those alerts manually (reason
+`fix_started`) once you've confirmed the fix, same as any other unsupported-ecosystem alert.
 
 ### Patch/minor group split — rolled out org-wide
 
