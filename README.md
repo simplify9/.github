@@ -589,6 +589,7 @@ Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `fl
 | `export-method` | | `app-store-connect` | ExportOptions.plist distribution method |
 | `run-analyze` | | `false` | Run `flutter analyze` before building |
 | `ipa-name-pattern` | | `{app_slug}-{version}-{build_number}.ipa` | Output IPA name tokens |
+| `dart-define` | | `""` | Space-separated `KEY=VALUE` pairs passed as `--dart-define` to `flutter build ipa` |
 | `wait-for-processing` | | `false` | Poll App Store Connect until processing finishes (fire-and-forget by default) |
 | `release-environment` | | `ios-staging` | GitHub Environment for the release job |
 | `disable-release` | | `false` | Build only; skip TestFlight upload |
@@ -642,6 +643,7 @@ Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbu
 | `analyze-fatal-level` | | `none` | `flutter analyze` fatal severity (`none`/`warning`/`info`) |
 | `keystore-output-path` | | `android/app/release.keystore` | Where the decoded keystore is written |
 | `aab-name-pattern` | | `{app_slug}-release-{version_name}.aab` | Output AAB name tokens |
+| `dart-define` | | `""` | Space-separated `KEY=VALUE` pairs passed as `--dart-define` to `flutter build appbundle` |
 | `play-track` | | `internal` | `internal`, `alpha`, `beta`, `production` |
 | `release-status` | | `draft` | Play release status (`draft`/`completed`/...) |
 | `changes-not-sent-for-review` | | `false` | Use `changesNotSentForReview` (internal tracks) |

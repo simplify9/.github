@@ -128,6 +128,14 @@ on:
         type: string
         default: none
 
+      # ── Build flags ─────────────────────────────────────────────────────────
+      dart-define:
+        description: Space-separated KEY=VALUE pairs passed as --dart-define to
+          flutter build
+        required: false
+        type: string
+        default: ""
+
       # ── Signing & artifact paths ────────────────────────────────────────────
       keystore-output-path:
         description: Where to write the decoded release keystore
@@ -537,12 +545,20 @@ jobs:
       - name: Build Release Bundle (AAB)
         working-directory: ${{ inputs.project-directory }}
         shell: bash
+        env:
+          DART_DEFINE: ${{ inputs.dart-define }}
         run: |
           set -euo pipefail
           echo "::group::🤖 [CHECKPOINT 2/3] flutter build appbundle"
+          DEFINE_FLAGS=""
+          for kv in ${DART_DEFINE}; do
+            DEFINE_FLAGS="${DEFINE_FLAGS} --dart-define=${kv}"
+          done
+          # shellcheck disable=SC2086
           flutter build appbundle --release \
             --build-name="${VERSION_NAME}" \
-            --build-number="${VERSION_CODE}"
+            --build-number="${VERSION_CODE}" \
+            ${DEFINE_FLAGS}
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "::endgroup::"
 
