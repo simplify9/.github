@@ -68,6 +68,7 @@ jobs:
 
       # ── Build ─────────────────────────────────────────────────────────────
       aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE: e.g. laflef-release-{version_name}.aab
+      dart-define: ""                      # OPTIONAL: space-separated KEY=VALUE pairs, e.g. "API_BASE_URL=https://dev.api.example.com FLAVOR=develop"
 
       # ── Release ───────────────────────────────────────────────────────────
       play-track: internal
@@ -99,6 +100,7 @@ jobs:
 
       # ── Build ─────────────────────────────────────────────────────────────
       aab-name-pattern: "app-release-{version_name}.aab"   # REPLACE
+      dart-define: ""                      # OPTIONAL: space-separated KEY=VALUE pairs, e.g. "API_BASE_URL=https://api.example.com FLAVOR=production"
 
       # ── Release ───────────────────────────────────────────────────────────
       play-track: production

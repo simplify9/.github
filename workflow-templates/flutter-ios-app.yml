@@ -61,6 +61,9 @@ jobs:
       # ── Versioning ───────────────────────────────────────────────────────
       marketing-prefix: "1.0"        # REPLACE: major.minor only; patch stays automatic
 
+      # ── Build ────────────────────────────────────────────────────────────
+      dart-define: ""                 # OPTIONAL: space-separated KEY=VALUE pairs, e.g. "API_BASE_URL=https://dev.api.example.com FLAVOR=develop"
+
       # ── Export & upload ───────────────────────────────────────────────────
       ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
       release-environment: ios-develop
@@ -90,6 +93,9 @@ jobs:
 
       # ── Versioning ───────────────────────────────────────────────────────
       marketing-prefix: "1.0"        # REPLACE: major.minor only; patch stays automatic
+
+      # ── Build ────────────────────────────────────────────────────────────
+      dart-define: ""                 # OPTIONAL: space-separated KEY=VALUE pairs, e.g. "API_BASE_URL=https://api.example.com FLAVOR=production"
 
       # ── Export & upload ───────────────────────────────────────────────────
       ipa-name-pattern: "app-{version}-{build_number}.ipa"  # REPLACE
