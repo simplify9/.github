@@ -663,6 +663,11 @@ jobs:
           # The Docker build authenticates with its own registry credentials, so the
           # job never needs the persisted git token — drop it for hardening/parity.
           persist-credentials: false
+          # Without this, a repo using Git LFS gets pointer files checked out instead
+          # of real content, and the Docker image silently ships those tiny pointer
+          # files (e.g. gig-dxp-cms's seeded videos uploaded as ~130-byte text files
+          # instead of real .mp4s). No-op for repos that don't use LFS at all.
+          lfs: true
 
       - name: Build and push Docker image
         id: docker
