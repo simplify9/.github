@@ -495,7 +495,7 @@ jobs:
             steps.package_manager.outputs.cache_dependency_path }}
 
       - name: Setup Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v5.6.0
         with:
           distribution: ${{ inputs.java-distribution }}
           java-version: ${{ inputs.java-version }}
