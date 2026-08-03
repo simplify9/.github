@@ -60,6 +60,22 @@
 # not the alert's recorded one) and is logged explicitly so a passing gate is
 # still auditable.
 #
+# REMOVED-DEPENDENCY CLEAR (added 2026-08-03): verification originally cleared
+# an alert only when the flagged package was PRESENT at a patched version, so a
+# PR that fixed the alert by DELETING the dependency could never pass -- the
+# package had zero occurrences, `versions_found` came back empty, and empty was
+# treated as unverifiable. That made removal, the most complete fix there is,
+# the one fix shape the gate could not verify. Confirmed live on
+# funride-admin#64 (drops a Vite-era repo's leftover react-scripts@4.0.3, whose
+# dead webpack4/jest26 subtree carried 17 critical transitives across two
+# lockfiles): all 34 alerts logged "could not locate <pkg> in yarn.lock at the
+# PR head -- stays blocking", including ones the manifest fallback had already
+# correctly re-pointed from the PR-deleted package-lock.json to yarn.lock.
+# Empty output is now trusted as a genuine absence when the parser EXITED ZERO,
+# and only then -- see the parse_rc comment at the parse site for why exit
+# status, not output, is what makes absence distinguishable from a broken
+# parse. A non-zero parser exit still fails closed.
+#
 # IMPORTANT -- 404 only, never "empty content": the Contents API also returns
 # HTTP 200 with `encoding: "none"` and an empty `.content` for a file that
 # still EXISTS but exceeds its ~1MB inline-read cap (confirmed live against a
@@ -384,17 +400,45 @@ runs:
               # top level in the same lockfile) -- one unpatched occurrence
               # still means the vulnerability is present.
               versions_found=""
+              # Capture each parser's exit status instead of collapsing it into
+              # the empty string. An empty result is only trustworthy as "this
+              # package is absent" if the parser actually SUCCEEDED -- both
+              # parsers exit 0 while printing nothing on a clean miss
+              # (parse_yarn_lock.py prints "" and returns 0; jq's select()
+              # likewise yields no lines), and non-zero only on real failure,
+              # so rc is the only thing that separates a removed dependency
+              # from a broken parse. `|| versions_found=""` threw that away,
+              # which is why absence had to fail closed.
+              parse_rc=0
               if [[ "$resolved_lockfile_path" == *"package-lock.json" ]]; then
-                versions_found="$(printf '%s' "$lockfile_content" | jq -r --arg suffix "node_modules/${pkg_name}" '(.packages // {}) | to_entries[] | select(.key | endswith($suffix)) | .value.version' 2>/dev/null)" || versions_found=""
+                versions_found="$(printf '%s' "$lockfile_content" | jq -r --arg suffix "node_modules/${pkg_name}" '(.packages // {}) | to_entries[] | select(.key | endswith($suffix)) | .value.version' 2>/dev/null)" || parse_rc=$?
               elif [[ "$resolved_lockfile_path" == *"yarn.lock" ]]; then
-                versions_found="$(printf '%s' "$lockfile_content" | python3 "$GITHUB_ACTION_PATH/parse_yarn_lock.py" "$pkg_name" 2>/dev/null)" || versions_found=""
+                versions_found="$(printf '%s' "$lockfile_content" | python3 "$GITHUB_ACTION_PATH/parse_yarn_lock.py" "$pkg_name" 2>/dev/null)" || parse_rc=$?
               else
                 echo "ℹ️ ${ghsa}: unsupported lockfile type (${resolved_lockfile_path:-$manifest_path}) -- npm verification only supports package-lock.json/yarn.lock. Stays blocking."
                 continue
               fi
 
+              if [[ $parse_rc -ne 0 ]]; then
+                echo "ℹ️ ${ghsa}: failed to parse ${resolved_lockfile_path:-$manifest_path} at the PR head (parser exit ${parse_rc}) -- stays blocking."
+                continue
+              fi
+
+              # Parser succeeded and found zero resolved occurrences: this PR
+              # removed the package from the dependency tree outright, which
+              # resolves the alert more completely than any version bump can.
+              # Safe to clear -- the lockfile was confirmed READABLE by the
+              # `-z "$lockfile_content"` guard above, and a 404 with no usable
+              # sibling, an oversize (encoding:none) read, a non-"file" content
+              # type, and an unsupported filename each already bailed out
+              # before this point. So an empty result here cannot be standing
+              # in for "the lockfile never loaded" -- it means the package is
+              # genuinely gone from a lockfile we did successfully read.
               if [[ -z "$versions_found" ]]; then
-                echo "ℹ️ ${ghsa}: could not locate ${pkg_name} in ${resolved_lockfile_path:-$manifest_path} at the PR head -- stays blocking."
+                cleared_count=$((cleared_count + 1))
+                total_critical=$((total_critical - 1))
+                cleared_numbers+="${alert_number}"$'\n'
+                echo "::notice title=✅ [VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} is absent from ${resolved_lockfile_path} at the PR head -- the dependency was removed from the tree, so this alert is no longer counted against this PR."
                 continue
               fi
 
