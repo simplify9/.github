@@ -51,6 +51,15 @@ permissions:
   contents: write
   security-events: read
 
+# One billed run per PR, not one per push. Dependabot rebases its own PRs, and
+# each rebase re-triggers this workflow; only the newest run's verdict matters.
+# Safe to cancel: `gh pr merge --auto` is idempotent, and the final (newest) run
+# is never the one cancelled -- cancellation only ever kills a run that a later
+# push has already superseded.
+concurrency:
+  group: auto-merge-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   vuln-gate:
     if: ${{ github.actor == 'dependabot[bot]' && github.event.pull_request.base.ref == 'main' }}

@@ -42,6 +42,14 @@ permissions:
   contents: write
   security-events: read
 
+# One billed run per PR, not one per push. This is a pure Dependabot Alerts API
+# query -- it produces no artifact and deploys nothing, so a superseded run is
+# always safe to cancel. (The push-triggered release workflows deliberately keep
+# cancel-in-progress: false; never copy this block into one of those.)
+concurrency:
+  group: vuln-check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   vuln-gate:
     uses: simplify9/.github/.github/workflows/critical-vuln-gate.yml@main
