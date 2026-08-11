@@ -1,0 +1,41 @@
+# =============================================================================
+# React Native Version-Contract Check — Caller template
+# =============================================================================
+# USAGE:
+#   Copy this file to your repo at .github/workflows/react-native-contract-check.yml.
+#   No REPLACE values needed — this template requires no customization.
+#
+#   Then mark `rn-contract / check` as a REQUIRED status check on the branch
+#   Dependabot targets (usually `develop`). Without that step the check still
+#   runs and still shows red, but auto-merge will NOT wait for it — GitHub's
+#   auto-merge only waits on REQUIRED checks.
+#
+# WHAT IT DOES:
+#   Fails the PR when the repo's resolved `react` version does not exactly match
+#   the version react-native's own bundled renderer demands, or when more than
+#   one copy of react ends up in the tree.
+#
+#   react-native's package.json peer range is looser than the renderer's own
+#   hard-coded assertion, so a semver-PATCH bump of react can be legal to npm,
+#   pass type-check, lint, jest and metro bundling — and still throw
+#   "Incompatible React versions" on the first screen at runtime. This is the
+#   only cheap gate that catches that class; see the composite action header
+#   for the full mechanism.
+#
+#   Runs on plain `pull_request` (not pull_request_target): it needs the PR's
+#   own package.json/lockfile, requires no secrets, and never installs or runs
+#   any code from the PR.
+# =============================================================================
+name: React Native Contract Check
+run-name: rn-contract-${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  rn-contract:
+    uses: simplify9/.github/.github/workflows/react-native-contract-gate.yml@main

@@ -1,0 +1,128 @@
+# =============================================================================
+# Check React Native version contract — composite action
+# =============================================================================
+# WHAT THIS CATCHES
+#   react-native advertises a LOOSE peer range (e.g. "react": "^19.2.3") while
+#   its own bundled renderer hard-codes an EXACT version and throws at runtime:
+#
+#       if ("19.2.3" !== isomorphicReactPackageVersion) throw Error(...)
+#
+#   So a semver-PATCH bump of react to 19.2.8 installs cleanly, satisfies the
+#   peer range, type-checks, lints, bundles, and passes a react-test-renderer
+#   unit test -- then throws the first time the app touches any of the six APIs
+#   that RendererImplementation binds to the Paper renderer UNCONDITIONALLY,
+#   regardless of newArchEnabled: findNodeHandle, unstable_batchedUpdates,
+#   sendAccessibilityEvent, findHostInstance_DEPRECATED,
+#   unmountComponentAtNodeAndRemoveContainer, isChildPublicInstance.
+#
+#   That set is reached by ScrollView, VirtualizedList/FlatList, TextInput and
+#   any Animated node using useNativeDriver -- i.e. the first real screen.
+#   Confirmed live: simplify9/mealivery-customer-mobile PR #89 auto-merged
+#   react 19.2.3 -> 19.2.8 as a "patch" bump and broke the app.
+#
+# WHY IT IS CHEAP
+#   Pure static comparison -- no install, no build, no emulator. It reads the
+#   repo's lockfile and the two renderer files from the shipped react-native
+#   package (node_modules when present, otherwise ~200KB from the CDN; never
+#   the ~32MB tarball). Typically well under 10 seconds.
+#
+# WHY NOT pull_request_target
+#   Unlike critical-vuln-check.yml, this gate needs the PR's OWN package.json
+#   and lockfile, which pull_request_target cannot see (it evaluates from the
+#   base branch). It is safe on a plain `pull_request` trigger because it needs
+#   NO secrets and a read-only GITHUB_TOKEN is sufficient -- and because it
+#   never installs or executes any code from the PR. Do not add a `yarn install`
+#   step here; that would turn a safe trigger into an arbitrary-code-execution
+#   surface for freshly-published dependency code.
+# =============================================================================
+name: Check React Native version contract
+description: >-
+  Fails when a repo's resolved react version does not match the exact version
+  react-native's bundled renderer demands, or when react is duplicated in the tree.
+
+inputs:
+  working-directory:
+    description: Directory containing package.json (repo root by default).
+    required: false
+    default: "."
+  fail-on-unknown:
+    description: >-
+      Fail when the contract cannot be determined at all (unreadable renderer,
+      unresolvable versions). Defaults to true: a gate that silently passes when
+      it cannot check anything manufactures confidence, which is worse than no gate.
+    required: false
+    default: "true"
+
+outputs:
+  status:
+    description: OK | DRIFT | DUPLICATE_REACT | CONTRACT_UNKNOWN | UNRESOLVABLE | NOT_A_REACT_NATIVE_REPO | NO_PACKAGE_JSON
+    value: ${{ steps.check.outputs.status }}
+  react:
+    description: The react version this repo resolves to.
+    value: ${{ steps.check.outputs.react }}
+  expected-react:
+    description: The react version react-native's bundled renderer requires.
+    value: ${{ steps.check.outputs.expected-react }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compare react against react-native's bundled renderer
+      id: check
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        FAIL_ON_UNKNOWN: ${{ inputs.fail-on-unknown }}
+      run: |
+        set -uo pipefail
+
+        result="$(python3 "${GITHUB_ACTION_PATH}/resolve_versions.py" --dir "$WORKING_DIRECTORY")" || {
+          echo "::error title=❌ [RN-CONTRACT] Checker failed to run::resolve_versions.py exited non-zero."
+          exit 1
+        }
+
+        get() { printf '%s' "$result" | python3 -c "import json,sys; print(json.load(sys.stdin).get('$1','') or '')"; }
+
+        status="$(get status)"
+        react="$(get reactVersion)"
+        expected="$(get expectedReact)"
+        source="$(get expectationSource)"
+        reason="$(get reason)"
+        rn="$(get reactNativeVersion)"
+
+        {
+          echo "status=${status}"
+          echo "react=${react}"
+          echo "expected-react=${expected}"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Resolver output:"
+        printf '%s\n' "$result" | python3 -m json.tool || printf '%s\n' "$result"
+
+        case "$status" in
+          NOT_A_REACT_NATIVE_REPO|NO_PACKAGE_JSON)
+            echo "::notice title=⏭️ [RN-CONTRACT] Skipped::No react-native dependency found in ${WORKING_DIRECTORY} -- nothing to check."
+            exit 0
+            ;;
+          OK)
+            echo "::notice title=✅ [RN-CONTRACT] Versions match::react ${react} matches what react-native ${rn} requires (via ${source})."
+            exit 0
+            ;;
+          DRIFT)
+            echo "::error title=❌ [RN-CONTRACT] react does not match react-native::${reason}. This combination installs and builds cleanly but THROWS at runtime ('Incompatible React versions') the first time the app calls findNodeHandle or another Paper-bound API -- which happens on the first screen with a list, a text input, or a native-driver animation. Fix: set react (and react-test-renderer) to ${expected}, or upgrade react-native to a release whose renderer expects react ${react}."
+            exit 1
+            ;;
+          DUPLICATE_REACT)
+            echo "::error title=❌ [RN-CONTRACT] Multiple react versions in the tree::${reason}. The renderer captures one react instance's internals while components use another, which breaks hooks and context in ways that are very hard to diagnose. Fix: dedupe (yarn dedupe / npm dedupe) or add a resolutions/overrides entry pinning a single react version."
+            exit 1
+            ;;
+          *)
+            msg="${reason:-status was ${status}}"
+            if [[ "$FAIL_ON_UNKNOWN" == "true" ]]; then
+              echo "::error title=❌ [RN-CONTRACT] Could not verify the version contract::${msg}. Failing closed: this check cannot confirm the app is safe, and passing here would manufacture false confidence. Set fail-on-unknown: false to downgrade this to a warning."
+              exit 1
+            fi
+            echo "::warning title=⚠️ [RN-CONTRACT] Could not verify the version contract::${msg}. fail-on-unknown is false, so this is not blocking."
+            exit 0
+            ;;
+        esac

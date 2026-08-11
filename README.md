@@ -1202,6 +1202,75 @@ reason for this file to exist outside the default branch.
 - Repos with a genuine open critical alert correctly gate `main` (or show a non-blocking warning on `develop`) until the alert is resolved or dismissed — this is expected behavior, not a bug.
 - Patch and minor bumps group separately per ecosystem (never combined); major bumps are always individual, ungrouped PRs.
 
+### React Native version contract — why "semver-patch" is not a safety property
+
+`react-native` advertises a **loose** peer range while its own bundled renderer hard-codes an
+**exact** React version and throws at runtime:
+
+```js
+// react-native/Libraries/Renderer/implementations/ReactNativeRenderer-prod.js — module top level
+var isomorphicReactPackageVersion = React.version;
+if ("19.2.3" !== isomorphicReactPackageVersion)
+  throw Error('Incompatible React versions: ...');
+```
+
+`react-native@0.85.1` declares `peerDependencies: { react: "^19.2.3" }`, so bumping `react` to
+`19.2.8` is a legal semver-**patch** update. It installs cleanly, type-checks, lints, passes
+`jest`, and bundles successfully — then throws on the first real screen. Confirmed live:
+`mealivery-customer-mobile` PR #89 auto-merged exactly this and broke the app.
+
+**On the New Architecture this is a *deferred* crash, not a launch crash.** `renderElement()`
+correctly routes to Fabric (which carries no version check), but `RendererImplementation.js`
+binds six APIs to the **Paper** renderer *unconditionally, regardless of `newArchEnabled`* —
+`findNodeHandle`, `unstable_batchedUpdates`, `sendAccessibilityEvent`,
+`findHostInstance_DEPRECATED`, `unmountComponentAtNodeAndRemoveContainer`,
+`isChildPublicInstance`. The first call to any of them loads Paper and throws. That set is
+reached by `ScrollView`, `FlatList`/`VirtualizedList`, `TextInput`, and any `Animated` node
+using `useNativeDriver` — so it fires on the first content screen, after `Sentry.init()` has
+run but typically before its transport can flush.
+
+**What does and does not catch this** (each verified by experiment, not assumed):
+
+| Gate | Catches it? | Why |
+| --- | --- | --- |
+| npm/yarn install | ❌ | `^19.2.3` genuinely permits `19.2.8` |
+| `tsc --noEmit`, `eslint` | ❌ | types and lint are unaffected |
+| `jest` + `react-test-renderer` render | ❌ | rendering uses Fabric; Paper is never loaded |
+| `npx react-native bundle` | ❌ | Metro builds a **static** graph and never evaluates module bodies |
+| **`rn-contract / check`** | ✅ | compares resolved `react` against the renderer's own literal |
+| Native build / E2E smoke | ✅ | but ~10× the cost on macOS runners |
+
+Hence `workflow-templates/react-native-contract-check.yml` →
+`.github/workflows/react-native-contract-gate.yml` →
+`.github/actions/check-react-native-contract`. It reads the repo's **lockfile** (not just
+`package.json`, since the lockfile decides what installs) and extracts the expected version
+from the shipped renderer — `node_modules` when present, otherwise ~200KB from the CDN, never
+the ~32MB tarball. Runs in seconds on `ubuntu-latest`.
+
+Three deliberate design choices:
+
+- **Plain `pull_request`, not `pull_request_target`.** Unlike `critical-vuln-check.yml`, this
+  gate needs the PR's *own* `package.json` and lockfile, which `pull_request_target` cannot see.
+  It is safe on `pull_request` because it needs **no secrets** (a read-only `GITHUB_TOKEN` is
+  enough) and never installs or executes PR code. **Never add a `yarn install` step to it** —
+  that would turn a safe trigger into an arbitrary-code-execution surface for freshly-published
+  dependency code.
+- **Fails closed when it cannot determine the contract.** RN ≥ 0.86 deletes the Paper renderer
+  entirely, so the assertion is gone; the checker falls back to Fabric's `reconcilerVersion`
+  (still exact) and only then gives up. A gate that silently passes when it cannot check
+  manufactures confidence, which is worse than no gate. Override per-repo with
+  `fail-on-unknown: false`.
+- **Also fails on duplicate `react`.** Two copies in the tree means the renderer captures one
+  instance's internals while components use another — a separate, harder-to-diagnose failure.
+
+**Grouping is not the fix.** `dependabot-templates/react-native-mobile.yml` groups
+`react` / `react-native` / `@react-native/*` / `@types/react` into one `react-core` PR so the
+lockstep set stays reviewable together, but Dependabot will still open a react-only PR when no
+matching react-native release exists. Exact-pinning is not the fix either — Dependabot rewrites
+exact pins (it did so twice in this repo). **The gate is the fix**, and it only blocks anything
+once `rn-contract / check` is marked **required** on the branch Dependabot targets — GitHub's
+auto-merge waits on *required* checks only.
+
 ---
 
 ## Core Architecture & Conventions

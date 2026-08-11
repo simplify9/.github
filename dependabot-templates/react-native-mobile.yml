@@ -16,6 +16,29 @@ updates:
       semver-major-days: 7
     open-pull-requests-limit: 10
     groups:
+      # react, react-native and the renderer shims are a LOCKSTEP SET, not
+      # independent packages. react-native's package.json advertises a loose
+      # peer range (e.g. "react": "^19.2.3") while its bundled renderer
+      # hard-codes an exact version and throws at runtime if react differs.
+      # So a lone semver-patch bump of react is legal to npm and fatal to the
+      # app -- confirmed live in mealivery-customer-mobile PR #89.
+      #
+      # Grouping them keeps the set in ONE reviewable PR instead of letting
+      # react drift away from react-native in a 20-package "patch" batch. It is
+      # NOT the safety mechanism on its own: Dependabot will still open a
+      # react-only PR when no matching react-native release exists. The actual
+      # enforcement is the `rn-contract / check` gate
+      # (workflow-templates/react-native-contract-check.yml), which must be
+      # marked REQUIRED on this target branch.
+      react-core:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "react-test-renderer"
+          - "react-native"
+          - "@react-native/*"
+          - "@types/react"
+          - "@types/react-test-renderer"
       npm-patch:
         update-types: ["patch"]
       npm-minor:
