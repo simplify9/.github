@@ -849,14 +849,31 @@ scales with how much a bump should be trusted to have surfaced problems already:
 ```yaml
 cooldown:
   default-days: 3
-  semver-patch-days: 1
+  semver-patch-days: 5
   semver-minor-days: 3
   semver-major-days: 7
 ```
 
-Patch bumps move fast (low risk, most value in landing quickly); major bumps get a full
-week of soak time before we even open a PR for them, on top of never being auto-merged
-regardless. This applies to every `updates:` entry (primary ecosystem, `docker`,
+**Patch gets the longest wait of the three, which looks backwards until you notice what
+actually differs between them.** The soak time is not scaled to how *breaking* a bump is —
+it's scaled to **how little human scrutiny it receives**. Patch is the only class that
+`dependabot-auto-merge.yml` merges automatically, so it is the only class where a freshly
+published version can reach `develop` with no human ever looking at it. Minor and major
+bumps both require a person to press merge, and that person is a far better filter than any
+number of days. Major still gets a full week on top of never being auto-merged, because the
+cost of reviewing one is high enough that it should not be re-reviewed twice.
+
+This was originally set to `semver-patch-days: 1` on the reasoning that patch bumps are low
+risk and worth landing quickly. That reasoning does not survive contact with two facts: a
+semver-patch release can break a runtime contract that no range expresses (see the React
+Native version contract section below, where a patch bump of `react` broke a production app),
+and the npm supply-chain attacks of 2025 turned freshly published patch versions into the
+primary delivery vector — most were detected within days, which is exactly the window a
+1-day cooldown fails to cover.
+
+Raising it costs nothing in security terms: **cooldown never applies to Dependabot *security*
+updates**, which still fire immediately regardless of these values. It delays only routine
+version updates. This applies to every `updates:` entry (primary ecosystem, `docker`,
 `github-actions`) in every template — cooldown is scoped per-entry, not repo-wide.
 
 Every primary-ecosystem block also groups bumps **by semver level, kept separate**:
