@@ -1257,6 +1257,15 @@ run but typically before its transport can flush.
 | **`rn-contract / check`** | ✅ | compares resolved `react` against the renderer's own literal |
 | Native build / E2E smoke | ✅ | but ~10× the cost on macOS runners |
 
+**Crash reporting does not catch it either.** Confirmed on `mealivery-customer-mobile`: with the
+mismatch in place the app reliably crashes on demand, and **neither Sentry nor Crashlytics
+recorded anything** — despite Sentry being correctly initialised (`enabled: !__DEV__`, and
+`Sentry.init()` runs during module evaluation, well before the throw). An uncaught JS error in a
+release build unwinds through `ErrorUtils` to `RCTFatal` and aborts the process before the
+transport can flush. Treat this as a **monitoring blind spot for the whole class**, not a
+misconfiguration: for this failure mode the PR gate is not a convenience, it is the only signal
+you get. Nothing downstream will tell you.
+
 Hence `workflow-templates/react-native-contract-check.yml` →
 `.github/workflows/react-native-contract-gate.yml` →
 `.github/actions/check-react-native-contract`. It reads the repo's **lockfile** (not just
@@ -1291,6 +1300,37 @@ auto-merge waits on *required* checks only.
 ---
 
 ## Core Architecture & Conventions
+
+### `concurrency` — cancel PR checks, never cancel releases
+
+Every caller template sets a `concurrency` block. The **group** is always
+`<prefix>-${{ github.workflow }}-<per-PR or per-ref key>`; what varies, and what matters, is
+`cancel-in-progress`:
+
+| Trigger | `cancel-in-progress` | Why |
+| --- | --- | --- |
+| `pull_request` / `pull_request_target` checks | **`true`** | A developer iterating pushes five times; only the newest result is meaningful. Cancelling the four superseded runs costs nothing and bills nothing. These checks produce no artifact and deploy nothing. |
+| `push` release/publish workflows | **`false`** | A superseded run may already be mid-upload to TestFlight, Play, a registry or a cluster. Cancelling there can leave a partial release. Queue instead. |
+
+```yaml
+concurrency:
+  group: rn-contract-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+```
+
+`github.event.pull_request.number || github.ref` rather than `github.ref` alone: on a
+`pull_request` event `github.ref` is `refs/pull/<n>/merge`, which is unique per PR and would work,
+but the explicit form keeps the group readable and stays correct if the workflow ever gains a
+non-PR trigger.
+
+Measured effect on the mobile fleet: 302 PRs/month against 492 push events, so cancellation
+removes ~39% of billed check runs. The absolute saving on Linux is small (these tiers cost single
+-digit dollars per month), but it applies for free and keeps the number bounded as PR volume grows.
+
+**Note on the existing mobile release templates:** `android-app.yml`, `ios-app.yml` and the
+`flutter-*` pair are `push`-triggered *and* set `cancel-in-progress: true`. That predates this
+convention. It is tolerable because a cancelled build simply produces no artifact, but a push
+landing during the upload/distribute stage could interrupt it — worth revisiting separately.
 
 ### Two-Layer Pattern
 
