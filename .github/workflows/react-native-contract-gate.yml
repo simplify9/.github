@@ -1,0 +1,56 @@
+# =============================================================================
+# React Native version-contract gate — reusable workflow
+# =============================================================================
+# Called by workflow-templates/react-native-contract-check.yml in each RN repo.
+#
+# Produces a single check named `rn-contract / check`, which is the string to
+# mark as a REQUIRED status check in branch protection / rulesets. Mark it
+# required on the branch Dependabot targets (usually `develop`) -- that is the
+# branch auto-merge writes to, and therefore the only place the check can
+# actually stop a bad merge.
+#
+# This is deliberately a `pull_request` (not `pull_request_target`) gate: it
+# needs the PR's own package.json + lockfile, needs no secrets, and never
+# installs or executes PR code. See the composite action's header for why that
+# distinction matters and why a `yarn install` step must never be added here.
+# =============================================================================
+name: React Native Contract Gate
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing package.json (repo root by default).
+        required: false
+        type: string
+        default: "."
+      fail-on-unknown:
+        description: Fail when the contract cannot be determined at all.
+        required: false
+        type: boolean
+        default: true
+      runner:
+        description: Runner label. Linux is correct here -- this gate never touches native tooling.
+        required: false
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check react / react-native version contract
+        uses: simplify9/.github/.github/actions/check-react-native-contract@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-unknown: ${{ inputs.fail-on-unknown }}

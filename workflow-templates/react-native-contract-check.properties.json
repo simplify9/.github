@@ -1,0 +1,9 @@
+{
+    "name": "React Native Contract Check",
+    "description": "Fails a PR when react does not exactly match the version react-native's bundled renderer requires, or when react is duplicated in the tree. Catches the 'legal patch bump that crashes at runtime' class that type-check, lint, jest and metro bundling all miss. Mark 'rn-contract / check' required on the branch Dependabot targets.",
+    "iconName": "octicon-versions",
+    "categories": [
+        "React Native",
+        "Dependencies"
+    ]
+}
