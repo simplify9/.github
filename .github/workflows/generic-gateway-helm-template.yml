@@ -179,6 +179,22 @@ on:
         description: Additional Helm set values line or comma separated
         required: false
         type: string
+      tolerations:
+        description: |
+          Optional Kubernetes tolerations for the deployment pod, as a YAML list
+          (one entry per toleration, each with key/operator/value/effect), e.g.:
+            tolerations: |
+              - key: dedicated
+                operator: Equal
+                value: "1cs"
+                effect: NoSchedule
+          Lets the pod schedule onto a tainted/dedicated node pool. Requires
+          s9genericchart-v2 >=0.4.0 (the `tolerations` chart value). Leave empty
+          (default) to omit tolerations entirely — matches the chart's own no-op
+          default, so unset callers are unaffected.
+        required: false
+        default: ''
+        type: string
 
       routing-mode:
         description: Routing mode gateway ingress or dual
@@ -772,6 +788,25 @@ jobs:
       - name: Mark routing checkpoint
         run: echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
 
+      # Renders inputs.tolerations (a bare YAML list) into its own values file,
+      # since the single values_file slot above already carries the gateway-routing
+      # output. helm-generic applies -f once per non-blank line, in order, so both
+      # files land on the same `helm upgrade` call.
+      - name: Render tolerations values file
+        id: tolerations
+        if: ${{ inputs.tolerations != '' }}
+        shell: bash
+        env:
+          TOLERATIONS: ${{ inputs.tolerations }}
+        run: |
+          set -euo pipefail
+          FILE="${RUNNER_TEMP}/tolerations-values.yaml"
+          {
+            echo "tolerations:"
+            printf '%s\n' "$TOLERATIONS" | sed 's/^/  /'
+          } > "$FILE"
+          echo "values-file=${FILE}" >> "$GITHUB_OUTPUT"
+
       # Gateway listener + cert onboarding is race-safe against the shared gateway
       # (single optimistic-locked kubectl replace, retried on conflict). Previously
       # ~380 lines of inline bash; see .github/actions/gateway-onboard.
@@ -809,9 +844,13 @@ jobs:
           extra_args: --wait
           atomic: ${{ inputs.atomic }}
           # Structured gateway/ingress routing values come from the rendered YAML
-          # file (values_file). The --set values below still override it on any
-          # colliding key (Helm applies -f before --set).
-          values_file: ${{ steps.routing.outputs.values-file }}
+          # file, plus an optional tolerations values file (skipped when
+          # inputs.tolerations is unset, since that step doesn't run). The --set
+          # values below still override both on any colliding key (Helm applies
+          # -f before --set).
+          values_file: |
+            ${{ steps.routing.outputs.values-file }}
+            ${{ steps.tolerations.outputs.values-file }}
           extra_set_values: |
             image.repo=${{ env.CONTAINER_REGISTRY }}
             app.version=${{ needs.version.outputs.version }}
