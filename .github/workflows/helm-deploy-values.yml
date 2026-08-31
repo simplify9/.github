@@ -16,6 +16,28 @@
 #   ingress.paths[i]
 #   service.targetPort=<port>
 #
+# ROUTING MODES (routing-mode input):
+#   ingress  DEFAULT. Legacy nginx Ingress via the ingress-* inputs. Behaviour
+#            is unchanged from before Gateway API support existed: the gateway
+#            steps are skipped and nothing extra reaches Helm.
+#   gateway  Gateway API only. Routing values are rendered by the shared
+#            `gateway-routing` action -- the SAME action the full gateway
+#            pipeline (generic-gateway-helm-template.yml) uses -- and merged in
+#            as a second --values file, so the slug/sectionName/parentRef logic
+#            has one implementation in the estate, not two.
+#   dual     Both. Emits the s9generic ingress schema
+#            (ingress.hosts[].host / ingress.paths[]); charts with a different
+#            ingress shape must stay on `ingress` or `gateway`.
+#
+#   SHARED vs DEDICATED listener: pass `gateway-section-name` (or
+#   `gateway-section-names`) naming an EXISTING listener and onboarding becomes
+#   a read-only assertion. Omit it and onboarding runs DEDICATED mode, which
+#   creates a per-host listener + Certificate and mutates the shared Gateway on
+#   every deploy -- the documented cause of listener drift on the shared edges.
+#
+#   Value precedence, lowest to highest:
+#     caller values file  ->  rendered gateway values  ->  --set  ->  --set-string
+#
 # Deploy guardrails:
 #   - concurrency: serializes runs per namespace+release so two deploys can't
 #     race the same Helm release (cancel-in-progress: false — never cancel a
@@ -116,6 +138,146 @@ on:
         type: string
         required: false
         default: ""
+
+      # ---------------------------------------------------------------------
+      # Gateway API routing (opt-in).
+      #
+      # routing-mode defaults to `ingress`, which is the pre-existing behaviour
+      # bit-for-bit: the render/onboard steps below are skipped entirely and
+      # nothing new is passed to Helm. Existing callers are unaffected.
+      # ---------------------------------------------------------------------
+      routing-mode:
+        description: >-
+          Routing mode: `ingress` (default, legacy nginx Ingress via the
+          ingress-* inputs), `gateway` (Gateway API HTTPRoute only), or `dual`
+          (both). Anything other than `ingress` renders a gateway values file
+          with the shared gateway-routing action and merges it into the deploy.
+          NOTE: `dual` emits the s9generic ingress schema
+          (ingress.hosts[].host / ingress.paths[]); charts using a different
+          ingress shape should stay on `ingress` or `gateway`.
+        type: string
+        required: false
+        default: ingress
+
+      gateway-hostnames:
+        description: Gateway hostnames, comma- or newline-separated.
+        type: string
+        required: false
+        default: ""
+
+      gateway-paths:
+        description: >-
+          Gateway route paths, comma- or newline-separated. Empty falls back to
+          ingress-paths, then to `/`.
+        type: string
+        required: false
+        default: ""
+
+      gateway-path-type:
+        description: Gateway route path type (PathPrefix or Exact).
+        type: string
+        required: false
+        default: PathPrefix
+
+      gateway-parent-name:
+        description: Gateway parentRef name (the Gateway to attach the route to).
+        type: string
+        required: false
+        default: public-gateway
+
+      gateway-parent-namespace:
+        description: Namespace the parent Gateway lives in.
+        type: string
+        required: false
+        default: s9-dev-edge
+
+      gateway-section-name:
+        description: >-
+          Gateway sectionName override — the name of an EXISTING listener on the
+          parent Gateway (e.g. `https-wildcard-sf9-io`). Setting this selects
+          SHARED LISTENER MODE: onboarding creates no listener and no
+          Certificate, it only asserts the named listener exists and fails the
+          deploy if it does not. Pass this for every app on a shared wildcard
+          domain — omitting it runs DEDICATED mode, which mutates the shared
+          Gateway on every deploy.
+        type: string
+        required: false
+        default: ""
+
+      gateway-section-names:
+        description: >-
+          Per-hostname sectionName overrides, one per line, position-aligned
+          with gateway-hostnames. A blank line means DEDICATED mode for that
+          host; a non-empty line means SHARED mode. Mutually exclusive with
+          gateway-section-name (the shared action fails if both are set).
+        type: string
+        required: false
+        default: ""
+
+      gateway-backend-service-name:
+        description: >-
+          Backend Service name for the route. Empty means the chart's own
+          Service (the chart fills in its fullname).
+        type: string
+        required: false
+        default: ""
+
+      gateway-backend-port:
+        description: Backend Service port for the route.
+        type: string
+        required: false
+        default: "80"
+
+      gateway-auto-onboarding:
+        description: >-
+          Run the gateway-onboard action before deploying. In shared-listener
+          mode this is a cheap, loud pre-flight assertion that the listener
+          exists. Set false only when the caller does not own the Gateway and
+          cannot read it.
+        type: boolean
+        required: false
+        default: true
+
+      gateway-class-name:
+        description: GatewayClass used if onboarding has to create the Gateway (DEDICATED mode only).
+        type: string
+        required: false
+        default: cilium
+
+      gateway-cert-issuer-name:
+        description: cert-manager issuer name (DEDICATED mode only).
+        type: string
+        required: false
+        default: letsencrypt-production-gateway
+
+      gateway-cert-issuer-kind:
+        description: cert-manager issuer kind (DEDICATED mode only).
+        type: string
+        required: false
+        default: ClusterIssuer
+
+      gateway-cert-wait:
+        description: Wait for certificate readiness during onboarding (DEDICATED mode only).
+        type: boolean
+        required: false
+        default: true
+
+      gateway-cert-wait-timeout-seconds:
+        description: Certificate readiness timeout in seconds (DEDICATED mode only).
+        type: string
+        required: false
+        default: "600"
+
+      gateway-verify-route:
+        description: >-
+          After a gateway deploy, assert the HTTPRoute actually exists and was
+          Accepted by the parent Gateway. This is the guard against the estate's
+          most expensive silent failure: a chart that renders no HTTPRoute (or
+          one pointing at a listener that does not match) still reports a
+          successful `helm upgrade`, and the app is simply unreachable.
+        type: boolean
+        required: false
+        default: true
 
       image-tag:
         description: Optional image tag to set on the chart (empty = chart 
@@ -356,6 +518,80 @@ jobs:
           fi
           echo "values-file=${RESOLVED}" >> "$GITHUB_OUTPUT"
 
+      # Gateway API routing values are produced by the same shared, parameterised
+      # action the full gateway pipeline uses (generic-gateway-helm-template.yml),
+      # rather than being re-derived here. That keeps one implementation of the
+      # slug/sectionName/parentRef logic in the estate instead of a second copy
+      # that can drift. It writes a real YAML file under $RUNNER_TEMP — never
+      # into the workspace, which would collide with the sparse-checkout above.
+      - name: Render gateway routing values
+        id: routing
+        if: ${{ inputs.routing-mode != 'ingress' }}
+        uses: simplify9/.github/.github/actions/gateway-routing@main
+        with:
+          routing-mode: ${{ inputs.routing-mode }}
+          gateway-parent-name: ${{ inputs.gateway-parent-name }}
+          gateway-parent-namespace: ${{ inputs.gateway-parent-namespace }}
+          gateway-section-name: ${{ inputs.gateway-section-name }}
+          gateway-section-names: ${{ inputs.gateway-section-names }}
+          gateway-hostnames: ${{ inputs.gateway-hostnames }}
+          gateway-paths: ${{ inputs.gateway-paths }}
+          gateway-path-type: ${{ inputs.gateway-path-type }}
+          gateway-backend-service-name: ${{ inputs.gateway-backend-service-name }}
+          gateway-backend-port: ${{ inputs.gateway-backend-port }}
+          ingress-hosts: ${{ inputs.ingress-hosts }}
+          ingress-paths: ${{ inputs.ingress-paths }}
+          ingress-tls-secrets: ${{ inputs.ingress-tls-secrets }}
+
+      # helm-deploy takes ONE values-file path, already spoken for by the
+      # caller's repo values file. The rendered gateway YAML is therefore passed
+      # through its inline `values` input instead: the action emits
+      # `--values <caller file>` then `--values <inline tmp>`, so the gateway
+      # values land after — and thus win over — the caller's file, while --set
+      # and --set-string still win over both. No change to the shared action.
+      - name: Load rendered gateway values
+        id: gwvalues
+        if: ${{ inputs.routing-mode != 'ingress' }}
+        env:
+          ROUTING_FILE: ${{ steps.routing.outputs.values-file }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$ROUTING_FILE" ]; then
+            echo "::error title=Gateway values missing::gateway-routing reported '$ROUTING_FILE' but it does not exist."
+            exit 1
+          fi
+          echo "----- rendered gateway values -----"
+          cat "$ROUTING_FILE"
+          # Random heredoc delimiter (repo convention) so rendered content can
+          # never terminate the block early.
+          DELIM="EOF_$(dd if=/dev/urandom bs=15 count=1 status=none | base64 | tr -dc 'a-zA-Z0-9')"
+          {
+            echo "yaml<<${DELIM}"
+            cat "$ROUTING_FILE"
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Shared-listener mode makes this a read-only assertion that the named
+      # listener exists — it creates nothing. Dedicated mode (no section name)
+      # provisions a listener + Certificate and MUTATES the shared Gateway, which
+      # is why gateway-section-name should be set for any app on a wildcard domain.
+      - name: Onboard gateway hostnames
+        if: ${{ inputs.routing-mode != 'ingress' && inputs.gateway-auto-onboarding }}
+        uses: simplify9/.github/.github/actions/gateway-onboard@main
+        with:
+          kubeconfig: ${{ secrets.kubeconfig || secrets.kubeconfig64 }}
+          namespace: ${{ inputs.namespace }}
+          gateway-parent-name: ${{ inputs.gateway-parent-name }}
+          gateway-parent-namespace: ${{ inputs.gateway-parent-namespace }}
+          gateway-class-name: ${{ inputs.gateway-class-name }}
+          gateway-cert-issuer-name: ${{ inputs.gateway-cert-issuer-name }}
+          gateway-cert-issuer-kind: ${{ inputs.gateway-cert-issuer-kind }}
+          gateway-cert-wait: ${{ inputs.gateway-cert-wait }}
+          gateway-cert-wait-timeout-seconds: ${{ inputs.gateway-cert-wait-timeout-seconds }}
+          gateway-section-name: ${{ inputs.gateway-section-name }}
+          gateway-host-list: ${{ steps.routing.outputs.gateway-host-list }}
+          gateway-section-names-list: ${{ steps.routing.outputs.gateway-section-names-list }}
+
       - name: Deploy with Helm
         uses: simplify9/.github/.github/actions/helm-deploy@main
         with:
@@ -366,6 +602,8 @@ jobs:
           release-name: ${{ inputs.release-name }}
           namespace: ${{ inputs.namespace }}
           values-file: ${{ steps.prep.outputs.values-file }}
+          # Empty in ingress mode, so the Helm invocation is unchanged there.
+          values: ${{ steps.gwvalues.outputs.yaml }}
           set-values: ${{ steps.prep.outputs.set-values }}
           secret-set-string-values: ${{ secrets.helm-set-secret-values }}
           image-tag: ${{ inputs.image-tag }}
@@ -376,3 +614,59 @@ jobs:
           helm-version: ${{ inputs.helm-version }}
           kubectl-version: ${{ inputs.kubectl-version }}
           kubeconfig: ${{ secrets.kubeconfig || secrets.kubeconfig64 }}
+
+      # A successful `helm upgrade` is NOT evidence that traffic will flow. Two
+      # failure modes both report success and serve nothing:
+      #   1. the chart renders no HTTPRoute at all (gateway.* values silently
+      #      ignored by a chart version that predates Gateway API support);
+      #   2. the route attaches to a listener that cannot serve its hostname.
+      # Case 1 is caught by the existence check, case 2 by reading the parent's
+      # Accepted condition. Both are otherwise invisible until users report 404s.
+      - name: Verify HTTPRoute attached
+        if: ${{ inputs.routing-mode != 'ingress' && inputs.gateway-verify-route }}
+        env:
+          KUBECONFIG_DATA: ${{ secrets.kubeconfig || secrets.kubeconfig64 }}
+          RELEASE_NAME: ${{ inputs.release-name }}
+          NAMESPACE: ${{ inputs.namespace }}
+          ROUTING_MODE: ${{ inputs.routing-mode }}
+        run: |
+          set -euo pipefail
+          KUBECONFIG_FILE="$RUNNER_TEMP/kubeconfig-verify"
+          trap 'rm -f "$KUBECONFIG_FILE"' EXIT
+          # Secret is accepted base64-encoded or as raw YAML, matching the
+          # kubeconfig handling in the shared deploy actions.
+          if printf '%s' "$KUBECONFIG_DATA" | base64 -d > "$KUBECONFIG_FILE" 2>/dev/null &&
+             head -c 512 "$KUBECONFIG_FILE" | grep -q 'apiVersion'; then :; else
+            printf '%s' "$KUBECONFIG_DATA" > "$KUBECONFIG_FILE"
+          fi
+          chmod 600 "$KUBECONFIG_FILE"
+          export KUBECONFIG="$KUBECONFIG_FILE"
+
+          echo "::group::[GATEWAY] HTTPRoutes for release $RELEASE_NAME"
+          ROUTES="$(kubectl -n "$NAMESPACE" get httproute \
+            -l "app.kubernetes.io/instance=$RELEASE_NAME" \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+          # Fall back to the release name for charts that do not label the route.
+          if [ -z "$ROUTES" ] && kubectl -n "$NAMESPACE" get httproute "$RELEASE_NAME" >/dev/null 2>&1; then
+            ROUTES="$RELEASE_NAME"
+          fi
+          if [ -z "$ROUTES" ]; then
+            echo "::error title=No HTTPRoute::routing-mode is '$ROUTING_MODE' but the release created no HTTPRoute in namespace '$NAMESPACE'. The deployed chart most likely has no HTTPRoute template - gateway.* values are silently ignored by chart versions that predate Gateway API support. Check the chart version that was actually deployed."
+            exit 1
+          fi
+
+          RC=0
+          for r in $ROUTES; do
+            echo "-- $r"
+            kubectl -n "$NAMESPACE" get httproute "$r" -o jsonpath='{range .status.parents[*]}  parent={.parentRef.name}/{.parentRef.sectionName}{range .conditions[*]} {.type}={.status}({.reason}){end}{"\n"}{end}'
+            # Accepted=False is the loud, greppable failure - e.g. NoMatchingParent
+            # when sectionName names a listener that does not exist.
+            if kubectl -n "$NAMESPACE" get httproute "$r" -o json |
+               tr -d ' \n' | grep -q '"type":"Accepted","status":"False"'; then
+              echo "::error title=HTTPRoute not accepted::'$r' was rejected by its parent Gateway (conditions above)."
+              RC=1
+            fi
+          done
+          echo "::endgroup::"
+          if [ "$RC" -eq 0 ]; then echo "HTTPRoute(s) accepted by the parent Gateway."; fi
+          exit "$RC"
