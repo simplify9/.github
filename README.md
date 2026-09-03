@@ -536,6 +536,8 @@ Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishe
 | `package-manager` | | `yarn` | `yarn` or `npm` |
 | `build-root-directory` | | `android` | Gradle project root |
 | `use-jetifier` | | `true` | Run `npx jetify` (AndroidX migration) |
+| `free-disk-space` | | `true` | Reclaim preinstalled toolchains the build never uses (.NET, GHC, Swift, PowerShell, CodeQL, Docker images) before installing anything |
+| `android-ndk-version` | | `27.1.12297006` | NDK to guarantee is installed. Set to your `android/build.gradle` `ndkVersion` to avoid a second, unused NDK; empty string skips NDK setup |
 | `play-track` | | `internal` | `internal`, `alpha`, `beta`, `production` |
 | `changes-not-sent-for-review` | | `false` | Use `changesNotSentForReview` (internal tracks) |
 | `release-environment` | | `android-staging` | GitHub Environment for the release job |
@@ -567,7 +569,17 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
-**Notes:** Gradle uses `gradle/actions/setup-gradle@v5` (do not use the archived `gradle/gradle-build-action`, and do not add `cache: gradle` to `setup-java` — it conflicts). The workflow sets `org.gradle.caching=true` itself, so callers no longer need to. NDK `27.1.12297006` (r27b LTS) is pinned and installed via `sdkmanager` (not `actions/cache` — the Android SDK dir is root-owned). Use the **Android App CI/CD** starter template for a `workflow_dispatch` entry point.
+**Notes:** Gradle uses `gradle/actions/setup-gradle@v5` (do not use the archived `gradle/gradle-build-action`, and do not add `cache: gradle` to `setup-java` — it conflicts). The workflow sets `org.gradle.caching=true` itself, so callers no longer need to. NDK defaults to `27.1.12297006` (r27b LTS) and is installed via `sdkmanager` (not `actions/cache` — the Android SDK dir is root-owned), and is **skipped when the runner image already ships that version**. Use the **Android App CI/CD** starter template for a `workflow_dispatch` entry point.
+
+> **Runner disk is the failure mode to know about.** A release RN build (node_modules, jetifier rewrite, restored Gradle home, NDK, per-ABI native output, R8, bundletool) does not fit next to everything `ubuntu-24.04` preinstalls. When the filesystem fills, the JVM's writes get **truncated instead of refused**, so Gradle blames whichever task happened to be writing — and the reported error is never the real one:
+>
+> | Reported error | What actually happened |
+> |---|---|
+> | `:app:compileReleaseArtProfile` — `Class rules don't support flags, but 'HSP' were specified` | The merged `baseline-prof.txt` was cut off mid-token |
+> | `:app:signReleaseBundle` / `:app:packageReleaseBundle` — `Location not within channel boundaries` | The AAB's zip central directory points past a truncated EOF |
+> | `java.io.IOException: No space left on device` | The honest one — same cause |
+>
+> Because it depends on *when* the disk fills, the same commit can fail and then pass on a re-run. `free-disk-space: true` (the default) reclaims ~20 GB up front, and the build now prints free space before and after Gradle so this is visible in the log rather than inferred. If a build still fails on disk, the failure report says so explicitly. Apps that package several ABIs with `debugSymbolLevel 'FULL'` are the ones that hit this first.
 
 ---
 
