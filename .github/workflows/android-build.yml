@@ -61,6 +61,24 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      free-disk-space:
+        description: "Reclaim preinstalled toolchains this build never uses
+          (.NET SDKs, Haskell/GHC, Swift, PowerShell+Az, CodeQL, cached Docker
+          images) before installing anything. A release React Native build does
+          not fit alongside them on ubuntu-latest. Only set false if the caller
+          genuinely needs one of those toolchains in the same job."
+        required: false
+        type: boolean
+        default: true
+      android-ndk-version:
+        description: "NDK to guarantee is installed, as an sdkmanager package
+          revision. Default 27.1.12297006 (r27b LTS) for RN 0.85. Set this to the
+          ndkVersion in your android/build.gradle so CI does not install a second,
+          unused NDK next to the one the build actually resolves. Empty string
+          skips NDK installation entirely."
+        required: false
+        type: string
+        default: "27.1.12297006"
       node-version:
         description: Node version for JS dependency install
         required: false
@@ -327,6 +345,57 @@ jobs:
             echo "CHECKPOINT_2_STATUS=⏳ Pending"
             echo "CHECKPOINT_3_STATUS=⏳ Pending"
           } >> "$GITHUB_ENV"
+
+      # ── Disk headroom ───────────────────────────────────────────────────────
+      # A release RN build (node_modules + jetifier rewrite + restored Gradle
+      # home + NDK + per-ABI native output + R8 + bundletool) does not fit next
+      # to everything ubuntu-24.04 preinstalls. When the filesystem fills, the
+      # JVM's writes are truncated rather than refused, so Gradle reports a
+      # different misleading error each run instead of the real cause:
+      #   :app:compileReleaseArtProfile — "Class rules don't support flags"
+      #       (the merged baseline-prof.txt was cut off mid-token)
+      #   :app:signReleaseBundle       — "Location not within channel boundaries"
+      #       (the AAB's zip central directory points past a truncated EOF)
+      # and only sometimes the honest "java.io.IOException: No space left on
+      # device". Reclaim before anything downloads, and always print df so the
+      # next disk incident is diagnosable from the log instead of by inference.
+      - name: Free disk space
+        if: ${{ inputs.free-disk-space }}
+        shell: bash
+        run: |
+          # IMPORTANT: `shell: bash` steps run as
+          # `bash --noprofile --norc -e -o pipefail {0}` -- `-e` is baked into
+          # the invocation itself and `set -uo pipefail` here does NOT (and
+          # cannot) cancel it. That is why every removal below carries
+          # `|| true`: a path absent from a future runner image is expected,
+          # not an error, and must never fail the build.
+          set -uo pipefail
+          echo "::group::🤖 [ANDROID] Reclaiming runner disk"
+          echo "→ Before:"
+          df -h / | sed 's/^/    /'
+          BEFORE_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
+
+          # Removed: toolchains an Android/React Native build never touches.
+          # NOT touched: /usr/local/lib/android (SDK, build-tools and every NDK
+          # the project might resolve) and /opt/hostedtoolcache (holds the Java
+          # and Node that setup-java/setup-node put there for this very job) —
+          # apart from CodeQL, which nothing here can use.
+          sudo rm -rf /usr/share/dotnet            || true   # 11 .NET SDKs
+          sudo rm -rf /opt/ghc /usr/local/.ghcup   || true   # GHC/Stack/Cabal
+          sudo rm -rf /usr/share/swift             || true
+          sudo rm -rf /usr/local/share/powershell  || true   # PS + Az modules
+          sudo rm -rf /opt/hostedtoolcache/CodeQL  || true
+          sudo rm -rf /usr/local/share/boost       || true
+          docker image prune --all --force > /dev/null 2>&1 || true
+          sudo apt-get clean > /dev/null 2>&1               || true
+
+          echo "→ After:"
+          df -h / | sed 's/^/    /'
+          AFTER_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
+          echo "→ Reclaimed: $(( (AFTER_KB - BEFORE_KB) / 1024 )) MB"
+          echo "→ Free now:  $(( AFTER_KB / 1024 )) MB"
+          echo "✅ Disk reclaimed"
+          echo "::endgroup::"
 
       # ── Environment Setup ───────────────────────────────────────────────────
       - name: Checkout
@@ -605,18 +674,33 @@ jobs:
           echo "✅ Gradle properties normalized"
           echo "::endgroup::"
 
+      # ndk-version default 27.1.12297006 = NDK r27b (LTS). Change it only after
+      # validating CMake ABI compatibility with your RN version. The runner image
+      # already ships several NDKs (27.3/28.2/29.0 as of ubuntu-24.04 20260823),
+      # and sdkmanager installs side-by-side, so asking for one that is already
+      # there used to add ~2.8 GB of a second copy the build never resolves —
+      # which on a big RN app is the difference between fitting on the runner
+      # and truncating the AAB. Install only when genuinely absent.
       - name: Install NDK
+        if: ${{ inputs.android-ndk-version != '' }}
         shell: bash
+        env:
+          NDK_VERSION: ${{ inputs.android-ndk-version }}
         run: |
           set -euo pipefail
-          SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          SDK_ROOT="/usr/local/lib/android/sdk"
+          SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
           echo "::group::📦 [ANDROID] Pre-installing NDK versions"
-          echo "→ Accepting SDK licenses"
-          yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
-          echo "→ Installing NDK 27.1.12297006"
-          # NDK 27.1.12297006 = NDK r27b (LTS). Upgrade only after
-          # validating CMake ABI compatibility with your RN version.
-          "${SDKMANAGER}" "ndk;27.1.12297006"
+          if [[ -d "${SDK_ROOT}/ndk/${NDK_VERSION}" ]]; then
+            echo "→ NDK ${NDK_VERSION} already present in the runner image — skipping install"
+          else
+            echo "→ Accepting SDK licenses"
+            yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
+            echo "→ Installing NDK ${NDK_VERSION}"
+            "${SDKMANAGER}" "ndk;${NDK_VERSION}"
+          fi
+          echo "→ NDKs now on disk:"
+          find "${SDK_ROOT}/ndk" -mindepth 1 -maxdepth 1 -printf '    %f\n' 2>/dev/null || echo "    (none)"
           echo "✅ NDK version pre-installed"
           echo "::endgroup::"
 
@@ -651,6 +735,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "→ Disk before Gradle: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           # EXTRA_ARGS is intentionally unquoted to allow word splitting
           # for callers that pass multiple space-separated Gradle flags.
           # shellcheck disable=SC2086
@@ -668,6 +753,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "→ Disk after Gradle:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Gradle bundle built — PASSED"
 
@@ -732,6 +818,19 @@ jobs:
           echo "  Checkpoint 1 — Keystore restored: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Bundle built:      ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — Bundle renamed:    ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+
+          # A full filesystem does not announce itself: the JVM's writes get
+          # truncated and Gradle blames whichever task happened to be writing
+          # (compileReleaseArtProfile on a cut-off baseline profile,
+          # signReleaseBundle on a cut-off AAB: "Location not within channel
+          # boundaries"). Say so here so nobody chases the wrong task again.
+          # Never let the diagnostic itself abort the report it is attached to.
+          FREE_MB="$(df -Pk / 2>/dev/null | awk 'NR==2 {print int($4/1024)}')" || FREE_MB=""
+          echo "  Free disk at failure:             ${FREE_MB:-unknown} MB"
+          df -h / 2>/dev/null | sed 's/^/    /' || true
+          if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 1024 ]]; then
+            echo "::error title=🤖 [ANDROID] Runner out of disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Gradle task as a symptom of a truncated write, not the cause. Ensure free-disk-space is true, and set android-ndk-version to the ndkVersion your android/build.gradle actually resolves."
+          fi
 
       - name: Build summary
         if: always()
