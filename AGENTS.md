@@ -354,6 +354,7 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - **CocoaPods caching:** two independent `actions/cache@v5` steps key on `Podfile.lock` — `~/.cocoapods/repos` (global spec repo, always restored) and `ios/Pods` (project Pods dir, skipped when `clean-reinstall-pods: true`).
 - **ccache (`enable-ccache`, default `true`):** caches ObjC/C++ pod compilation under `~/Library/Caches/ccache`. No benefit for Swift targets. The workflow patches the Podfile to set `:ccache_enabled => true` when enabled.
 - **Ruby/Bundler:** set `ruby-version` + `use-bundler: true` to manage CocoaPods via Bundler (`ruby/setup-ruby@v1` with `bundler-cache`).
+- **Disk is logged, not reclaimed.** The Archive step prints free space before and after `xcodebuild`, and the failure report prints `df` plus an explicit low-disk error under 2 GB. There is deliberately **no** reclamation step here (unlike `android-build.yml`): macOS runners have ample headroom and this pipeline has never run short. The logging exists because a full filesystem truncates writes rather than refusing them, so it would surface as a corrupt archive, a bogus codesign result or a `PhaseScriptExecution` failure — never as "out of disk". Android lost two weeks to exactly that. If iOS ever does run short, the log will say so on the first run. Do not add a cleanup step here without evidence that one is needed.
 
 ## Android-Specific Rules
 

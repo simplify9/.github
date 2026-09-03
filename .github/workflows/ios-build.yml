@@ -886,6 +886,7 @@ jobs:
           PROFILE_NAME: ${{ steps.profile_meta.outputs.profile_name }}
         run: |
           set -euo pipefail
+          echo "→ Disk before archive: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           mkdir -p output
 
           TEAM_ID="${IOS_TEAM_ID}"
@@ -913,6 +914,7 @@ jobs:
             -hideShellScriptEnvironment \
             -showBuildTimingSummary
 
+          echo "→ Disk after archive:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${ARCHIVE_PATH}"
 
@@ -1044,6 +1046,20 @@ jobs:
           echo "  Checkpoint 1 — Signing cert installed: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
           echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
           echo "  Checkpoint 3 — IPA renamed:           ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+
+          # Insurance, not a known problem: macOS runners have plenty of headroom
+          # and this pipeline has never run short. But a full filesystem truncates
+          # writes instead of refusing them, so it surfaces as a corrupt archive,
+          # a bogus codesign result or a PhaseScriptExecution failure — never as
+          # "out of disk". The Android pipeline lost two weeks to exactly that
+          # (simplify9/.github#168) purely because nothing logged free space.
+          # Never let the diagnostic abort the report it is attached to.
+          FREE_MB="$(df -Pk / 2>/dev/null | awk 'NR==2 {print int($4/1024)}')" || FREE_MB=""
+          echo "  Free disk at failure:                 ${FREE_MB:-unknown} MB"
+          df -h / 2>/dev/null | sed 's/^/    /' || true
+          if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 2048 ]]; then
+            echo "::error title=🍎 [IOS] Runner low on disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Xcode error as a possible symptom of a truncated write rather than the cause."
+          fi
 
       - name: Collect ccache stats
         if: ${{ always() && inputs.enable-ccache }}
