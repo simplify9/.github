@@ -363,8 +363,12 @@ jobs:
         if: ${{ inputs.free-disk-space }}
         shell: bash
         run: |
-          # Deliberately not `set -e`: a path missing from a future runner image
-          # must never fail the build. Every removal is best-effort.
+          # IMPORTANT: `shell: bash` steps run as
+          # `bash --noprofile --norc -e -o pipefail {0}` -- `-e` is baked into
+          # the invocation itself and `set -uo pipefail` here does NOT (and
+          # cannot) cancel it. That is why every removal below carries
+          # `|| true`: a path absent from a future runner image is expected,
+          # not an error, and must never fail the build.
           set -uo pipefail
           echo "::group::🤖 [ANDROID] Reclaiming runner disk"
           echo "→ Before:"
