@@ -44,6 +44,16 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      free-disk-space:
+        description: "Reclaim preinstalled toolchains this build never uses
+          (.NET SDKs, Haskell/GHC, Swift, PowerShell+Az, CodeQL, cached Docker
+          images) before installing anything. ubuntu-latest starts with only
+          ~13 GB free, which a Flutter SDK plus a Gradle release build can
+          exhaust. Only set false if the caller genuinely needs one of those
+          toolchains in the same job."
+        required: false
+        type: boolean
+        default: true
       flutter-version:
         description: >
           Flutter version selector for subosito/flutter-action (for example
@@ -303,6 +313,48 @@ jobs:
             echo "CHECKPOINT_3_STATUS=⏳ Pending"
           } >> "$GITHUB_ENV"
 
+      # Same runner, same exposure as android-build.yml. A full filesystem
+      # truncates writes rather than refusing them, so Gradle fails in whichever
+      # task was mid-write and names the wrong culprit — that cost the React
+      # Native Android pipeline two weeks (simplify9/.github#168). This pipeline
+      # is lighter (no node_modules, no jetifier, no extra NDK) and has no
+      # recorded failure, but it runs on the same ~13 GB and had no way to see
+      # the ceiling coming. Reclaim first, and always print df.
+      - name: Free disk space
+        if: ${{ inputs.free-disk-space }}
+        shell: bash
+        run: |
+          # IMPORTANT: `shell: bash` steps run as
+          # `bash --noprofile --norc -e -o pipefail {0}` -- `-e` is baked into
+          # the invocation itself and `set -uo pipefail` here does NOT (and
+          # cannot) cancel it. That is why every removal below carries
+          # `|| true`: a path absent from a future runner image is expected,
+          # not an error, and must never fail the build.
+          set -uo pipefail
+          echo "::group::🤖 [ANDROID] Reclaiming runner disk"
+          echo "→ Before:"
+          df -h / | sed 's/^/    /'
+          BEFORE_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
+
+          # NOT touched: /usr/local/lib/android (SDK/NDK) and the rest of
+          # /opt/hostedtoolcache (holds the Java this job uses).
+          sudo rm -rf /usr/share/dotnet            || true
+          sudo rm -rf /opt/ghc /usr/local/.ghcup   || true
+          sudo rm -rf /usr/share/swift             || true
+          sudo rm -rf /usr/local/share/powershell  || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL  || true
+          sudo rm -rf /usr/local/share/boost       || true
+          docker image prune --all --force > /dev/null 2>&1 || true
+          sudo apt-get clean > /dev/null 2>&1               || true
+
+          echo "→ After:"
+          df -h / | sed 's/^/    /'
+          AFTER_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
+          echo "→ Reclaimed: $(( (AFTER_KB - BEFORE_KB) / 1024 )) MB"
+          echo "→ Free now:  $(( AFTER_KB / 1024 )) MB"
+          echo "✅ Disk reclaimed"
+          echo "::endgroup::"
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -550,6 +602,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::🤖 [CHECKPOINT 2/3] flutter build appbundle"
+          echo "→ Disk before build: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           DEFINE_FLAGS=""
           for kv in ${DART_DEFINE}; do
             DEFINE_FLAGS="${DEFINE_FLAGS} --dart-define=${kv}"
@@ -559,6 +612,7 @@ jobs:
             --build-name="${VERSION_NAME}" \
             --build-number="${VERSION_CODE}" \
             ${DEFINE_FLAGS}
+          echo "→ Disk after build:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "::endgroup::"
 
@@ -629,6 +683,14 @@ jobs:
         shell: bash
         run: |
           echo "::error title=🤖 [ANDROID] Build failed::CP1 keystore=${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2 build=${CHECKPOINT_2_STATUS:-⏭️ Not reached} | CP3 rename=${CHECKPOINT_3_STATUS:-⏭️ Not reached}"
+
+          # Never let the diagnostic abort the report it is attached to.
+          FREE_MB="$(df -Pk / 2>/dev/null | awk 'NR==2 {print int($4/1024)}')" || FREE_MB=""
+          echo "  Free disk at failure: ${FREE_MB:-unknown} MB"
+          df -h / 2>/dev/null | sed 's/^/    /' || true
+          if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 1024 ]]; then
+            echo "::error title=🤖 [ANDROID] Runner out of disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Gradle task as a symptom of a truncated write, not the cause. Ensure free-disk-space is true."
+          fi
 
       - name: Build summary
         if: always()
