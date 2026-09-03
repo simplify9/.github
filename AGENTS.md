@@ -369,6 +369,12 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ---
 
+## Flutter Mobile Rules
+
+- **The Flutter workflows mirror their React Native counterparts on disk.** `flutter-android-build.yml` runs on the same `ubuntu-latest` as `android-build.yml`, so it carries the same `free-disk-space` input (default `true`) plus free-space logging around `flutter build appbundle` and in the failure report. `flutter-ios-build.yml` gets logging only, like `ios-build.yml`. The fleet rule is: **Ubuntu Android builds reclaim and log; macOS iOS builds log only.** Mirror any change to one onto its counterpart, or record the divergence here.
+- Flutter Android is lighter than RN (no `node_modules`, no jetifier, no extra NDK install) and has no recorded disk failure — the reclamation there is parity insurance on a known-marginal runner, not a fix for an observed bug. Read the Android-Specific Rules entry on disk exhaustion for why the symptom never names the cause.
+- Both Flutter callers are currently low-traffic (`S9hub-mono`, `yousefafandi-franovo-booking`); neither had run since 2026-08-18 as of 2026-09-03, so treat "it was green last time" as weak evidence about current runner conditions.
+
 ## Adding a New Composite Action
 
 1. Create `.github/actions/<kebab-name>/action.yml`

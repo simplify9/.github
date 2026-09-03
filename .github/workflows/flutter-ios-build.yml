@@ -538,6 +538,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::🔏 [SIGN] [CHECKPOINT 2/3] Manual-sign rewrite & flutter build ipa"
+          echo "→ Disk before build: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
 
           sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "${PBXPROJ}"
           sed -i '' "s|PROVISIONING_PROFILE_SPECIFIER = \"\";|PROVISIONING_PROFILE_SPECIFIER = \"${PROFILE_NAME}\";|g" "${PBXPROJ}"
@@ -565,6 +566,7 @@ jobs:
             --export-options-plist="${EXPORT_OPTIONS_PLIST}" \
             ${DEFINE_FLAGS}
 
+          echo "→ Disk after build:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
           echo "::endgroup::"
 
@@ -634,6 +636,17 @@ jobs:
         shell: bash
         run: |
           echo "::error title=🍎 [IOS] Build failed::CP1 signing=${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2 build=${CHECKPOINT_2_STATUS:-⏭️ Not reached} | CP3 rename=${CHECKPOINT_3_STATUS:-⏭️ Not reached}"
+
+          # Insurance, not a known problem — macOS runners have ample headroom.
+          # A full filesystem truncates writes instead of refusing them, so it
+          # would surface as a corrupt archive or a bogus codesign result, never
+          # as "out of disk". Never let the diagnostic abort the report.
+          FREE_MB="$(df -Pk / 2>/dev/null | awk 'NR==2 {print int($4/1024)}')" || FREE_MB=""
+          echo "  Free disk at failure: ${FREE_MB:-unknown} MB"
+          df -h / 2>/dev/null | sed 's/^/    /' || true
+          if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 2048 ]]; then
+            echo "::error title=🍎 [IOS] Runner low on disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Xcode error as a possible symptom of a truncated write rather than the cause."
+          fi
 
       - name: Build summary
         if: always()

@@ -651,6 +651,7 @@ Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbu
 | `java-version` | | `17` | Java version (temurin) |
 | `version-prefix` | | `1.0.0` | Base version (X.Y or X.Y.Z) |
 | `version-code-offset` | | `80000` | Added to `github.run_number` for versionCode |
+| `free-disk-space` | | `true` | Reclaim preinstalled toolchains the build never uses (.NET, GHC, Swift, PowerShell, CodeQL, Docker images) before installing anything |
 | `run-analyze` | | `true` | Run `flutter analyze` before building |
 | `analyze-fatal-level` | | `none` | `flutter analyze` fatal severity (`none`/`warning`/`info`) |
 | `keystore-output-path` | | `android/app/release.keystore` | Where the decoded keystore is written |
