@@ -116,7 +116,7 @@ runs:
         NOT_FOUND_HANDLING: ${{ inputs['not-found-handling'] }}
       run: |
         set -euo pipefail
-        echo "::group::⚡ Generate wrangler.toml"
+        echo "::group::Generate wrangler.toml"
 
         # Values come from env (never interpolated into the script). PROJECT_NAME,
         # ENVIRONMENT, ASSETS_DIR, BUILD_FOR_OPENNEXT and ADD_ASSETS_BINDING are
@@ -230,7 +230,7 @@ runs:
         echo "Generated wrangler.toml:"
         echo "---------------------------"
         cat wrangler.toml
-        echo "✅ wrangler.toml generated — project: ${PROJECT_NAME}, env: ${ENVIRONMENT}, routes: ${#ROUTES[@]}"
+        echo "wrangler.toml generated - project: ${PROJECT_NAME}, env: ${ENVIRONMENT}, routes: ${#ROUTES[@]}"
         echo "::endgroup::"
 
     - name: Report failure
@@ -239,7 +239,7 @@ runs:
       env:
         PROJECT_NAME: ${{ inputs['project-name'] }}
       run: |
-        echo "::error title=❌ [CF-WORKERS] wrangler.toml generation failed::Config generation failed for project '$PROJECT_NAME'. Check that route, project-name, and compatibility-date inputs are valid."
+        echo "::error title=[CF-WORKERS] wrangler.toml generation failed::Config generation failed for project '$PROJECT_NAME'. Check that route, project-name, and compatibility-date inputs are valid."
 
 branding:
   icon: 'settings'

@@ -46,8 +46,8 @@
 | Next.js (SSR, OpenNext adapter) | Cloudflare Workers | [`next-cloudflare-worker.yaml`](#next-cloudflare-workeryaml) |
 | Vite single-page app | Cloudflare Workers (static assets) | [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml) |
 | Containerized service (any stack, .NET-friendly) | Docker + Helm (GHCR OCI / ChartMuseum), optional K8s deploy | [`reusable-service-cicd.yml`](#reusable-service-cicdyml) |
-| Service deployed over ingress-nginx | Docker + `s9genericchart` → Kubernetes | [`generic-chart-helm.yml`](#generic-chart-helmyml) |
-| Service deployed behind the Cilium Gateway API | Docker + `s9genericchart-v2` → Kubernetes | [`generic-gateway-helm-template.yml`](#generic-gateway-helm-templateyml) |
+| Service deployed over ingress-nginx | Docker + `s9genericchart` -> Kubernetes | [`generic-chart-helm.yml`](#generic-chart-helmyml) |
+| Service deployed behind the Cilium Gateway API | Docker + `s9genericchart-v2` -> Kubernetes | [`generic-gateway-helm-template.yml`](#generic-gateway-helm-templateyml) |
 | Deploy an already-published chart from a values file | Kubernetes via Helm | [`helm-deploy-values.yml`](#helm-deploy-valuesyml) |
 | Cilium Gateway API-aware Helm chart (chart dev) | ChartMuseum | [`gateway-chart-cicd.yml`](#gateway-chart-cicdyml) |
 | iOS app (React Native or native) | TestFlight | [`ios-build.yml`](#ios-buildyml) |
@@ -65,20 +65,20 @@ uses: simplify9/.github/.github/workflows/<name>.yml@main
 
 ## Starter Templates
 
-This repo also ships **org workflow templates** (`workflow-templates/`) that appear in GitHub's **Actions → New workflow** picker for any `simplify9` repo. Each template is a thin caller wired to a reusable workflow with example inputs pre-filled — start from one and edit.
+This repo also ships **org workflow templates** (`workflow-templates/`) that appear in GitHub's **Actions -> New workflow** picker for any `simplify9` repo. Each template is a thin caller wired to a reusable workflow with example inputs pre-filled — start from one and edit.
 
 | Template (in "New workflow") | Wraps | Default triggers |
 |---|---|---|
-| Service CI/CD Pipeline | `reusable-service-cicd.yml` | `push` → `main`, `workflow_dispatch` |
-| Generic Chart Helm CI/CD | `generic-chart-helm.yml` | `push` → `staging`/`main`, `workflow_dispatch` |
-| Next.js + Cloudflare Workers | `next-cloudflare-worker.yaml` | `push` → `staging`/`main`, `workflow_dispatch` |
-| Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` → `staging`/`main`, `workflow_dispatch` |
+| Service CI/CD Pipeline | `reusable-service-cicd.yml` | `push` -> `main`, `workflow_dispatch` |
+| Generic Chart Helm CI/CD | `generic-chart-helm.yml` | `push` -> `staging`/`main`, `workflow_dispatch` |
+| Next.js + Cloudflare Workers | `next-cloudflare-worker.yaml` | `push` -> `staging`/`main`, `workflow_dispatch` |
+| Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` -> `staging`/`main`, `workflow_dispatch` |
 | Android App CI/CD | `android-build.yml` | `workflow_dispatch` |
 | iOS App CI/CD | `ios-build.yml` | `workflow_dispatch` |
 | Flutter Android App CI/CD | `flutter-android-build.yml` | `workflow_dispatch` |
 | Flutter iOS App CI/CD | `flutter-ios-build.yml` | `workflow_dispatch` |
-| Critical Vulnerability Check | `critical-vuln-gate.yml` | `pull_request` → `main`, `develop` |
-| Dependabot Auto-Merge | `critical-vuln-gate.yml` | `pull_request` → `main`, `develop` |
+| Critical Vulnerability Check | `critical-vuln-gate.yml` | `pull_request` -> `main`, `develop` |
+| Dependabot Auto-Merge | `critical-vuln-gate.yml` | `pull_request` -> `main`, `develop` |
 
 ---
 
@@ -136,9 +136,9 @@ google-play-service-account-json  # Google Play service account JSON
 ## Repository Structure
 
 ```text
-.github/                          ← workspace root (README.md, AGENTS.md, CLAUDE.md)
+.github/                         <- workspace root (README.md, AGENTS.md, CLAUDE.md)
 ├── .github/
-│   ├── workflows/                ← reusable workflows (workflow_call)
+│   ├── workflows/               <- reusable workflows (workflow_call)
 │   │   ├── next-cloudflare-worker.yaml
 │   │   ├── vite-cloudflare-worker.yml
 │   │   ├── reusable-service-cicd.yml
@@ -151,7 +151,7 @@ google-play-service-account-json  # Google Play service account JSON
 │   │   ├── flutter-ios-build.yml
 │   │   ├── flutter-android-build.yml
 │   │   └── critical-vuln-gate.yml
-│   ├── actions/                  ← composite actions
+│   ├── actions/                 <- composite actions
 │   │   ├── determine-semver/
 │   │   ├── tag-github-origin/
 │   │   ├── docker-build-push/
@@ -171,9 +171,9 @@ google-play-service-account-json  # Google Play service account JSON
 │   │   ├── xcode-export/
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
-│   └── dependabot.yml            ← this repo's own Dependabot config (github-actions only)
-├── workflow-templates/           ← org starter templates (*.yml + *.properties.json)
-└── dependabot-templates/         ← ready-made per-category `dependabot.yml` configs for consumer repos to copy
+│   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
+├── workflow-templates/          <- org starter templates (*.yml + *.properties.json)
+└── dependabot-templates/        <- ready-made per-category `dependabot.yml` configs for consumer repos to copy
 ```
 
 ---
@@ -194,8 +194,8 @@ Builds a Next.js app with the **OpenNext.js** Cloudflare adapter and deploys it 
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `project_name` | ✅ | — | Base Worker project name (without env suffix) |
-| `environment` | ✅ | — | Wrangler environment (`staging`, `production`) |
+| `project_name` | Yes | — | Base Worker project name (without env suffix) |
+| `environment` | Yes | — | Wrangler environment (`staging`, `production`) |
 | `route` | | `''` | Route / custom domain (falls back to repo var `CLOUDFLARE_ROUTE` then `ROUTE`) |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
 | `node_version` | | `24` | Node.js version |
@@ -229,9 +229,9 @@ Builds a Vite single-page app and deploys it to Cloudflare Workers **static asse
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `project_name` | ✅ | — | Base Worker project name |
-| `environment` | ✅ | — | Wrangler environment |
-| `route` | ✅ | — | Route / custom domain |
+| `project_name` | Yes | — | Base Worker project name |
+| `environment` | Yes | — | Wrangler environment |
+| `route` | Yes | — | Route / custom domain |
 | `assets_dir` | | `dist` | Vite build output directory |
 | `package_manager` | | `yarn` | `npm`, `yarn`, or `pnpm` |
 | `node_version` | | `24` | Node.js version |
@@ -251,13 +251,13 @@ Builds a Vite single-page app and deploys it to Cloudflare Workers **static asse
 
 #### `reusable-service-cicd.yml`
 
-The consolidated service pipeline: compute semver → optionally publish NuGet → build & push a Docker image → package and publish the Helm chart (GHCR OCI, ChartMuseum, or **both**) → optionally deploy to Kubernetes (ingress-nginx or gateway-api) → tag the git origin.
+The consolidated service pipeline: compute semver -> optionally publish NuGet -> build & push a Docker image -> package and publish the Helm chart (GHCR OCI, ChartMuseum, or **both**) -> optionally deploy to Kubernetes (ingress-nginx or gateway-api) -> tag the git origin.
 
 **Publishing is always on; deploying is opt-in (`deploy: false` by default).**
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `chart-name` | ✅ | — | Helm chart name (must match `Chart.yaml` `name:`) |
+| `chart-name` | Yes | — | Helm chart name (must match `Chart.yaml` `name:`) |
 | `chart-publish-method` | | `both` | `github-oci`, `chartmuseum`, or `both` (empty/unknown hard-fails) |
 | `chart-repo-url` | | — | ChartMuseum base URL (required for `chartmuseum`/`both`) |
 | `chart-path` | | `./chart` | Helm chart directory |
@@ -332,9 +332,9 @@ Full CI/CD that builds a Docker image and deploys the shared **`s9genericchart`*
 
 #### `generic-gateway-helm-template.yml`
 
-Gateway-first CI/CD: semver → Docker build/push → Gateway listener + TLS certificate auto-onboarding → Helm deploy of **`s9genericchart-v2`** → tag. The standard pipeline for any service that needs its own hostname on the cluster via the **Cilium Gateway API**.
+Gateway-first CI/CD: semver -> Docker build/push -> Gateway listener + TLS certificate auto-onboarding -> Helm deploy of **`s9genericchart-v2`** -> tag. The standard pipeline for any service that needs its own hostname on the cluster via the **Cilium Gateway API**.
 
-**Pipeline:** version → (optional NuGet) → build → deploy (`gateway-routing` renders values, `gateway-onboard` provisions listeners + cert, `helm-generic` deploys) → tag.
+**Pipeline:** version -> (optional NuGet) -> build -> deploy (`gateway-routing` renders values, `gateway-onboard` provisions listeners + cert, `helm-generic` deploys) -> tag.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
@@ -408,7 +408,7 @@ with:
     https-wildcard-sf9-io
 ```
 
-The first (blank) line → dedicated for `api-stg.zeenah.io` (gets its own listeners + cert); the second → shared listener for `zeenah-api.sf9.io` (validated only). When two hosts share one section name the pipeline emits a single `parentRefs` entry (the Gateway API forbids duplicate `(name, namespace, sectionName)` tuples).
+The first (blank) line -> dedicated for `api-stg.zeenah.io` (gets its own listeners + cert); the second -> shared listener for `zeenah-api.sf9.io` (validated only). When two hosts share one section name the pipeline emits a single `parentRefs` entry (the Gateway API forbids duplicate `(name, namespace, sectionName)` tuples).
 
 > **DNS / Cloudflare proxy:** HTTP-01 needs the hostname to resolve directly to the gateway IP. With Cloudflare, set the record to **DNS-only (grey cloud)** while the cert is issued; re-enable the orange cloud once it is `Ready` (the pipeline skips the DNS pre-flight when a valid cert already exists).
 
@@ -420,10 +420,10 @@ Deploy-only: deploys an already-published chart from a ChartMuseum-style repo us
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `release-name` | ✅ | — | Helm release name |
-| `chart-name` | ✅ | — | Chart name |
-| `chart-repo` | ✅ | — | Classic (ChartMuseum-style) Helm repo URL |
-| `namespace` | ✅ | — | Kubernetes namespace |
+| `release-name` | Yes | — | Helm release name |
+| `chart-name` | Yes | — | Chart name |
+| `chart-repo` | Yes | — | Classic (ChartMuseum-style) Helm repo URL |
+| `namespace` | Yes | — | Kubernetes namespace |
 | `values-file` | | `values.yaml` | Values file in the caller repo (applied if present) |
 | `chart-version` | | `''` | Empty = latest published; set to pin |
 | `environment` | | `''` | Helm `environment=` value (not the GitHub Environment) |
@@ -443,7 +443,7 @@ Deploy-only: deploys an already-published chart from a ChartMuseum-style repo us
 
 #### `gateway-chart-cicd.yml`
 
-CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git tags) → `helm lint --strict` + routing/ConfigMap render assertions (parsed with `yq`) → package → push to ChartMuseum → tag origin. The version comes from `determine-semver`, not the run number.
+CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git tags) -> `helm lint --strict` + routing/ConfigMap render assertions (parsed with `yq`) -> package -> push to ChartMuseum -> tag origin. The version comes from `determine-semver`, not the run number.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
@@ -453,7 +453,7 @@ CI/CD for a **Cilium Gateway API-aware** Helm chart: compute SemVer (from git ta
 | `major-version` / `minor-version` | | `1` / `0` | SemVer components |
 | `update-dependencies` | | `true` | `helm package --dependency-update` |
 | `validate-routing` | | `true` | Validate default/ingress/gateway/dual rendering |
-| `validate-configmap` | | `true` | Validate ConfigMap gating + key routing (`config.data` → ConfigMap, `environmentVariables` → Secret) |
+| `validate-configmap` | | `true` | Validate ConfigMap gating + key routing (`config.data` -> ConfigMap, `environmentVariables` -> Secret) |
 
 **Secrets:** `registry-username`, `registry-password` (required); `github-token` (optional — used by the tag job, falls back to `GITHUB_TOKEN`).
 
@@ -475,8 +475,8 @@ Builds, signs, and archives a React Native / native iOS app on a macOS runner, e
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `workspace` | ✅ | — | Path to `.xcworkspace` |
-| `scheme` | ✅ | — | Xcode scheme to archive |
+| `workspace` | Yes | — | Path to `.xcworkspace` |
+| `scheme` | Yes | — | Xcode scheme to archive |
 | `configuration` | | `Release` | Build configuration |
 | `xcode-version` | | `''` | Xcode major or major.minor (e.g. `16.4`) |
 | `macos-runner` | | `macos-latest` | macOS runner label |
@@ -526,7 +526,7 @@ Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishe
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `app-id` | ✅ | — | Android `applicationId` (package name) |
+| `app-id` | Yes | — | Android `applicationId` (package name) |
 | `app-slug` | | `app` | Output AAB filename slug |
 | `gradle-task` | | `bundleRelease` | Gradle task |
 | `version-prefix` | | `1.0.0` | Base version (X.Y or X.Y.Z) |
@@ -643,7 +643,7 @@ Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbu
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `app-id` | ✅ | — | Android `applicationId` / Play package name |
+| `app-id` | Yes | — | Android `applicationId` / Play package name |
 | `app-slug` | | `app` | Output AAB filename slug |
 | `project-directory` | | `.` | Flutter project root relative to repo root (set to e.g. `mobile` for a monorepo) |
 | `flutter-version` | | `3.x` | `subosito/flutter-action` version selector (pin exact for reproducible builds) |
@@ -689,7 +689,7 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
-**Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 → 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK plumbing — Flutter owns the actual build — but the Gradle User Home is cached via `gradle/actions/setup-gradle@v5` (which applies to the `gradlew` Flutter invokes), and both jobs opt JS-based actions onto Node 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`. The keystore and generated `android/key.properties` are removed by an `always()` cleanup step. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.
+**Notes:** versionName is a SemVer patch counter — `major.minor` are fixed by `version-prefix` and only the patch increments (`patch = base patch + run_number`, e.g. `1.1.69 -> 1.1.70`, no carry/rollover, no upper bound); versionCode is `run_number + version-code-offset` (strictly monotonic — set the offset above your last shipped versionCode, and trigger a new run rather than re-running a failed one, since re-runs reuse the run number). No NDK plumbing — Flutter owns the actual build — but the Gradle User Home is cached via `gradle/actions/setup-gradle@v5` (which applies to the `gradlew` Flutter invokes), and both jobs opt JS-based actions onto Node 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`. The keystore and generated `android/key.properties` are removed by an `always()` cleanup step. Use the **Flutter Android App CI/CD** starter template for a `workflow_dispatch` entry point.
 
 ---
 
@@ -749,7 +749,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `helm-deploy-s9generic` | Deploy from OCI **or** a local chart dir (`chart-path`) with failure diagnostics | `chart-name`, `chart-path`, `kubeconfig` |
 | `helm-package-push` | Package + publish to OCI or ChartMuseum | `chart-path`, `chart-name`, `version`, `publish-method` |
 
-> ⚠️ **Three overlapping deploy actions.** `helm-deploy`, `helm-deploy-s9generic`, and `helm-generic` all wrap `helm upgrade --install` and re-implement the same concerns (kubeconfig handling, atomic rollback, `--set`/`--set-string`, verification), differing only in input naming, chart source, and migration-Job support. Every hardening fix must be applied in three places. The intended direction is to consolidate them into a single parameterized deploy action and keep the old names as thin shims. See [AGENTS.md](./AGENTS.md#helm).
+> **Three overlapping deploy actions.** `helm-deploy`, `helm-deploy-s9generic`, and `helm-generic` all wrap `helm upgrade --install` and re-implement the same concerns (kubeconfig handling, atomic rollback, `--set`/`--set-string`, verification), differing only in input naming, chart source, and migration-Job support. Every hardening fix must be applied in three places. The intended direction is to consolidate them into a single parameterized deploy action and keep the old names as thin shims. See [AGENTS.md](./AGENTS.md#helm).
 
 ### Gateway API (Cilium)
 
@@ -762,8 +762,8 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 
 | Action | Purpose | Key outputs |
 |---|---|---|
-| `dotnet-build` | Resolve `.sln`/glob, then restore → build → optional test | `build-target` |
-| `dotnet-pack-push` | `dotnet pack --no-build` → `nuget push --skip-duplicate` (empty = skip) | `packages-pushed`, `package-paths` |
+| `dotnet-build` | Resolve `.sln`/glob, then restore -> build -> optional test | `build-target` |
+| `dotnet-pack-push` | `dotnet pack --no-build` -> `nuget push --skip-duplicate` (empty = skip) | `packages-pushed`, `package-paths` |
 
 ### Cloudflare
 
@@ -779,7 +779,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `ios-install-cert` | Import a `.p12` into a temporary keychain (`p12Base64`, `p12Password`) |
 | `ios-install-profile` | Install a `.mobileprovision`, extract UUID/Name + best-effort Team ID/Bundle ID (`profileBase64`) |
 | `xcode-build` | `xcodebuild archive` with manual signing (`workspace`, `scheme`, `archivePath`, `developmentTeam`, `provisioningProfileUuid`, `keychainPath`) |
-| `xcode-export` | `xcodebuild -exportArchive` → `.ipa` (`archivePath`, `exportOptionsPlist`, `exportPath`) |
+| `xcode-export` | `xcodebuild -exportArchive` -> `.ipa` (`archivePath`, `exportOptionsPlist`, `exportPath`) |
 
 ### Shared
 
@@ -808,7 +808,7 @@ set, the service:
 - Diffs current versions against the registry's latest and against the GitHub Advisory Database
 - Opens one PR per update (or per group) directly as `dependabot[bot]`, based on/against whatever `target-branch:` says
 
-Two independent triggers feed it, both toggled per-repo in **Settings → Code security**:
+Two independent triggers feed it, both toggled per-repo in **Settings -> Code security**:
 
 - **Version updates** — scheduled (the `schedule:` block below), routine bumps regardless of vulnerability status.
 - **Security updates** — event-driven, fires immediately when a new advisory affecting something in the dependency graph is published, independent of schedule.
@@ -981,7 +981,7 @@ full solution build locally, or if CI is later changed to include tests. Cross-r
 of the 44 repos (`gig-aiusecasespoc-api`, `wisewell-api`) don't have a test project at all — the
 duplication there is between other sibling projects (SDK/adapters, not tests). And one repo's
 test project (`avtr-api`) isn't even listed in its `.sln`, so it's fully orphaned — not part of
-any build, mismatched or not. **Don't assume "has a duplicate-pinned test project" ⇒ "CI is
+any build, mismatched or not. **Don't assume "has a duplicate-pinned test project" => "CI is
 broken" — check whether that project is actually in the `.sln` and actually built/published by
 the pipeline before treating a repo as urgent.**
 
@@ -1077,7 +1077,7 @@ version at the top level, in the same lockfile) — one unpatched occurrence sti
 vulnerability is present.
 
 **Lockfile fallback:** if the alert's recorded `manifest_path` genuinely 404s at the PR head
-(the PR deleted it — e.g. it migrated `package-lock.json` → `yarn.lock` as part of the fix,
+(the PR deleted it — e.g. it migrated `package-lock.json` -> `yarn.lock` as part of the fix,
 confirmed live on `gig-insureapp-survey-mobile#40`), the action also tries the sibling
 `package-lock.json`/`yarn.lock` in the same directory before giving up, and parses whichever
 one actually returned content by *its* format, not the alert's originally-recorded one. A
@@ -1141,7 +1141,7 @@ configuration anywhere in the call chain fixes it. `DEPENDABOT_ALERTS_TOKEN` —
 GitHub App installation token with **"Dependabot alerts: read"** — must be forwarded
 explicitly through every caller in the chain (`secrets: inherit` does not apply to custom
 secrets crossing a `workflow_call` boundary the same way it does for `GITHUB_TOKEN`).
-Missing/empty token → the gate fails closed with an explicit `Missing dependabot-alerts-token`
+Missing/empty token -> the gate fails closed with an explicit `Missing dependabot-alerts-token`
 error rather than silently passing.
 
 ### Known pitfalls (already fixed org-wide — do not reintroduce)
@@ -1263,12 +1263,12 @@ run but typically before its transport can flush.
 
 | Gate | Catches it? | Why |
 | --- | --- | --- |
-| npm/yarn install | ❌ | `^19.2.3` genuinely permits `19.2.8` |
-| `tsc --noEmit`, `eslint` | ❌ | types and lint are unaffected |
-| `jest` + `react-test-renderer` render | ❌ | rendering uses Fabric; Paper is never loaded |
-| `npx react-native bundle` | ❌ | Metro builds a **static** graph and never evaluates module bodies |
-| **`rn-contract / check`** | ✅ | compares resolved `react` against the renderer's own literal |
-| Native build / E2E smoke | ✅ | but ~10× the cost on macOS runners |
+| npm/yarn install | No | `^19.2.3` genuinely permits `19.2.8` |
+| `tsc --noEmit`, `eslint` | No | types and lint are unaffected |
+| `jest` + `react-test-renderer` render | No | rendering uses Fabric; Paper is never loaded |
+| `npx react-native bundle` | No | Metro builds a **static** graph and never evaluates module bodies |
+| **`rn-contract / check`** | Yes | compares resolved `react` against the renderer's own literal |
+| Native build / E2E smoke | Yes | but ~10× the cost on macOS runners |
 
 **Crash reporting does not catch it either.** Confirmed on `mealivery-customer-mobile`: with the
 mismatch in place the app reliably crashes on demand, and **neither Sentry nor Crashlytics
@@ -1279,8 +1279,8 @@ transport can flush. Treat this as a **monitoring blind spot for the whole class
 misconfiguration: for this failure mode the PR gate is not a convenience, it is the only signal
 you get. Nothing downstream will tell you.
 
-Hence `workflow-templates/react-native-contract-check.yml` →
-`.github/workflows/react-native-contract-gate.yml` →
+Hence `workflow-templates/react-native-contract-check.yml` ->
+`.github/workflows/react-native-contract-gate.yml` ->
 `.github/actions/check-react-native-contract`. It reads the repo's **lockfile** (not just
 `package.json`, since the lockfile decides what installs) and extracts the expected version
 from the shipped renderer — `node_modules` when present, otherwise ~200KB from the CDN, never
@@ -1368,8 +1368,8 @@ Per-branch gating lives in the **caller** (template), not inside the reusable wo
 
 | Branch | Typical use | How it's wired |
 |---|---|---|
-| `staging` | Staging/dev | Caller job `if: github.ref == 'refs/heads/staging'` → staging GitHub Environment |
-| `main` / `master` | Production | Caller job `if: github.ref == 'refs/heads/main'` → production GitHub Environment |
+| `staging` | Staging/dev | Caller job `if: github.ref == 'refs/heads/staging'` -> staging GitHub Environment |
+| `main` / `master` | Production | Caller job `if: github.ref == 'refs/heads/main'` -> production GitHub Environment |
 
 Mobile workflows additionally gate the release job on `release-environment != '' && !disable-release`.
 
@@ -1451,7 +1451,7 @@ genuinely unknowable — empty stubs, org-config repos):
 | 4 | Stack (1–2) | `dotnet`, `react`, `nextjs`, `react-native`, `expo`, `flutter`, `nodejs`, `nestjs`, `strapi`, `medusa`, `php`, `laravel`, `python`, `java`, `kotlin`, `swift`, `kubernetes`, `helm`, `terraform`, `ansible`, `rabbitmq`, `mqtt`, `elasticsearch`, … |
 | 5 | Lifecycle (when true) | `legacy`, `poc`, `nuget`, `open-source` |
 
-Example (public library repo): **SW-CloudFiles** → description
+Example (public library repo): **SW-CloudFiles** -> description
 `.NET abstraction over cloud file storage providers (S3, Azure, GCS, OCI) using streams and ASP.NET Core DI`,
 topics `simplify9 library dotnet nuget open-source`.
 

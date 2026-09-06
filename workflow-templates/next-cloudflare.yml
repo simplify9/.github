@@ -14,8 +14,8 @@
 #   respected; a minimal default is generated only when none exists.
 #
 # BRANCHES:
-#   develop → deploy-develop job    → environment "develop"    (develop)
-#   main    → deploy-production job  → environment "production" (Production)
+#   develop -> deploy-develop job    -> environment "develop"    (develop)
+#   main    -> deploy-production job  -> environment "production" (Production)
 #
 # ROUTE:
 #   `route` is optional — if omitted, the reusable workflow falls back to the

@@ -120,11 +120,11 @@ runs:
 
         # --- Validate inputs --------------------------------------------------
         if ! [[ "$major" =~ ^[0-9]+$ ]]; then
-          echo "::error title=❌ [VERSION] Invalid input::Major version must be an integer, got: '$major'"
+          echo "::error title=[VERSION] Invalid input::Major version must be an integer, got: '$major'"
           exit 1
         fi
         if ! [[ "$minor" =~ ^[0-9]+$ ]]; then
-          echo "::error title=❌ [VERSION] Invalid input::Minor version must be an integer, got: '$minor'"
+          echo "::error title=[VERSION] Invalid input::Minor version must be an integer, got: '$minor'"
           exit 1
         fi
 
@@ -133,9 +133,9 @@ runs:
         # Only a shallow checkout needs the network; if that fails, error out
         # instead of silently treating the line as empty (which yields .0).
         if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" == "true" ]]; then
-          echo "Shallow checkout detected — fetching tags from origin…"
+          echo "Shallow checkout detected - fetching tags from origin..."
           if ! git fetch --tags --quiet; then
-            echo "::error title=❌ [VERSION] Cannot read tags::Shallow checkout and tag fetch failed. Checkout with 'fetch-depth: 0' (recommended) or ensure the runner can fetch tags."
+            echo "::error title=[VERSION] Cannot read tags::Shallow checkout and tag fetch failed. Checkout with 'fetch-depth: 0' (recommended) or ensure the runner can fetch tags."
             exit 1
           fi
         fi
@@ -157,10 +157,10 @@ runs:
 
         if [[ -z "$latest_patch" ]]; then
           patch=0
-          echo "No existing ${prefix}* tags — starting at patch 0."
+          echo "No existing ${prefix}* tags - starting at patch 0."
         else
           patch=$((latest_patch + 1))
-          echo "Highest existing patch on this line: ${latest_patch} — next patch: ${patch}."
+          echo "Highest existing patch on this line: ${latest_patch} - next patch: ${patch}."
         fi
 
         # The IMAGE version is always a clean x.y.z (used for the registry tag).
@@ -194,7 +194,7 @@ runs:
           echo "git-tag=${git_tag}"
           echo "is-release=${is_release}"
         } >> "$GITHUB_OUTPUT"
-        echo "✅ image version=${version} | git tag=${git_tag} | release=${is_release}"
+        echo "image version=${version} | git tag=${git_tag} | release=${is_release}"
 
         # Full tag dump only under step-debug logging (RUNNER_DEBUG=1), to avoid
         # log noise in repos with many tags.
@@ -211,7 +211,7 @@ runs:
         MAJOR: ${{ inputs.major }}
         MINOR: ${{ inputs.minor }}
       run: |
-        echo "::error title=❌ [VERSION] Semantic version computation failed::Could not compute ${MAJOR}.${MINOR}.x. Ensure major/minor are integers and tags are accessible (checkout with fetch-depth: 0)."
+        echo "::error title=[VERSION] Semantic version computation failed::Could not compute ${MAJOR}.${MINOR}.x. Ensure major/minor are integers and tags are accessible (checkout with fetch-depth: 0)."
 
 branding:
   icon: 'tag'

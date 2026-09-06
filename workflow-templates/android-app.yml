@@ -9,16 +9,16 @@
 #   Replace all values marked with # REPLACE with your app-specific values.
 #
 # BRANCHES:
-#   develop → triggers Android Dev job → uploads to android-internal environment
-#   main    → triggers Android Prod job → uploads to android-production environment
+#   develop -> triggers Android Dev job -> uploads to android-internal environment
+#   main    -> triggers Android Prod job -> uploads to android-production environment
 #
 # VERSIONING:
 #   versionName: SemVer patch counter — major.minor fixed by version-prefix,
-#                patch = base patch + run_number (e.g. 1.1.69 → 1.1.70 → …).
+#                patch = base patch + run_number (e.g. 1.1.69 -> 1.1.70 -> …).
 #   versionCode: strictly monotonic — run_number + version-code-offset.
 #                Set version-code-offset above your last shipped versionCode
 #                to avoid Play upgrade-path failures on CI migration.
-#                Example: last shipped versionCode was 500 → set offset to 1000.
+#                Example: last shipped versionCode was 500 -> set offset to 1000.
 #
 # RE-RUNS:
 #   GitHub re-runs keep the same run_number. A re-run produces the same

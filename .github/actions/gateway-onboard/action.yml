@@ -82,8 +82,8 @@ runs:
         GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
         DEPLOY_NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::notice title=🚪 [GATEWAY] Auto-Onboarding::gateway: ${GATEWAY_NAMESPACE}/${GATEWAY_NAME} | namespace: ${DEPLOY_NAMESPACE}"
-        echo "GATEWAY_ONBOARD_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "::notice title=[GATEWAY] Auto-Onboarding::gateway: ${GATEWAY_NAMESPACE}/${GATEWAY_NAME} | namespace: ${DEPLOY_NAMESPACE}"
+        echo "GATEWAY_ONBOARD_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
 
     # Inputs are passed via env (never interpolated into the script body) so secret
     # and hostname values can't break out into the shell. The cluster-mutating logic
@@ -108,7 +108,7 @@ runs:
         SECTION_NAMES_LIST: ${{ inputs.gateway-section-names-list }}
       run: |
         bash "${{ github.action_path }}/onboard.sh"
-        echo "GATEWAY_ONBOARD_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "GATEWAY_ONBOARD_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
     # 4. Failure report (before summary).
     - name: Report failure
@@ -118,7 +118,7 @@ runs:
         GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
         GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
       run: |
-        echo "::error title=❌ [GATEWAY] Onboarding failed::gateway '${GATEWAY_NAMESPACE}/${GATEWAY_NAME}'. Checkpoint — 1) Onboard listeners/certs: ${GATEWAY_ONBOARD_CP1_STATUS:-⏭️ Not reached}. Check gateway capacity, kubeconfig access, and DNS for the requested hostnames."
+        echo "::error title=[GATEWAY] Onboarding failed::gateway '${GATEWAY_NAMESPACE}/${GATEWAY_NAME}'. Checkpoint - 1) Onboard listeners/certs: ${GATEWAY_ONBOARD_CP1_STATUS:-NOT REACHED}. Check gateway capacity, kubeconfig access, and DNS for the requested hostnames."
 
     # 5. Summary (always last, always runs).
     - name: Write onboarding summary
@@ -132,14 +132,14 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "## 🚪 Gateway Auto-Onboarding"
+          echo "## Gateway Auto-Onboarding"
           echo ""
           echo "| Field | Value |"
           echo "| --- | --- |"
           echo "| Gateway | \`${GATEWAY_NAMESPACE}/${GATEWAY_NAME}\` |"
           echo "| Deploy namespace | \`${DEPLOY_NAMESPACE:-n/a}\` |"
           echo "| Cert issuer | \`${CERT_ISSUER}\` |"
-          echo "| Onboard listeners/certs | ${GATEWAY_ONBOARD_CP1_STATUS:-⏭️ Not reached} |"
+          echo "| Onboard listeners/certs | ${GATEWAY_ONBOARD_CP1_STATUS:-NOT REACHED} |"
         } >> "$GITHUB_STEP_SUMMARY"
 
 branding:

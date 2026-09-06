@@ -263,7 +263,7 @@ fi
 # ----- assemble the values file ----------------------------------------------
 
 {
-  echo "# Rendered by gateway-routing/render.sh — do not edit by hand."
+  echo "# Rendered by gateway-routing/render.sh - do not edit by hand."
   echo "gateway:"
   echo "  enabled: ${gateway_enabled}"
   if [ "$gateway_enabled" = "true" ]; then
@@ -323,6 +323,6 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
   } >> "$GITHUB_OUTPUT"
 fi
 
-echo "✅ [CHECKPOINT 1/2] Routing values rendered — mode: ${mode} (${host_count} host(s))"
+echo "[CHECKPOINT 1/2] Routing values rendered - mode: ${mode} (${host_count} host(s))"
 echo "--- rendered values file (${ROUTING_VALUES_FILE}) ---"
 cat "$ROUTING_VALUES_FILE"

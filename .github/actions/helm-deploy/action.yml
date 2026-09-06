@@ -167,8 +167,8 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "HELM_DEPLOY_CP1_STATUS=⏳ Pending"
-          echo "HELM_DEPLOY_CP2_STATUS=⏳ Pending"
+          echo "HELM_DEPLOY_CP1_STATUS=PENDING"
+          echo "HELM_DEPLOY_CP2_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Set up Helm
@@ -190,7 +190,7 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
       run: |
         set -euo pipefail
-        echo "::group::☸️ [CHECKPOINT 1/2] Configure Kubernetes Context"
+        echo "::group::[CHECKPOINT 1/2] Configure Kubernetes Context"
         echo "Configuring Kubernetes context..."
         mkdir -p ~/.kube
 
@@ -211,8 +211,8 @@ runs:
 
         echo "Cluster info:"
         kubectl cluster-info
-        echo "HELM_DEPLOY_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Kubernetes context configured — namespace: $NAMESPACE"
+        echo "HELM_DEPLOY_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Kubernetes context configured - namespace: $NAMESPACE"
         echo "::endgroup::"
 
     - name: Validate chart source inputs
@@ -226,7 +226,7 @@ runs:
         CHART_VERSION: ${{ inputs.chart-version }}
       run: |
         set -euo pipefail
-        echo "::group::🔎 Validate chart source inputs"
+        echo "::group::Validate chart source inputs"
         case "$CHART_SOURCE_TYPE" in
           oci)
             if [ -z "$REPOSITORY" ]; then
@@ -257,7 +257,7 @@ runs:
             exit 1
             ;;
         esac
-        echo "✅ Chart source inputs valid ($CHART_SOURCE_TYPE)"
+        echo "Chart source inputs valid ($CHART_SOURCE_TYPE)"
         echo "::endgroup::"
 
     - name: Configure Helm registry authentication
@@ -269,7 +269,7 @@ runs:
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
       run: |
         set -euo pipefail
-        echo "::group::🔑 Configure Helm OCI registry authentication"
+        echo "::group::Configure Helm OCI registry authentication"
         echo "::add-mask::$REGISTRY_PASSWORD"
         echo "Configuring Helm registry authentication for $REGISTRY"
         registry_host="$REGISTRY"
@@ -290,7 +290,7 @@ runs:
         CHART_REPO_PASSWORD: ${{ inputs.chart-repo-password }}
       run: |
         set -euo pipefail
-        echo "::group::📦 Configure Helm chart repository (ChartMuseum)"
+        echo "::group::Configure Helm chart repository (ChartMuseum)"
         # Register the chart repository under a fixed internal alias. The password
         # is masked and fed over stdin (never on the command line / process list),
         # matching the OCI path's secret hygiene.
@@ -306,7 +306,7 @@ runs:
           "${add_args[@]}"
         fi
         helm repo update s9-chart-src
-        echo "✅ Chart repository configured"
+        echo "Chart repository configured"
         echo "::endgroup::"
 
     - name: Deploy Helm chart
@@ -338,7 +338,7 @@ runs:
         SECRET_SET_STRING_VALUES: ${{ inputs.secret-set-string-values }}
       run: |
         set -euo pipefail
-        echo "::group::🚀 [CHECKPOINT 2/2] Deploy Helm chart"
+        echo "::group::[CHECKPOINT 2/2] Deploy Helm chart"
 
         # Clean up any temporary values file on exit (success or failure).
         VALUES_TMP=""
@@ -457,8 +457,8 @@ runs:
         # Output is set only after a successful deploy (empty on failure).
         echo "chart-url=${CHART_URL}" >> "$GITHUB_OUTPUT"
 
-        echo "HELM_DEPLOY_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart deployed — release: $RELEASE_NAME, namespace: $NAMESPACE"
+        echo "HELM_DEPLOY_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Chart deployed - release: $RELEASE_NAME, namespace: $NAMESPACE"
         echo "::endgroup::"
 
     - name: Verify deployment
@@ -468,7 +468,7 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
       run: |
         set -euo pipefail
-        echo "::group::🔍 Verify deployment"
+        echo "::group::Verify deployment"
         echo "Verifying deployment..."
 
         echo "Helm release status:"
@@ -497,12 +497,12 @@ runs:
       run: |
         set -euo pipefail
         if [ "$DEPLOY_OUTCOME" = "success" ]; then
-          status="✅ Succeeded"
+          status="SUCCEEDED"
         else
-          status="❌ Failed"
+          status="FAILED"
         fi
         {
-          echo "## ☸️ Helm Deploy"
+          echo "## Helm Deploy"
           echo ""
           echo "| Field | Value |"
           echo "| --- | --- |"
@@ -512,8 +512,8 @@ runs:
           echo "| Chart | \`${CHART_NAME}:${CHART_VERSION}\` |"
           echo "| Source type | ${CHART_SOURCE_TYPE} |"
           echo "| Chart URL | \`${CHART_URL:-n/a}\` |"
-          echo "| K8s context | ${HELM_DEPLOY_CP1_STATUS:-⏭️ Not reached} |"
-          echo "| Helm deploy | ${HELM_DEPLOY_CP2_STATUS:-⏭️ Not reached} |"
+          echo "| K8s context | ${HELM_DEPLOY_CP1_STATUS:-NOT REACHED} |"
+          echo "| Helm deploy | ${HELM_DEPLOY_CP2_STATUS:-NOT REACHED} |"
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Report failure
@@ -524,7 +524,7 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
         CHART_SOURCE_TYPE: ${{ inputs.chart-source-type }}
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::Release '$RELEASE_NAME' in namespace '$NAMESPACE'. Checkpoints — 1) K8s context: ${HELM_DEPLOY_CP1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_DEPLOY_CP2_STATUS:-⏭️ Not reached}. Check chart source ($CHART_SOURCE_TYPE), image tag, and resource quotas."
+        echo "::error title=[HELM] Deploy failed::Release '$RELEASE_NAME' in namespace '$NAMESPACE'. Checkpoints - 1) K8s context: ${HELM_DEPLOY_CP1_STATUS:-NOT REACHED} | 2) Helm deploy: ${HELM_DEPLOY_CP2_STATUS:-NOT REACHED}. Check chart source ($CHART_SOURCE_TYPE), image tag, and resource quotas."
 
 branding:
   icon: 'anchor'

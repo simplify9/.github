@@ -94,7 +94,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "XCODE_BUILD_CP1_STATUS=⏳ Pending"
+          echo "XCODE_BUILD_CP1_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Build and archive
@@ -115,7 +115,7 @@ runs:
         DEBUG_BUILD_SETTINGS: ${{ inputs.debugBuildSettings }}
       run: |
         set -euo pipefail
-        echo "::group::🍎 [CHECKPOINT 1/1] Build and Archive"
+        echo "::group::[CHECKPOINT 1/1] Build and Archive"
 
         ARGS=(
           -workspace "${WORKSPACE}"
@@ -176,7 +176,7 @@ runs:
             'CODE_SIGN|DEVELOPMENT_TEAM|PROVISION|PRODUCT_BUNDLE_IDENTIFIER' || true
         fi
 
-        echo "🔨 Starting xcodebuild archive for scheme '${SCHEME}' (configuration: ${CONFIGURATION})..."
+        echo "Starting xcodebuild archive for scheme '${SCHEME}' (configuration: ${CONFIGURATION})..."
 
         if command -v xcpretty >/dev/null 2>&1; then
           xcodebuild "${ARGS[@]}" | xcpretty --color
@@ -186,8 +186,8 @@ runs:
           xcodebuild "${ARGS[@]}"
         fi
 
-        echo "XCODE_BUILD_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Archive created — ${ARCHIVE_PATH}"
+        echo "XCODE_BUILD_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Archive created - ${ARCHIVE_PATH}"
         echo "::endgroup::"
 
     - name: Report failure
@@ -199,7 +199,7 @@ runs:
         SIGNING_STYLE: ${{ inputs.signingStyle }}
       run: |
         set -euo pipefail
-        echo "::error title=❌ [IOS] Build failed::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}. Checkpoints — 1) Archive: ${XCODE_BUILD_CP1_STATUS:-⏭️ Not reached}. Check provisioning profile UUID and keychain path."
+        echo "::error title=[IOS] Build failed::scheme: ${SCHEME}, config: ${CONFIGURATION}, signing: ${SIGNING_STYLE}. Checkpoints - 1) Archive: ${XCODE_BUILD_CP1_STATUS:-NOT REACHED}. Check provisioning profile UUID and keychain path."
 
 branding:
   icon: 'box'

@@ -3,14 +3,13 @@
 # =============================================================================
 # Appends a standardized, status-aware section to the GitHub Step Summary.
 # Centralizes the success/failure status derivation so callers do not each
-# duplicate the `STATUS=$( [ ... ] && ✅ || ❌ )` snippet.
+# duplicate the `STATUS=$( [ ... ] && SUCCESS || FAILED )` snippet.
 #
 # Inputs:
 #   title    (required)  Section heading text (without the status suffix),
 #                        e.g. "Helm Chart Package + Push".
 #   status   (required)  Job status — pass ${{ job.status }}. "success" renders
-#                        "✅ SUCCESS"; anything else renders "❌ FAILED".
-#   icon     (optional)  Emoji shown before the title.
+#                        "SUCCESS"; anything else renders "FAILED".
 #   details  (optional)  Markdown body appended under the heading — typically
 #                        one or more tables.
 #
@@ -19,7 +18,6 @@
 #     if: always()
 #     uses: simplify9/.github/.github/actions/write-job-summary@main
 #     with:
-#       icon: '☸️'
 #       title: Helm Chart Validation
 #       status: ${{ job.status }}
 #       details: |
@@ -36,12 +34,8 @@ inputs:
     description: 'Section heading text (without the status suffix).'
     required: true
   status:
-    description: 'Job status — pass the job.status context. "success" => ✅ SUCCESS, otherwise ❌ FAILED.'
+    description: 'Job status - pass the job.status context. "success" renders SUCCESS, otherwise FAILED.'
     required: true
-  icon:
-    description: 'Optional emoji shown before the title.'
-    required: false
-    default: ''
   details:
     description: 'Markdown body appended under the heading (e.g. tables).'
     required: false
@@ -55,27 +49,25 @@ runs:
       env:
         TITLE: ${{ inputs.title }}
         STATUS_IN: ${{ inputs.status }}
-        ICON: ${{ inputs.icon }}
         DETAILS: ${{ inputs.details }}
       run: |
         set -euo pipefail
         # Context-aware notice + namespaced checkpoint (this action IS the shared
         # summary writer, so it appends the section itself rather than delegating).
-        echo "JOB_SUMMARY_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-        echo "::notice title=📝 [SUMMARY] ${TITLE}::status: ${STATUS_IN}"
+        echo "JOB_SUMMARY_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
+        echo "::notice title=[SUMMARY] ${TITLE}::status: ${STATUS_IN}"
         if [ "${STATUS_IN}" = "success" ]; then
-          status_label="✅ SUCCESS"
+          status_label="SUCCESS"
         else
-          status_label="❌ FAILED"
+          status_label="FAILED"
         fi
         heading="${TITLE}"
-        [ -n "${ICON}" ] && heading="${ICON} ${TITLE}"
         {
-          echo "## ${heading} — ${status_label}"
+          echo "## ${heading} - ${status_label}"
           echo ""
           printf '%s\n' "${DETAILS}"
         } >> "$GITHUB_STEP_SUMMARY"
-        echo "JOB_SUMMARY_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "JOB_SUMMARY_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
 branding:
   icon: 'file-text'

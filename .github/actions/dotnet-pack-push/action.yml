@@ -103,11 +103,11 @@ runs:
         # "Report failure" step can name the failing phase without leaking a
         # variable into the caller's job environment.
         echo "phase=Pack" >> "$GITHUB_OUTPUT"
-        echo "::group::🔷 [1/2] Pack NuGet Packages"
+        echo "::group::[1/2] Pack NuGet Packages"
 
         # An empty / whitespace-only input means "this repo publishes nothing".
         if [[ -z "${PROJECTS//[[:space:]]/}" ]]; then
-          echo "No 'projects' provided — skipping NuGet pack & push."
+          echo "No 'projects' provided - skipping NuGet pack & push."
           echo "skip-pack=true" >> "$GITHUB_OUTPUT"
           echo "::endgroup::"
           exit 0
@@ -136,7 +136,7 @@ runs:
         mapfile -t PROJECT_SET < <(printf '%s\n' "${PROJECT_SET[@]}" | awk 'NF && !seen[$0]++')
 
         if [[ ${#PROJECT_SET[@]} -eq 0 ]]; then
-          echo "::error title=❌ [DOTNET] No packable projects::'projects' was set to '$PROJECTS' but no matching .csproj files were found."
+          echo "::error title=[DOTNET] No packable projects::'projects' was set to '$PROJECTS' but no matching .csproj files were found."
           exit 1
         fi
 
@@ -146,7 +146,7 @@ runs:
 
         echo "Packing ${#PROJECT_SET[@]} project(s) (${VERSION:-no explicit version}):"
         for project in "${PROJECT_SET[@]}"; do
-          echo "→ $project"
+          echo "$project"
           declare -a pack_args=("$project" --configuration "$CONFIGURATION" --no-build --output "$nupkg_dir")
           [[ -n "$VERSION" ]] && pack_args+=("-p:Version=$VERSION")
           # Stamps the nuspec <repository> element so GitHub Packages links the
@@ -156,7 +156,7 @@ runs:
           dotnet pack "${pack_args[@]}"
         done
 
-        echo "✅ [1/2] Packed ${#PROJECT_SET[@]} project(s) into $nupkg_dir"
+        echo "[1/2] Packed ${#PROJECT_SET[@]} project(s) into $nupkg_dir"
         echo "::endgroup::"
 
     - name: Push NuGet packages
@@ -171,29 +171,29 @@ runs:
         set -euo pipefail
         echo "phase=Push" >> "$GITHUB_OUTPUT"
         echo "::add-mask::$API_KEY"
-        echo "::group::🔷 [2/2] Push NuGet Packages"
+        echo "::group::[2/2] Push NuGet Packages"
 
         if [[ -z "$API_KEY" ]]; then
-          echo "::error title=❌ [DOTNET] Missing API key::api-key input is required to push."
+          echo "::error title=[DOTNET] Missing API key::api-key input is required to push."
           exit 1
         fi
         if [[ -z "$NUGET_SOURCE" ]]; then
-          echo "::error title=❌ [DOTNET] Missing feed::nuget-source input is required to push."
+          echo "::error title=[DOTNET] Missing feed::nuget-source input is required to push."
           exit 1
         fi
 
         shopt -s nullglob
         declare -a PACKAGES=("$NUPKG_DIR"/*.nupkg)
         if [[ ${#PACKAGES[@]} -eq 0 ]]; then
-          echo "::error title=❌ [DOTNET] No packages::No .nupkg files were produced in $NUPKG_DIR."
+          echo "::error title=[DOTNET] No packages::No .nupkg files were produced in $NUPKG_DIR."
           exit 1
         fi
 
-        echo "Pushing ${#PACKAGES[@]} package(s) → $NUGET_SOURCE"
+        echo "Pushing ${#PACKAGES[@]} package(s) -> $NUGET_SOURCE"
         pushed=0 failed=0
         declare -a pushed_paths=()
         for nupkg in "${PACKAGES[@]}"; do
-          echo "→ $(basename "$nupkg")"
+          echo "$(basename "$nupkg")"
           # --skip-duplicate keeps re-runs idempotent (existing versions are a no-op).
           if dotnet nuget push "$nupkg" --api-key "$API_KEY" --source "$NUGET_SOURCE" --skip-duplicate; then
             pushed=$((pushed + 1))
@@ -216,10 +216,10 @@ runs:
 
         echo "Push summary: $pushed succeeded, $failed failed"
         if [[ $failed -gt 0 ]]; then
-          echo "::error title=❌ [DOTNET] Push failed::$failed package(s) failed to push to $NUGET_SOURCE."
+          echo "::error title=[DOTNET] Push failed::$failed package(s) failed to push to $NUGET_SOURCE."
           exit 1
         fi
-        echo "✅ [2/2] Pushed $pushed package(s) → $NUGET_SOURCE"
+        echo "[2/2] Pushed $pushed package(s) -> $NUGET_SOURCE"
         echo "::endgroup::"
 
     - name: Report failure
@@ -231,7 +231,7 @@ runs:
         # Latest phase that actually ran: Push if it started, else Pack.
         BUILD_PHASE: ${{ steps.push.outputs.phase || steps.pack.outputs.phase || 'Pack' }}
       run: |
-        echo "::error title=❌ [DOTNET] Pack/push failed::Failed during the '${BUILD_PHASE:-Pack}' phase. projects: ${PROJECTS}, feed: ${NUGET_SOURCE}."
+        echo "::error title=[DOTNET] Pack/push failed::Failed during the '${BUILD_PHASE:-Pack}' phase. projects: ${PROJECTS}, feed: ${NUGET_SOURCE}."
 
 branding:
   icon: 'package'

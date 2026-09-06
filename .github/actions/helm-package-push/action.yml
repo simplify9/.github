@@ -138,8 +138,8 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "HELM_PKG_CP1_STATUS=⏳ Pending"
-          echo "HELM_PKG_CP2_STATUS=⏳ Pending"
+          echo "HELM_PKG_CP1_STATUS=PENDING"
+          echo "HELM_PKG_CP2_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Set up Helm
@@ -220,7 +220,7 @@ runs:
         UPDATE_DEPENDENCIES: ${{ inputs.update-dependencies }}
       run: |
         set -euo pipefail
-        echo "::group::☸️ [CHECKPOINT 1/2] Package Helm Chart"
+        echo "::group::[CHECKPOINT 1/2] Package Helm Chart"
         echo "Packaging Helm chart from $CHART_PATH"
         if [ "$UPDATE_DEPENDENCIES" = "true" ]; then
           echo "Running helm package with dependency update enabled"
@@ -234,8 +234,8 @@ runs:
 
         echo "Packaged chart: ${PACKAGE_FILE}"
         ls -la "$PACKAGE_DESTINATION/"
-        echo "HELM_PKG_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart packaged — $CHART_NAME-$VERSION.tgz"
+        echo "HELM_PKG_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Chart packaged - $CHART_NAME-$VERSION.tgz"
         echo "::endgroup::"
 
     - name: Validate publish configuration
@@ -281,14 +281,14 @@ runs:
       run: |
         set -euo pipefail
         echo "::add-mask::$PASSWORD"
-        echo "🔐 Authenticating with OCI registry: $REGISTRY..."
+        echo "Authenticating with OCI registry: $REGISTRY..."
         registry_host="$REGISTRY"
         if [ "$registry_host" = "docker.io" ]; then
           # Docker Hub's Helm/OCI endpoint requires this hostname for registry login.
           registry_host="registry-1.docker.io"
         fi
         printf '%s' "$PASSWORD" | helm registry login "$registry_host" -u "$USERNAME" --password-stdin
-        echo "✅ Registry authentication successful."
+        echo "Registry authentication successful."
 
     - name: Push Helm chart to OCI registry
       if: inputs.publish-method == 'oci'
@@ -314,8 +314,8 @@ runs:
         helm push "${PACKAGE_FILE}" "${CHART_URL}"
 
         echo "chart-url=${CHART_URL}/$CHART_NAME:$VERSION" >> "$GITHUB_OUTPUT"
-        echo "HELM_PKG_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart pushed (OCI) — $CHART_NAME:$VERSION → $REGISTRY"
+        echo "HELM_PKG_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Chart pushed (OCI) - $CHART_NAME:$VERSION -> $REGISTRY"
 
     - name: Log out of OCI registry
       if: always() && inputs.publish-method == 'oci'
@@ -358,19 +358,19 @@ runs:
         CM_HOST=$(printf '%s' "$CHARTMUSEUM_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#[/:].*$##')
 
         echo "::add-mask::$CHARTMUSEUM_PASSWORD"
-        echo "📡 Uploading chart to ChartMuseum: ${CHARTMUSEUM_API_URL}"
-        echo "🚀 Uploading '$(basename "$PACKAGE_FILE")'..."
+        echo "Uploading chart to ChartMuseum: ${CHARTMUSEUM_API_URL}"
+        echo "Uploading '$(basename "$PACKAGE_FILE")'..."
         # Credentials are passed via --netrc-file from a process substitution, so
         # they never appear in the process argv (visible to `ps` on the runner).
         curl -sS --max-time 30 --retry 3 --retry-connrefused \
           --fail --show-error --data-binary "@${PACKAGE_FILE}" \
           --netrc-file <(printf 'machine %s login %s password %s\n' "$CM_HOST" "$CHARTMUSEUM_USERNAME" "$CHARTMUSEUM_PASSWORD") \
           "${CHARTMUSEUM_API_URL}"
-        echo "✅ '$(basename "$PACKAGE_FILE")' uploaded successfully."
+        echo "'$(basename "$PACKAGE_FILE")' uploaded successfully."
 
         echo "chart-url=${CHARTMUSEUM_URL%/}" >> "$GITHUB_OUTPUT"
-        echo "HELM_PKG_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart pushed (ChartMuseum) — $CHART_NAME:$VERSION → $CHARTMUSEUM_URL"
+        echo "HELM_PKG_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Chart pushed (ChartMuseum) - $CHART_NAME:$VERSION -> $CHARTMUSEUM_URL"
 
     - name: Report failure
       if: failure()
@@ -379,7 +379,7 @@ runs:
         CHART_NAME: ${{ inputs.chart-name }}
         VERSION: ${{ inputs.version }}
       run: |
-        echo "::error title=❌ [HELM] Package/push failed::Chart '$CHART_NAME:$VERSION'. Checkpoints — 1) Packaged: ${HELM_PKG_CP1_STATUS:-⏭️ Not reached} | 2) Pushed: ${HELM_PKG_CP2_STATUS:-⏭️ Not reached}. Check chart path and registry credentials."
+        echo "::error title=[HELM] Package/push failed::Chart '$CHART_NAME:$VERSION'. Checkpoints - 1) Packaged: ${HELM_PKG_CP1_STATUS:-NOT REACHED} | 2) Pushed: ${HELM_PKG_CP2_STATUS:-NOT REACHED}. Check chart path and registry credentials."
 
 branding:
   icon: 'anchor'

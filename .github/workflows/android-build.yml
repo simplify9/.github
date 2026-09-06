@@ -25,7 +25,7 @@
 #   versionName: SemVer patch counter. major.minor are fixed by the developer
 #                (version-prefix); only the patch increments — patch =
 #                base patch + run_number — by exactly 1 per run, with no
-#                carry/rollover and no upper bound (e.g. 1.1.69 → 1.1.70 → …).
+#                carry/rollover and no upper bound (e.g. 1.1.69 -> 1.1.70 -> …).
 #                Optional version-name-override bypasses this logic.
 #   versionCode: strictly monotonic integer —
 #                run_number + version-code-offset.
@@ -305,7 +305,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -339,11 +338,11 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🤖 [ANDROID] Build AAB — Job Started::App: ${APP_ID} | Version prefix: ${VERSION_PREFIX} | Track: ${PLAY_TRACK} | Triggered by: ${ACTOR}"
+          echo "::notice title=[ANDROID] Build AAB - Job Started::App: ${APP_ID} | Version prefix: ${VERSION_PREFIX} | Track: ${PLAY_TRACK} | Triggered by: ${ACTOR}"
           {
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=⏳ Pending"
-            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=PENDING"
+            echo "CHECKPOINT_3_STATUS=PENDING"
           } >> "$GITHUB_ENV"
 
       # ── Disk headroom ───────────────────────────────────────────────────────
@@ -370,8 +369,8 @@ jobs:
           # `|| true`: a path absent from a future runner image is expected,
           # not an error, and must never fail the build.
           set -uo pipefail
-          echo "::group::🤖 [ANDROID] Reclaiming runner disk"
-          echo "→ Before:"
+          echo "::group::[ANDROID] Reclaiming runner disk"
+          echo "Before:"
           df -h / | sed 's/^/    /'
           BEFORE_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
 
@@ -389,12 +388,12 @@ jobs:
           docker image prune --all --force > /dev/null 2>&1 || true
           sudo apt-get clean > /dev/null 2>&1               || true
 
-          echo "→ After:"
+          echo "After:"
           df -h / | sed 's/^/    /'
           AFTER_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
-          echo "→ Reclaimed: $(( (AFTER_KB - BEFORE_KB) / 1024 )) MB"
-          echo "→ Free now:  $(( AFTER_KB / 1024 )) MB"
-          echo "✅ Disk reclaimed"
+          echo "Reclaimed: $(( (AFTER_KB - BEFORE_KB) / 1024 )) MB"
+          echo "Free now:  $(( AFTER_KB / 1024 )) MB"
+          echo "Disk reclaimed"
           echo "::endgroup::"
 
       # ── Environment Setup ───────────────────────────────────────────────────
@@ -613,8 +612,8 @@ jobs:
           set -euo pipefail
           mkdir -p "$(dirname "${KEYSTORE_OUTPUT_PATH}")"
           printf '%s' "${KEYSTORE_B64}" | base64 -d > "${KEYSTORE_OUTPUT_PATH}"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/3] Keystore restored — PASSED"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/3] Keystore restored - PASSED"
 
       - name: Verify keystore
         shell: bash
@@ -633,12 +632,12 @@ jobs:
           RN_ARCHITECTURES: ${{ inputs.gradle-react-native-architectures }}
         run: |
           set -euo pipefail
-          echo "::group::⚙️ [ANDROID] Normalizing Gradle properties for CI"
+          echo "::group::[ANDROID] Normalizing Gradle properties for CI"
 
           PROPS_FILE="${GRADLE_PROPS_DIR}/gradle.properties"
 
           if [[ ! -f "${PROPS_FILE}" ]]; then
-            echo "→ No existing gradle.properties found; creating one"
+            echo "No existing gradle.properties found; creating one"
             touch "${PROPS_FILE}"
           fi
 
@@ -653,25 +652,25 @@ jobs:
             if grep -qE "^${escaped_key}=" "${file}"; then
               # Replace the whole line; use | as delimiter to avoid clashes with / in values
               sed -i "s|^${escaped_key}=.*|${key}=${value}|" "${file}"
-              echo "  ✓ replaced: ${key}=${value}"
+              echo "  replaced: ${key}=${value}"
             else
               # Ensure file ends with a newline before appending
               [[ -s "${file}" && -n "$(tail -c1 "${file}")" ]] && echo "" >> "${file}"
               echo "${key}=${value}" >> "${file}"
-              echo "  ✓ appended: ${key}=${value}"
+              echo "  appended: ${key}=${value}"
             fi
           }
 
-          echo "→ Applying CI performance settings to ${PROPS_FILE}"
+          echo "Applying CI performance settings to ${PROPS_FILE}"
           upsert_prop "org.gradle.jvmargs" "-Xmx4g -XX:MaxMetaspaceSize=1g" "${PROPS_FILE}"
           upsert_prop "org.gradle.caching" "true" "${PROPS_FILE}"
           upsert_prop "org.gradle.parallel" "true" "${PROPS_FILE}"
           upsert_prop "reactNativeArchitectures" "${RN_ARCHITECTURES}" "${PROPS_FILE}"
 
-          echo "→ Resulting gradle.properties performance settings:"
+          echo "Resulting gradle.properties performance settings:"
           grep -E "^(org\.gradle\.jvmargs|org\.gradle\.caching|org\.gradle\.parallel|reactNativeArchitectures)=" "${PROPS_FILE}" | sed 's/^/    /'
 
-          echo "✅ Gradle properties normalized"
+          echo "Gradle properties normalized"
           echo "::endgroup::"
 
       # ndk-version default 27.1.12297006 = NDK r27b (LTS). Change it only after
@@ -690,18 +689,18 @@ jobs:
           set -euo pipefail
           SDK_ROOT="/usr/local/lib/android/sdk"
           SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-          echo "::group::📦 [ANDROID] Pre-installing NDK versions"
+          echo "::group::[ANDROID] Pre-installing NDK versions"
           if [[ -d "${SDK_ROOT}/ndk/${NDK_VERSION}" ]]; then
-            echo "→ NDK ${NDK_VERSION} already present in the runner image — skipping install"
+            echo "NDK ${NDK_VERSION} already present in the runner image - skipping install"
           else
-            echo "→ Accepting SDK licenses"
+            echo "Accepting SDK licenses"
             yes | "${SDKMANAGER}" --licenses > /dev/null 2>&1 || true
-            echo "→ Installing NDK ${NDK_VERSION}"
+            echo "Installing NDK ${NDK_VERSION}"
             "${SDKMANAGER}" "ndk;${NDK_VERSION}"
           fi
-          echo "→ NDKs now on disk:"
+          echo "NDKs now on disk:"
           find "${SDK_ROOT}/ndk" -mindepth 1 -maxdepth 1 -printf '    %f\n' 2>/dev/null || echo "    (none)"
-          echo "✅ NDK version pre-installed"
+          echo "NDK version pre-installed"
           echo "::endgroup::"
 
       # Pinned to setup-gradle@v5 (not v6).
@@ -735,7 +734,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "→ Disk before Gradle: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
+          echo "Disk before Gradle: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           # EXTRA_ARGS is intentionally unquoted to allow word splitting
           # for callers that pass multiple space-separated Gradle flags.
           # shellcheck disable=SC2086
@@ -753,9 +752,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "→ Disk after Gradle:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Gradle bundle built — PASSED"
+          echo "Disk after Gradle:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/3] Gradle bundle built - PASSED"
 
       # ── Artifact ────────────────────────────────────────────────────────────
       - name: Rename bundle
@@ -794,8 +793,8 @@ jobs:
           fi
 
           echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/3] Bundle renamed — PASSED: ${AAB_OUT}"
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 3/3] Bundle renamed - PASSED: ${AAB_OUT}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -814,10 +813,10 @@ jobs:
           APP_ID: ${{ inputs.app-id }}
         run: |
           set -euo pipefail
-          echo "::error title=🤖 [ANDROID] Build Job Failed::App: ${APP_ID}"
-          echo "  Checkpoint 1 — Keystore restored: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Bundle built:      ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — Bundle renamed:    ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+          echo "::error title=[ANDROID] Build Job Failed::App: ${APP_ID}"
+          echo "  Checkpoint 1 - Keystore restored: ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Bundle built:      ${CHECKPOINT_2_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 3 - Bundle renamed:    ${CHECKPOINT_3_STATUS:-NOT REACHED}"
 
           # A full filesystem does not announce itself: the JVM's writes get
           # truncated and Gradle blames whichever task happened to be writing
@@ -829,14 +828,13 @@ jobs:
           echo "  Free disk at failure:             ${FREE_MB:-unknown} MB"
           df -h / 2>/dev/null | sed 's/^/    /' || true
           if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 1024 ]]; then
-            echo "::error title=🤖 [ANDROID] Runner out of disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Gradle task as a symptom of a truncated write, not the cause. Ensure free-disk-space is true, and set android-ndk-version to the ndkVersion your android/build.gradle actually resolves."
+            echo "::error title=[ANDROID] Runner out of disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Gradle task as a symptom of a truncated write, not the cause. Ensure free-disk-space is true, and set android-ndk-version to the ndkVersion your android/build.gradle actually resolves."
           fi
 
       - name: Build summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🤖'
           title: Android Build
           status: ${{ job.status }}
           details: |
@@ -850,13 +848,13 @@ jobs:
             | Triggered by | ${{ github.actor }} |
             | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-            ## 📋 Build Checkpoint Summary
+            ## Build Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Keystore restored | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Bundle built | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | Bundle renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            | 1 | Keystore restored | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Bundle built | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | Bundle renamed | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
 
   release_with_environment:
     name: Release
@@ -892,8 +890,8 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🤖 [ANDROID] Release to Google Play (env gated) — Job Started::App: ${APP_ID} | Version: ${VERSION_NAME} | Track: ${PLAY_TRACK} | Env: ${RELEASE_ENV} | Triggered by: ${ACTOR}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=[ANDROID] Release to Google Play (env gated) - Job Started::App: ${APP_ID} | Version: ${VERSION_NAME} | Track: ${PLAY_TRACK} | Env: ${RELEASE_ENV} | Triggered by: ${ACTOR}"
+          echo "CHECKPOINT_1_STATUS=PENDING" >> "$GITHUB_ENV"
 
       # ── AAB Retrieval ───────────────────────────────────────────────────────
       - name: Download artifact
@@ -963,8 +961,8 @@ jobs:
           PLAY_TRACK: ${{ inputs.play-track }}
         run: |
           set -euo pipefail
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — PASSED: ${APP_ID} v${VERSION_NAME} → ${PLAY_TRACK}"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/1] Google Play upload completed - PASSED: ${APP_ID} v${VERSION_NAME} -> ${PLAY_TRACK}"
 
       - name: Release failure
         if: failure()
@@ -974,14 +972,13 @@ jobs:
           VERSION_NAME: ${{ needs.build.outputs.version-name }}
         run: |
           set -euo pipefail
-          echo "::error title=🤖 [ANDROID] Release (env gated) Job Failed::App: ${APP_ID} | Version: ${VERSION_NAME}"
-          echo "  Checkpoint 1 — Google Play upload: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
+          echo "::error title=[ANDROID] Release (env gated) Job Failed::App: ${APP_ID} | Version: ${VERSION_NAME}"
+          echo "  Checkpoint 1 - Google Play upload: ${CHECKPOINT_1_STATUS:-NOT REACHED}"
 
       - name: Release summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🤖'
           title: Android Release to Google Play (Environment-Gated)
           status: ${{ job.status }}
           details: |
@@ -994,8 +991,8 @@ jobs:
             | Branch | `${{ github.ref_name }}` |
             | Runner | ${{ runner.os }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Google Play upload | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
+            | 1 | Google Play upload | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |

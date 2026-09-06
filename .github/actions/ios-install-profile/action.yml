@@ -41,7 +41,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "IOS_PROFILE_CP1_STATUS=⏳ Pending"
+          echo "IOS_PROFILE_CP1_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Install provisioning profile (manual)
@@ -50,7 +50,7 @@ runs:
         IOS_MOBILEPROVISION_BASE64: ${{ inputs.profileBase64 }}
       run: |
         set -euo pipefail
-        echo "::group::🔏 [CHECKPOINT 1/1] Install Provisioning Profile"
+        echo "::group::[CHECKPOINT 1/1] Install Provisioning Profile"
         mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
         printf '%s' "$IOS_MOBILEPROVISION_BASE64" | base64 -D > "$RUNNER_TEMP/profile.mobileprovision"
@@ -86,8 +86,8 @@ runs:
         echo "IOS_PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_TEAM_ID=$TEAM_ID_FROM_PROFILE" >> "$GITHUB_ENV"
         echo "IOS_PROFILE_BUNDLE_ID=$BUNDLE_ID" >> "$GITHUB_ENV"
-        echo "IOS_PROFILE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Profile installed — Name: $NAME, UUID: $UUID"
+        echo "IOS_PROFILE_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Profile installed - Name: $NAME, UUID: $UUID"
         echo "::endgroup::"
 
     - name: Report failure
@@ -95,7 +95,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        echo "::error title=❌ [SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
+        echo "::error title=[SIGN] Provisioning profile installation failed::Failed to decode or install provisioning profile. Check that profileBase64 is a valid base64-encoded .mobileprovision file."
 
 branding:
   icon: 'lock'

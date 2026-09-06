@@ -95,5 +95,5 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail
-          echo "::notice title=🤖 [AUTO-MERGE] Enabling auto-merge::${PR_URL} — patch-level ${{ steps.metadata.outputs.package-ecosystem }} bump, vuln gate passed"
+          echo "::notice title=[AUTO-MERGE] Enabling auto-merge::${PR_URL} - patch-level ${{ steps.metadata.outputs.package-ecosystem }} bump, vuln gate passed"
           gh pr merge --auto --squash "$PR_URL"

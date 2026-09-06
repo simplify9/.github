@@ -5,10 +5,10 @@
 # Google Play (r0adkll/upload-google-play@v1).
 #
 # Two-job pattern:
-#   build                    → produces + uploads the signed AAB artifact
-#   release_with_environment → downloads + ships to Google Play, gated by a
-#                              named GitHub Environment and skippable via
-#                              disable-release.
+#   build                    -> produces + uploads the signed AAB artifact
+#   release_with_environment -> downloads + ships to Google Play, gated by a
+#                               named GitHub Environment and skippable via
+#                               disable-release.
 #
 # Drop-in replacement for laflef-mobile/.github/workflows/laflef-android-cicd.yml
 # — same Flutter setup, SemVer patch-counter versioning, key.properties signing and
@@ -264,7 +264,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -306,11 +305,11 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🤖 [ANDROID] Flutter build starting::app=${APP_ID} version-prefix=${VERSION_PREFIX} track=${PLAY_TRACK} actor=${ACTOR}"
+          echo "::notice title=[ANDROID] Flutter build starting::app=${APP_ID} version-prefix=${VERSION_PREFIX} track=${PLAY_TRACK} actor=${ACTOR}"
           {
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=⏳ Pending"
-            echo "CHECKPOINT_3_STATUS=⏳ Pending"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=PENDING"
+            echo "CHECKPOINT_3_STATUS=PENDING"
           } >> "$GITHUB_ENV"
 
       # Same runner, same exposure as android-build.yml. A full filesystem
@@ -331,8 +330,8 @@ jobs:
           # `|| true`: a path absent from a future runner image is expected,
           # not an error, and must never fail the build.
           set -uo pipefail
-          echo "::group::🤖 [ANDROID] Reclaiming runner disk"
-          echo "→ Before:"
+          echo "::group::[ANDROID] Reclaiming runner disk"
+          echo "Before:"
           df -h / | sed 's/^/    /'
           BEFORE_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
 
@@ -347,12 +346,12 @@ jobs:
           docker image prune --all --force > /dev/null 2>&1 || true
           sudo apt-get clean > /dev/null 2>&1               || true
 
-          echo "→ After:"
+          echo "After:"
           df -h / | sed 's/^/    /'
           AFTER_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
-          echo "→ Reclaimed: $(( (AFTER_KB - BEFORE_KB) / 1024 )) MB"
-          echo "→ Free now:  $(( AFTER_KB / 1024 )) MB"
-          echo "✅ Disk reclaimed"
+          echo "Reclaimed: $(( (AFTER_KB - BEFORE_KB) / 1024 )) MB"
+          echo "Free now:  $(( AFTER_KB / 1024 )) MB"
+          echo "Disk reclaimed"
           echo "::endgroup::"
 
       - name: Checkout
@@ -399,13 +398,13 @@ jobs:
           ANALYZE_FATAL_LEVEL: ${{ inputs.analyze-fatal-level }}
         run: |
           set -euo pipefail
-          echo "::group::🤖 Flutter dependencies"
+          echo "::group::Flutter dependencies"
           flutter --version
           flutter pub get
           echo "::endgroup::"
 
           if [[ "${RUN_ANALYZE}" == "true" ]]; then
-            echo "::group::🤖 flutter analyze (fatal level: ${ANALYZE_FATAL_LEVEL})"
+            echo "::group::flutter analyze (fatal level: ${ANALYZE_FATAL_LEVEL})"
             case "${ANALYZE_FATAL_LEVEL}" in
               none)    ANALYZE_FLAGS="--no-fatal-infos --no-fatal-warnings" ;;
               warning) ANALYZE_FLAGS="--no-fatal-infos" ;;
@@ -430,7 +429,7 @@ jobs:
           VERSION_CODE_OFFSET: ${{ inputs.version-code-offset }}
         run: |
           set -euo pipefail
-          echo "::group::🏷️ [VERSION] Compute versionName / versionCode"
+          echo "::group::[VERSION] Compute versionName / versionCode"
 
           NAME_OFFSET_RAW="${VERSION_NAME_OFFSET}"
           CODE_OFFSET_RAW="${VERSION_CODE_OFFSET}"
@@ -502,11 +501,11 @@ jobs:
           echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
 
-          echo "✅ versionName=${VERSION_NAME} versionCode=${VERSION_CODE} (source: ${VERSION_NAME_SOURCE})"
+          echo "versionName=${VERSION_NAME} versionCode=${VERSION_CODE} (source: ${VERSION_NAME_SOURCE})"
           echo "::endgroup::"
 
           {
-            echo "## 🏷️ Android Version Computation"
+            echo "## Android Version Computation"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
@@ -550,17 +549,17 @@ jobs:
           KEYSTORE_OUTPUT_PATH: ${{ inputs.keystore-output-path }}
         run: |
           set -euo pipefail
-          echo "::group::🔏 [SIGN] [CHECKPOINT 1/3] Restore keystore"
+          echo "::group::[SIGN] [CHECKPOINT 1/3] Restore keystore"
           mkdir -p "$(dirname "${KEYSTORE_OUTPUT_PATH}")"
           # printf '%s' avoids the trailing newline `echo` would add, which would
           # corrupt the decoded binary keystore.
           printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 -d > "${KEYSTORE_OUTPUT_PATH}"
           if [[ ! -s "${KEYSTORE_OUTPUT_PATH}" ]]; then
-            echo "ERROR: decoded keystore is empty — check android-keystore-base64."
+            echo "ERROR: decoded keystore is empty - check android-keystore-base64."
             exit 1
           fi
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ Keystore restored to ${KEYSTORE_OUTPUT_PATH}"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "Keystore restored to ${KEYSTORE_OUTPUT_PATH}"
           echo "::endgroup::"
 
       - name: Create key.properties for Android signing
@@ -601,8 +600,8 @@ jobs:
           DART_DEFINE: ${{ inputs.dart-define }}
         run: |
           set -euo pipefail
-          echo "::group::🤖 [CHECKPOINT 2/3] flutter build appbundle"
-          echo "→ Disk before build: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
+          echo "::group::[CHECKPOINT 2/3] flutter build appbundle"
+          echo "Disk before build: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           DEFINE_FLAGS=""
           for kv in ${DART_DEFINE}; do
             DEFINE_FLAGS="${DEFINE_FLAGS} --dart-define=${kv}"
@@ -612,8 +611,8 @@ jobs:
             --build-name="${VERSION_NAME}" \
             --build-number="${VERSION_CODE}" \
             ${DEFINE_FLAGS}
-          echo "→ Disk after build:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "Disk after build:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
           echo "::endgroup::"
 
       - name: Rename bundle
@@ -625,7 +624,7 @@ jobs:
           AAB_NAME_PATTERN: ${{ inputs.aab-name-pattern }}
         run: |
           set -euo pipefail
-          echo "::group::🤖 [CHECKPOINT 3/3] Locate & rename AAB"
+          echo "::group::[CHECKPOINT 3/3] Locate & rename AAB"
 
           SRC=""
           DEFAULT_SRC="build/app/outputs/bundle/release/app-release.aab"
@@ -649,8 +648,8 @@ jobs:
 
           mv "${SRC}" "${AAB_OUT}"
           echo "aab_file=${AAB_OUT}" >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ AAB renamed to ${AAB_OUT}"
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "AAB renamed to ${AAB_OUT}"
           echo "::endgroup::"
 
       - name: Upload artifact
@@ -682,21 +681,20 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          echo "::error title=🤖 [ANDROID] Build failed::CP1 keystore=${CHECKPOINT_1_STATUS:-⏭️ Not reached} | CP2 build=${CHECKPOINT_2_STATUS:-⏭️ Not reached} | CP3 rename=${CHECKPOINT_3_STATUS:-⏭️ Not reached}"
+          echo "::error title=[ANDROID] Build failed::CP1 keystore=${CHECKPOINT_1_STATUS:-NOT REACHED} | CP2 build=${CHECKPOINT_2_STATUS:-NOT REACHED} | CP3 rename=${CHECKPOINT_3_STATUS:-NOT REACHED}"
 
           # Never let the diagnostic abort the report it is attached to.
           FREE_MB="$(df -Pk / 2>/dev/null | awk 'NR==2 {print int($4/1024)}')" || FREE_MB=""
           echo "  Free disk at failure: ${FREE_MB:-unknown} MB"
           df -h / 2>/dev/null | sed 's/^/    /' || true
           if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 1024 ]]; then
-            echo "::error title=🤖 [ANDROID] Runner out of disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Gradle task as a symptom of a truncated write, not the cause. Ensure free-disk-space is true."
+            echo "::error title=[ANDROID] Runner out of disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Gradle task as a symptom of a truncated write, not the cause. Ensure free-disk-space is true."
           fi
 
       - name: Build summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🤖'
           title: Flutter Android Build
           status: ${{ job.status }}
           details: |
@@ -711,13 +709,13 @@ jobs:
             | Triggered by | ${{ github.actor }} |
             | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Keystore restored | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | AAB built | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | AAB renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            | 1 | Keystore restored | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | AAB built | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | AAB renamed | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
 
   release_with_environment:
     name: Android Release (Google Play)
@@ -757,8 +755,8 @@ jobs:
           RELEASE_ENV: ${{ inputs.release-environment }}
           ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🤖 [ANDROID] Google Play release starting::app=${APP_ID} version=${VERSION_NAME} track=${PLAY_TRACK} env=${RELEASE_ENV} actor=${ACTOR}"
-          echo "RELEASE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=[ANDROID] Google Play release starting::app=${APP_ID} version=${VERSION_NAME} track=${PLAY_TRACK} env=${RELEASE_ENV} actor=${ACTOR}"
+          echo "RELEASE_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
 
       - name: Download artifact
         uses: actions/download-artifact@v8
@@ -821,8 +819,8 @@ jobs:
           PLAY_TRACK: ${{ inputs.play-track }}
         run: |
           set -euo pipefail
-          echo "RELEASE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] Google Play upload completed — ${APP_ID} → ${PLAY_TRACK}"
+          echo "RELEASE_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/1] Google Play upload completed - ${APP_ID} -> ${PLAY_TRACK}"
 
       - name: Release failure
         if: failure()
@@ -832,13 +830,12 @@ jobs:
           VERSION_NAME: ${{ needs.build.outputs.version-name }}
           PLAY_TRACK: ${{ inputs.play-track }}
         run: |
-          echo "::error title=🤖 [ANDROID] Release failed::app=${APP_ID} version=${VERSION_NAME} track=${PLAY_TRACK}"
+          echo "::error title=[ANDROID] Release failed::app=${APP_ID} version=${VERSION_NAME} track=${PLAY_TRACK}"
 
       - name: Release summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🤖'
           title: Flutter Android Release to Google Play (Environment-Gated)
           status: ${{ job.status }}
           details: |
@@ -851,8 +848,8 @@ jobs:
             | Environment | ${{ inputs.release-environment }} |
             | Branch | `${{ github.ref_name }}` |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Google Play upload | ${{ env.RELEASE_CP1_STATUS || '⏭️ Not reached' }} |
+            | 1 | Google Play upload | ${{ env.RELEASE_CP1_STATUS || 'NOT REACHED' }} |

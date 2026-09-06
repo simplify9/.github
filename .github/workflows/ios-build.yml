@@ -348,7 +348,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -380,10 +379,10 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Build IPA — Job Started::Workspace: ${WORKSPACE} | Scheme: ${SCHEME} | Triggered by: ${ACTOR}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_3_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=[IOS] Build IPA - Job Started::Workspace: ${WORKSPACE} | Scheme: ${SCHEME} | Triggered by: ${ACTOR}"
+          echo "CHECKPOINT_1_STATUS=PENDING" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=PENDING" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=PENDING" >> "$GITHUB_ENV"
 
       # ── Environment Setup ────────────────────────────────────────────────────────────
       - name: Checkout
@@ -581,7 +580,7 @@ jobs:
             # Key exists (commented or not) — uncomment then set value to true
             sed -i '' -E 's/^([[:space:]]*)#([[:space:]]*:ccache_enabled)/\1\2/' "${PODFILE}"
             sed -i '' -E 's/(:ccache_enabled[[:space:]]*=>[[:space:]]*)[[:alnum:]:_]+/\1true/' "${PODFILE}"
-            echo "→ Patched existing :ccache_enabled in ${PODFILE}"
+            echo "Patched existing :ccache_enabled in ${PODFILE}"
           else
             # Key absent — inject :ccache_enabled => true into react_native_post_install(...)
             # Uses Ruby (already present for CocoaPods) for reliable multi-line AST-aware patching.
@@ -596,17 +595,17 @@ jobs:
           abort "ERROR: react_native_post_install not found in #{ARGV[0]}" if modified == content
           File.write(ARGV[0], modified)
           ' -- "${PODFILE}"
-            echo "→ Injected :ccache_enabled => true into react_native_post_install in ${PODFILE}"
+            echo "Injected :ccache_enabled => true into react_native_post_install in ${PODFILE}"
           fi
 
           if grep -qE ':ccache_enabled[[:space:]]*=>[[:space:]]*true' "${PODFILE}"; then
-            echo "✅ :ccache_enabled => true active in ${PODFILE}"
+            echo ":ccache_enabled => true active in ${PODFILE}"
           else
             echo "ERROR: Failed to enable :ccache_enabled in ${PODFILE}."
             exit 1
           fi
 
-          echo "→ Podfile diff:"
+          echo "Podfile diff:"
           git --no-pager diff -- "${PODFILE}" || true
 
       # ── CocoaPods ──────────────────────────────────────────────────────────────────
@@ -657,15 +656,15 @@ jobs:
           RUBY_VERSION: ${{ inputs.ruby-version }}
         run: |
           set -euo pipefail
-          echo "::group::📦 [IOS] Installing CocoaPods"
+          echo "::group::[IOS] Installing CocoaPods"
           if [[ "${USE_BUNDLER}" == "true" && -n "${RUBY_VERSION}" ]]; then
-            echo "→ Running: bundle exec pod install"
+            echo "Running: bundle exec pod install"
             bundle exec pod install
           else
-            echo "→ Running: pod install"
+            echo "Running: pod install"
             pod install
           fi
-          echo "✅ CocoaPods installed"
+          echo "CocoaPods installed"
           echo "::endgroup::"
 
       # ── Versioning ──────────────────────────────────────────────────────────────────
@@ -793,8 +792,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/3] Signing certificate installed — PASSED"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/3] Signing certificate installed - PASSED"
 
       - name: Install profile
         id: install_profile
@@ -886,7 +885,7 @@ jobs:
           PROFILE_NAME: ${{ steps.profile_meta.outputs.profile_name }}
         run: |
           set -euo pipefail
-          echo "→ Disk before archive: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
+          echo "Disk before archive: $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
           mkdir -p output
 
           TEAM_ID="${IOS_TEAM_ID}"
@@ -914,9 +913,9 @@ jobs:
             -hideShellScriptEnvironment \
             -showBuildTimingSummary
 
-          echo "→ Disk after archive:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Archive created (manual xcodebuild) — PASSED: ${ARCHIVE_PATH}"
+          echo "Disk after archive:  $(df -Pk / | awk 'NR==2 {print int($4/1024)" MB free"}')"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/3] Archive created (manual xcodebuild) - PASSED: ${ARCHIVE_PATH}"
 
       # ── Export ───────────────────────────────────────────────────────────────────
       # exportOptions.plist can be provided statically via export-options-plist
@@ -1021,8 +1020,8 @@ jobs:
 
           echo "ipa_file=${IPA_OUT}" >> "$GITHUB_OUTPUT"
           echo "IPA_FILE=${IPA_OUT}" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/3] IPA renamed — PASSED: ${IPA_OUT}"
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 3/3] IPA renamed - PASSED: ${IPA_OUT}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -1042,10 +1041,10 @@ jobs:
           SCHEME: ${{ inputs.scheme }}
         run: |
           set -euo pipefail
-          echo "::error title=🍎 [IOS] Build Job Failed::Workspace: ${WORKSPACE} | Scheme: ${SCHEME}"
-          echo "  Checkpoint 1 — Signing cert installed: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Archive created:       ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — IPA renamed:           ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+          echo "::error title=[IOS] Build Job Failed::Workspace: ${WORKSPACE} | Scheme: ${SCHEME}"
+          echo "  Checkpoint 1 - Signing cert installed: ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Archive created:       ${CHECKPOINT_2_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 3 - IPA renamed:           ${CHECKPOINT_3_STATUS:-NOT REACHED}"
 
           # Insurance, not a known problem: macOS runners have plenty of headroom
           # and this pipeline has never run short. But a full filesystem truncates
@@ -1058,7 +1057,7 @@ jobs:
           echo "  Free disk at failure:                 ${FREE_MB:-unknown} MB"
           df -h / 2>/dev/null | sed 's/^/    /' || true
           if [[ -n "${FREE_MB}" && "${FREE_MB}" -lt 2048 ]]; then
-            echo "::error title=🍎 [IOS] Runner low on disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Xcode error as a possible symptom of a truncated write rather than the cause."
+            echo "::error title=[IOS] Runner low on disk::Only ${FREE_MB} MB free when the build failed. Treat the reported Xcode error as a possible symptom of a truncated write rather than the cause."
           fi
 
       - name: Collect ccache stats
@@ -1068,7 +1067,7 @@ jobs:
           {
             echo "CCACHE_STATS_SUMMARY<<CCACHE_STATS_EOF"
             echo ""
-            echo "## ⚡ ccache Stats"
+            echo "## ccache Stats"
             echo ""
             echo '```text'
             ccache --show-stats || true
@@ -1080,7 +1079,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🍎'
           title: iOS Build
           status: ${{ job.status }}
           details: |
@@ -1094,13 +1092,13 @@ jobs:
             | Branch | `${{ github.ref_name }}` |
             | Triggered by | ${{ github.actor }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Signing cert installed | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Archive created | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | IPA renamed | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            | 1 | Signing cert installed | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Archive created | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | IPA renamed | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
             ${{ env.CCACHE_STATS_SUMMARY }}
   release_with_environment:
     name: Release
@@ -1136,8 +1134,8 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🍎 [IOS] Upload to TestFlight (env gated) — Job Started::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Env: ${RELEASE_ENV} | Upload tool: ${UPLOAD_TOOL} | Triggered by: ${ACTOR}"
-          echo "UPLOAD_CHECKPOINT_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=[IOS] Upload to TestFlight (env gated) - Job Started::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Env: ${RELEASE_ENV} | Upload tool: ${UPLOAD_TOOL} | Triggered by: ${ACTOR}"
+          echo "UPLOAD_CHECKPOINT_STATUS=PENDING" >> "$GITHUB_ENV"
 
       # ── IPA Retrieval ──────────────────────────────────────────────────────────────
       - name: Download artifact
@@ -1245,12 +1243,12 @@ jobs:
           IPA_BYTES=$(stat -c%s "${IPA}")
           IPA_SIZE_MB=$(awk "BEGIN { printf \"%.2f\", ${IPA_BYTES} / 1048576 }")
           IPA_NAME="$(basename "${IPA}")"
-          echo "::notice title=🍎 [IOS] TestFlight Upload Starting::File: ${IPA_NAME} | Size: ${IPA_SIZE_MB} MB | Backend: AppStoreConnectAPI | Started: $(date -u +'%H:%M:%S UTC')"
-          echo "::group::🍎 [IOS] Upload details"
-          echo "  → File:    ${IPA_NAME}"
-          echo "  → Size:    ${IPA_SIZE_MB} MB"
-          echo "  → Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
-          echo "  → Started: $(date -u +'%H:%M:%S UTC')"
+          echo "::notice title=[IOS] TestFlight Upload Starting::File: ${IPA_NAME} | Size: ${IPA_SIZE_MB} MB | Backend: AppStoreConnectAPI | Started: $(date -u +'%H:%M:%S UTC')"
+          echo "::group::[IOS] Upload details"
+          echo "  File:    ${IPA_NAME}"
+          echo "  Size:    ${IPA_SIZE_MB} MB"
+          echo "  Backend: AppStoreConnectAPI (apple-actions/upload-testflight-build@v5)"
+          echo "  Started: $(date -u +'%H:%M:%S UTC')"
           echo "::endgroup::"
           echo "APPSTOREAPI_UPLOAD_START=$(date +%s)" >> "$GITHUB_ENV"
           echo "APPSTOREAPI_IPA_SIZE_MB=${IPA_SIZE_MB}" >> "$GITHUB_ENV"
@@ -1279,13 +1277,13 @@ jobs:
         run: |
           set -euo pipefail
           ELAPSED=$(( $(date +%s) - APPSTOREAPI_UPLOAD_START ))
-          bar='██████████████████████████████'
-          echo "::group::🍎 [IOS] Upload complete"
-          echo "  [${bar}] 100% — ${APPSTOREAPI_IPA_SIZE_MB} MB in ${ELAPSED}s"
-          echo "  → Completed at $(date -u +'%H:%M:%S UTC')"
+          bar='=============================='
+          echo "::group::[IOS] Upload complete"
+          echo "  [${bar}] 100% - ${APPSTOREAPI_IPA_SIZE_MB} MB in ${ELAPSED}s"
+          echo "  Completed at $(date -u +'%H:%M:%S UTC')"
           echo "::endgroup::"
-          echo "UPLOAD_CHECKPOINT_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/1] TestFlight upload completed — PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
+          echo "UPLOAD_CHECKPOINT_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/1] TestFlight upload completed - PASSED: ${APPSTOREAPI_IPA_NAME} (${APPSTOREAPI_IPA_SIZE_MB} MB) in ${ELAPSED}s"
 
       - name: Release failure
         if: failure()
@@ -1295,14 +1293,13 @@ jobs:
           BUILD_NUMBER: ${{ needs.build.outputs.build-number }}
           UPLOAD_TOOL: ${{ inputs.upload-tool }}
         run: |
-          echo "::error title=🍎 [IOS] Release Job Failed::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Upload tool: ${UPLOAD_TOOL}"
-          echo "  Checkpoint 1 — TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-❌ Not reached}"
+          echo "::error title=[IOS] Release Job Failed::Version: ${VERSION} | Build: ${BUILD_NUMBER} | Upload tool: ${UPLOAD_TOOL}"
+          echo "  Checkpoint 1 - TestFlight upload: ${UPLOAD_CHECKPOINT_STATUS:-NOT REACHED}"
 
       - name: Release summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🍎'
           title: iOS TestFlight Upload
           status: ${{ job.status }}
           details: |
@@ -1314,8 +1311,8 @@ jobs:
             | Triggered by | ${{ github.actor }} |
             | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | TestFlight upload | ${{ env.UPLOAD_CHECKPOINT_STATUS || '⏭️ Skipped' }} |
+            | 1 | TestFlight upload | ${{ env.UPLOAD_CHECKPOINT_STATUS || 'SKIPPED' }} |

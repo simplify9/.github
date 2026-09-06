@@ -112,12 +112,12 @@ if [ -n "${GATEWAY_SECTION_NAME:-}" ]; then
   echo "Shared listener mode: gateway-section-name='${GATEWAY_SECTION_NAME}' is set."
   echo "Skipping per-host listener and cert provisioning."
   if ! listener_names | grep -Fxq "${GATEWAY_SECTION_NAME}"; then
-    echo "❌ Shared listener '${GATEWAY_SECTION_NAME}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}'." >&2
+    echo "Shared listener '${GATEWAY_SECTION_NAME}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}'." >&2
     echo "   Available listeners:" >&2
     listener_names | sed 's/^/     /' >&2
     exit 1
   fi
-  echo "✅ Shared listener '${GATEWAY_SECTION_NAME}' confirmed present on gateway. Onboarding complete."
+  echo "Shared listener '${GATEWAY_SECTION_NAME}' confirmed present on gateway. Onboarding complete."
   exit 0
 fi
 
@@ -187,7 +187,7 @@ add_host_listeners() {
   local attempt
   for (( attempt = 1; attempt <= REPLACE_MAX_RETRIES; attempt++ )); do
     local gw
-    gw=$(gateway_json) || { echo "❌ Gateway '${GATEWAY_NAME}' not found in '${GATEWAY_NAMESPACE}'." >&2; return 1; }
+    gw=$(gateway_json) || { echo "Gateway '${GATEWAY_NAME}' not found in '${GATEWAY_NAMESPACE}'." >&2; return 1; }
 
     # Decide which listeners are missing, from THIS snapshot.
     #
@@ -206,7 +206,7 @@ add_host_listeners() {
       need_http=false
     elif jq -e --arg h "$host" '.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTP" and .port==80)' >/dev/null <<<"$gw"; then
       other=$(jq -r --arg h "$host" 'first(.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTP" and .port==80) | .name)' <<<"$gw")
-      echo "❌ Host '${host}' already has an HTTP:80 listener named '${other}', not the expected '${http_listener}'." >&2
+      echo "Host '${host}' already has an HTTP:80 listener named '${other}', not the expected '${http_listener}'." >&2
       echo "   The chart's HTTPRoute targets section '${http_listener}', so it would not attach to '${other}'." >&2
       echo "   ACTION REQUIRED: set gateway-section-name (single shared listener) or gateway-section-names (per-host) to '${other}' so routing reuses the existing listener." >&2
       return 1
@@ -215,7 +215,7 @@ add_host_listeners() {
       need_https=false
     elif jq -e --arg h "$host" '.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTPS" and .port==443)' >/dev/null <<<"$gw"; then
       other=$(jq -r --arg h "$host" 'first(.spec.listeners[]? | select(.hostname==$h and .protocol=="HTTPS" and .port==443) | .name)' <<<"$gw")
-      echo "❌ Host '${host}' already has an HTTPS:443 listener named '${other}', not the expected '${https_listener}'." >&2
+      echo "Host '${host}' already has an HTTPS:443 listener named '${other}', not the expected '${https_listener}'." >&2
       echo "   The chart's HTTPRoute targets section '${https_listener}', so it would not attach to '${other}'." >&2
       echo "   ACTION REQUIRED: set gateway-section-name (single shared listener) or gateway-section-names (per-host) to '${other}' so routing reuses the existing listener." >&2
       return 1
@@ -233,8 +233,8 @@ add_host_listeners() {
     local current
     current=$(jq '.spec.listeners | length' <<<"$gw")
     if (( current + needed > MAX_LISTENERS )); then
-      echo "❌ GATEWAY CAPACITY ERROR: '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' currently has ${current}/${MAX_LISTENERS} listeners." >&2
-      echo "   Adding ${needed} listener(s) for '${host}' would reach $((current + needed)) — exceeding the hard Gateway API limit of ${MAX_LISTENERS}." >&2
+      echo "GATEWAY CAPACITY ERROR: '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' currently has ${current}/${MAX_LISTENERS} listeners." >&2
+      echo "   Adding ${needed} listener(s) for '${host}' would reach $((current + needed)) - exceeding the hard Gateway API limit of ${MAX_LISTENERS}." >&2
       echo "   ACTION REQUIRED: Prune stale listeners from the gateway before redeploying." >&2
       # shellcheck disable=SC2028  # the \n is intentional literal text in a copy-pasteable kubectl hint
       echo "   Run: kubectl get gateway ${GATEWAY_NAME} -n ${GATEWAY_NAMESPACE} -o jsonpath='{range .status.listeners[*]}{.name}: attachedRoutes={.attachedRoutes}{\"\\n\"}{end}'" >&2
@@ -265,19 +265,19 @@ add_host_listeners() {
     # the write with a 409 Conflict if the gateway changed since we read it.
     local err
     if err=$(kubectl replace -f - <<<"$new" 2>&1); then
-      echo "✅ Added ${needed} listener(s) for '${host}' (HTTP=${need_http}, HTTPS=${need_https}); ${current} -> $((current + needed))/${MAX_LISTENERS}."
+      echo "Added ${needed} listener(s) for '${host}' (HTTP=${need_http}, HTTPS=${need_https}); ${current} -> $((current + needed))/${MAX_LISTENERS}."
       return 0
     fi
     if echo "$err" | grep -qiE 'conflict|please apply your changes to the latest version|object has been modified'; then
-      echo "⚠️  Conflict adding listeners for '${host}' (attempt ${attempt}/${REPLACE_MAX_RETRIES}); another writer updated the gateway. Retrying with a fresh read..."
+      echo "Conflict adding listeners for '${host}' (attempt ${attempt}/${REPLACE_MAX_RETRIES}); another writer updated the gateway. Retrying with a fresh read..."
       sleep "$attempt"
       continue
     fi
-    echo "❌ Failed to add listeners for '${host}': ${err}" >&2
+    echo "Failed to add listeners for '${host}': ${err}" >&2
     return 1
   done
 
-  echo "❌ Exhausted ${REPLACE_MAX_RETRIES} retries adding listeners for '${host}' due to repeated conflicts." >&2
+  echo "Exhausted ${REPLACE_MAX_RETRIES} retries adding listeners for '${host}' due to repeated conflicts." >&2
   return 1
 }
 
@@ -301,12 +301,12 @@ while IFS= read -r host; do
     # Shared listener mode for this host: validate the named listener exists.
     echo "Shared listener mode for '${host}': section-name='${_per_host_sn}'."
     if ! listener_names | grep -Fxq "${_per_host_sn}"; then
-      echo "❌ Shared listener '${_per_host_sn}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' for host '${host}'." >&2
+      echo "Shared listener '${_per_host_sn}' does not exist on gateway '${GATEWAY_NAME}' in '${GATEWAY_NAMESPACE}' for host '${host}'." >&2
       echo "   Available listeners:" >&2
       listener_names | sed 's/^/     /' >&2
       exit 1
     fi
-    echo "✅ Shared listener '${_per_host_sn}' confirmed for '${host}'."
+    echo "Shared listener '${_per_host_sn}' confirmed for '${host}'."
     continue
   fi
 
@@ -333,20 +333,20 @@ while IFS= read -r host; do
       resolve_rc=0
       resolved=$(resolve_ipv4 "$host") || resolve_rc=$?
       if [ "$resolve_rc" -eq 2 ]; then
-        echo "⚠️  No DNS resolver tool (dig/getent/nslookup) on this runner — skipping DNS pre-flight for '${host}'."
+        echo "No DNS resolver tool (dig/getent/nslookup) on this runner - skipping DNS pre-flight for '${host}'."
       elif [ -z "${resolved}" ]; then
-        echo "❌ DNS pre-flight failed: '${host}' has no A record." >&2
-        echo "   Create an A record: ${host} → ${gateway_ip}" >&2
+        echo "DNS pre-flight failed: '${host}' has no A record." >&2
+        echo "   Create an A record: ${host} -> ${gateway_ip}" >&2
         exit 1
       elif ! echo "${resolved}" | grep -Fxq "${gateway_ip}"; then
-        echo "❌ DNS pre-flight failed: '${host}' does not resolve to the gateway IP." >&2
+        echo "DNS pre-flight failed: '${host}' does not resolve to the gateway IP." >&2
         echo "   Resolved to: $(echo "${resolved}" | tr '\n' ' ')" >&2
         echo "   Gateway IP:  ${gateway_ip} (${GATEWAY_NAME} in ${GATEWAY_NAMESPACE})" >&2
-        echo "   HTTP-01 ACME requires DNS to point directly to the gateway — not through a proxy." >&2
+        echo "   HTTP-01 ACME requires DNS to point directly to the gateway - not through a proxy." >&2
         echo "   If using Cloudflare: set the record to DNS-only mode (grey cloud) for this hostname." >&2
         exit 1
       else
-        echo "✅ DNS pre-flight passed: '${host}' → ${gateway_ip}"
+        echo "DNS pre-flight passed: '${host}' -> ${gateway_ip}"
       fi
     fi
   fi
@@ -376,7 +376,7 @@ while IFS= read -r host; do
       [ -z "$order_name" ] && continue
       case "$order_state" in
         errored|invalid)
-          echo "⚠️  Purging failed ACME Order '${order_name}' (state: ${order_state}) — cert-manager will retry immediately."
+          echo "Purging failed ACME Order '${order_name}' (state: ${order_state}) - cert-manager will retry immediately."
           kubectl delete order "${order_name}" -n "${GATEWAY_NAMESPACE}" --ignore-not-found
           ;;
       esac
@@ -392,4 +392,4 @@ while IFS= read -r host; do
   fi
 done < <(printf "%s" "$HOST_LIST")
 
-echo "✅ Gateway hostnames onboarded — PASSED"
+echo "Gateway hostnames onboarded - PASSED"

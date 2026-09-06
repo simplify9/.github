@@ -148,8 +148,8 @@ runs:
       env:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
-        echo "::notice title=🔒 [VULN-GATE] Critical Vulnerability Check::repository: ${REPOSITORY}"
-        echo "VULN_GATE_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+        echo "::notice title=[VULN-GATE] Critical Vulnerability Check::repository: ${REPOSITORY}"
+        echo "VULN_GATE_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
 
     - name: Query Dependabot alerts and evaluate
       id: check
@@ -164,10 +164,10 @@ runs:
         set -uo pipefail
         echo "::add-mask::$DEPENDABOT_TOKEN"
         echo "::add-mask::$GITHUB_READ_TOKEN"
-        echo "::group::🔒 [CHECKPOINT 1/1] Query Open Critical Dependabot Alerts"
+        echo "::group::[CHECKPOINT 1/1] Query Open Critical Dependabot Alerts"
 
         if [[ -z "$DEPENDABOT_TOKEN" ]]; then
-          echo "::error title=❌ [VULN-GATE] Missing dependabot-alerts-token::${REPOSITORY} — this gate requires a PAT/App token with 'Dependabot alerts: read', forwarded explicitly by the caller (GITHUB_TOKEN cannot access this API regardless of granted permissions). Add a dependabot-alerts-token entry (set to the DEPENDABOT_ALERTS_TOKEN org secret) to this job's secrets block in the caller workflow. Fails closed until forwarded."
+          echo "::error title=[VULN-GATE] Missing dependabot-alerts-token::${REPOSITORY} - this gate requires a PAT/App token with 'Dependabot alerts: read', forwarded explicitly by the caller (GITHUB_TOKEN cannot access this API regardless of granted permissions). Add a dependabot-alerts-token entry (set to the DEPENDABOT_ALERTS_TOKEN org secret) to this job's secrets block in the caller workflow. Fails closed until forwarded."
           echo "::endgroup::"
           exit 1
         fi
@@ -210,21 +210,21 @@ runs:
             "$url")" || curl_exit=$?
 
           if [[ $curl_exit -ne 0 ]]; then
-            echo "::error title=❌ [VULN-GATE] Dependabot Alerts API request failed::Network/transport error (curl exit ${curl_exit}) querying ${REPOSITORY} on page ${page_num}. This gate fails closed on any error, including connectivity issues."
+            echo "::error title=[VULN-GATE] Dependabot Alerts API request failed::Network/transport error (curl exit ${curl_exit}) querying ${REPOSITORY} on page ${page_num}. This gate fails closed on any error, including connectivity issues."
             rm -f "$response_file" "$headers_file"
             echo "::endgroup::"
             exit 1
           fi
 
           if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-            echo "::error title=❌ [VULN-GATE] Dependabot Alerts token rejected::${REPOSITORY} returned HTTP ${http_code}. The dependabot-alerts-token input must be a real PAT/App token with 'Dependabot alerts: read' -- GITHUB_TOKEN cannot access this API regardless of granted permissions, confirmed by live testing. This gate fails closed until a valid token is forwarded. Response: $(cat "$response_file")"
+            echo "::error title=[VULN-GATE] Dependabot Alerts token rejected::${REPOSITORY} returned HTTP ${http_code}. The dependabot-alerts-token input must be a real PAT/App token with 'Dependabot alerts: read' -- GITHUB_TOKEN cannot access this API regardless of granted permissions, confirmed by live testing. This gate fails closed until a valid token is forwarded. Response: $(cat "$response_file")"
             rm -f "$response_file" "$headers_file"
             echo "::endgroup::"
             exit 1
           fi
 
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error title=❌ [VULN-GATE] Dependabot Alerts API call failed::HTTP ${http_code} on page ${page_num} for ${REPOSITORY}. Response: $(cat "$response_file")"
+            echo "::error title=[VULN-GATE] Dependabot Alerts API call failed::HTTP ${http_code} on page ${page_num} for ${REPOSITORY}. Response: $(cat "$response_file")"
             rm -f "$response_file" "$headers_file"
             echo "::endgroup::"
             exit 1
@@ -251,17 +251,17 @@ runs:
           url="$next_url"
           page_num=$((page_num + 1))
           if [[ "$page_num" -gt 10 ]]; then
-            echo "::warning title=⚠️ [VULN-GATE] Pagination cap reached::Stopped after 10 pages (1000 alerts) for ${REPOSITORY} — true count may be higher."
+            echo "::warning title=[VULN-GATE] Pagination cap reached::Stopped after 10 pages (1000 alerts) for ${REPOSITORY} - true count may be higher."
             break
           fi
         done
 
         if [[ "$total_critical" -gt 0 ]]; then
-          echo "::group::🔎 Verify PR branch already resolves flagged npm alerts"
+          echo "::group::Verify PR branch already resolves flagged npm alerts"
           if [[ "$EVENT_NAME" != "pull_request_target" || -z "$PR_HEAD_SHA" ]]; then
             echo "Not a pull_request_target run with a PR head available -- skipping (this only applies to PR-time gates; build-time/push runs always evaluate the repo as merged, which is already correct)."
           elif [[ -z "$GITHUB_READ_TOKEN" ]]; then
-            echo "::warning title=⚠️ [VULN-GATE] No github-token forwarded::Cannot verify whether this PR's branch already resolves flagged alerts -- skipping, all ${total_critical} alert(s) stay blocking."
+            echo "::warning title=[VULN-GATE] No github-token forwarded::Cannot verify whether this PR's branch already resolves flagged alerts -- skipping, all ${total_critical} alert(s) stay blocking."
           elif [[ "$(npx --yes semver 1.2.3 -r '>=1.0.0' 2>/dev/null)" != "1.2.3" ]]; then
             # The `semver` CLI prints the version + exits 0 when in-range, and
             # prints NOTHING + exits non-zero when out-of-range -- the per-alert
@@ -273,7 +273,7 @@ runs:
             # case upfront catches that failure mode before it can be confused
             # with a real range check, and fails closed for the whole PR-branch
             # verification pass instead (same as the missing-token case above).
-            echo "::warning title=⚠️ [VULN-GATE] semver tool unavailable::Could not execute 'npx semver' (registry/network issue?) -- skipping PR-branch verification entirely this run, all ${total_critical} alert(s) stay blocking."
+            echo "::warning title=[VULN-GATE] semver tool unavailable::Could not execute 'npx semver' (registry/network issue?) -- skipping PR-branch verification entirely this run, all ${total_critical} alert(s) stay blocking."
           else
             declare -A LOCKFILE_CACHE
             declare -A LOCKFILE_PATH_CACHE
@@ -297,7 +297,7 @@ runs:
               ghsa="$(printf '%s' "$alert" | jq -r '.security_advisory.ghsa_id // "unknown"')"
 
               if [[ -z "$manifest_path" || -z "$vuln_range_raw" ]]; then
-                echo "ℹ️ ${ghsa}: missing manifest path or vulnerable range -- stays blocking."
+                echo "${ghsa}: missing manifest path or vulnerable range -- stays blocking."
                 continue
               fi
 
@@ -359,13 +359,13 @@ runs:
                   # happens to degrade safely today, but only by accident).
                   lf_type="$(jq -r 'if type == "array" then "directory" else (.type // "unknown") end' "$lf_body_file" 2>/dev/null)" || lf_type="unknown"
                   if [[ "$lf_type" != "file" ]]; then
-                    echo "::warning title=⚠️ [VULN-GATE] Unexpected content type at ${candidate_path}::PR head ${PR_HEAD_SHA} returned type '${lf_type}' (expected 'file') -- not a confirmed absence, so no sibling is substituted for it. Stays blocking."
+                    echo "::warning title=[VULN-GATE] Unexpected content type at ${candidate_path}::PR head ${PR_HEAD_SHA} returned type '${lf_type}' (expected 'file') -- not a confirmed absence, so no sibling is substituted for it. Stays blocking."
                     rm -f "$lf_body_file"
                     break
                   fi
                   lf_encoding="$(jq -r '.encoding // empty' "$lf_body_file" 2>/dev/null)" || lf_encoding=""
                   if [[ "$lf_encoding" == "none" ]]; then
-                    echo "::warning title=⚠️ [VULN-GATE] Lockfile too large to verify::${candidate_path} at PR head ${PR_HEAD_SHA} exceeds the Contents API's inline size cap -- this is NOT the same as the file being deleted, so no sibling is substituted for it. Stays blocking."
+                    echo "::warning title=[VULN-GATE] Lockfile too large to verify::${candidate_path} at PR head ${PR_HEAD_SHA} exceeds the Contents API's inline size cap -- this is NOT the same as the file being deleted, so no sibling is substituted for it. Stays blocking."
                     rm -f "$lf_body_file"
                     break
                   fi
@@ -375,7 +375,7 @@ runs:
                     fetched_path="$candidate_path"
                     lf_content="$candidate_content"
                     if [[ "$candidate_path" != "$manifest_path" ]]; then
-                      echo "::notice title=🔎 [VULN-GATE] Lockfile migrated::${manifest_path} no longer exists (confirmed 404) at PR head ${PR_HEAD_SHA} -- found ${candidate_path} in its place, using that instead."
+                      echo "::notice title=[VULN-GATE] Lockfile migrated::${manifest_path} no longer exists (confirmed 404) at PR head ${PR_HEAD_SHA} -- found ${candidate_path} in its place, using that instead."
                     fi
                     break
                   fi
@@ -387,7 +387,7 @@ runs:
               resolved_lockfile_path="${LOCKFILE_PATH_CACHE[$manifest_path]}"
 
               if [[ -z "$lockfile_content" ]]; then
-                echo "ℹ️ ${ghsa}: could not read ${manifest_path}, nor a sibling package-lock.json/yarn.lock, from PR head ${PR_HEAD_SHA} -- stays blocking."
+                echo "${ghsa}: could not read ${manifest_path}, nor a sibling package-lock.json/yarn.lock, from PR head ${PR_HEAD_SHA} -- stays blocking."
                 continue
               fi
 
@@ -415,12 +415,12 @@ runs:
               elif [[ "$resolved_lockfile_path" == *"yarn.lock" ]]; then
                 versions_found="$(printf '%s' "$lockfile_content" | python3 "$GITHUB_ACTION_PATH/parse_yarn_lock.py" "$pkg_name" 2>/dev/null)" || parse_rc=$?
               else
-                echo "ℹ️ ${ghsa}: unsupported lockfile type (${resolved_lockfile_path:-$manifest_path}) -- npm verification only supports package-lock.json/yarn.lock. Stays blocking."
+                echo "${ghsa}: unsupported lockfile type (${resolved_lockfile_path:-$manifest_path}) -- npm verification only supports package-lock.json/yarn.lock. Stays blocking."
                 continue
               fi
 
               if [[ $parse_rc -ne 0 ]]; then
-                echo "ℹ️ ${ghsa}: failed to parse ${resolved_lockfile_path:-$manifest_path} at the PR head (parser exit ${parse_rc}) -- stays blocking."
+                echo "${ghsa}: failed to parse ${resolved_lockfile_path:-$manifest_path} at the PR head (parser exit ${parse_rc}) -- stays blocking."
                 continue
               fi
 
@@ -438,7 +438,7 @@ runs:
                 cleared_count=$((cleared_count + 1))
                 total_critical=$((total_critical - 1))
                 cleared_numbers+="${alert_number}"$'\n'
-                echo "::notice title=✅ [VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} is absent from ${resolved_lockfile_path} at the PR head -- the dependency was removed from the tree, so this alert is no longer counted against this PR."
+                echo "::notice title=[VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} is absent from ${resolved_lockfile_path} at the PR head -- the dependency was removed from the tree, so this alert is no longer counted against this PR."
                 continue
               fi
 
@@ -461,14 +461,14 @@ runs:
                 cleared_count=$((cleared_count + 1))
                 total_critical=$((total_critical - 1))
                 cleared_numbers+="${alert_number}"$'\n'
-                echo "::notice title=✅ [VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} in ${resolved_lockfile_path} is patched in this branch (checked version(s): $(printf '%s' "$versions_found" | tr '\n' ' ')) -- no longer counted against this PR."
+                echo "::notice title=[VULN-GATE] ${ghsa} resolved in this PR::${pkg_name} in ${resolved_lockfile_path} is patched in this branch (checked version(s): $(printf '%s' "$versions_found" | tr '\n' ' ')) -- no longer counted against this PR."
               else
-                echo "::notice title=❌ [VULN-GATE] ${ghsa} still open::${pkg_name} in ${resolved_lockfile_path} still resolves to a vulnerable version in this branch."
+                echo "::notice title=[VULN-GATE] ${ghsa} still open::${pkg_name} in ${resolved_lockfile_path} still resolves to a vulnerable version in this branch."
               fi
             done
 
             if [[ "$cleared_count" -gt 0 ]]; then
-              echo "::notice title=🔎 [VULN-GATE] PR-branch verification summary::${cleared_count} npm alert(s) auto-cleared because this PR's branch already resolves them. ${total_critical} alert(s) remain blocking."
+              echo "::notice title=[VULN-GATE] PR-branch verification summary::${cleared_count} npm alert(s) auto-cleared because this PR's branch already resolves them. ${total_critical} alert(s) remain blocking."
               rebuilt_summary_rows="$(jq -r --arg cleared "$cleared_numbers" '
                 ($cleared | rtrimstr("\n") | split("\n") | map(tonumber)) as $clearedlist
                 | .[] | select(([.number] - $clearedlist) | length > 0)
@@ -493,13 +493,13 @@ runs:
         echo "::endgroup::"
 
         if [[ "$total_critical" -gt 0 ]]; then
-          echo "VULN_GATE_CP1_STATUS=❌ CRITICAL ALERT FOUND" >> "$GITHUB_ENV"
-          echo "::error title=❌ [VULN-GATE] Blocked by critical Dependabot alert(s)::${REPOSITORY} has ${total_critical} open CRITICAL-severity Dependabot alert(s) — this check/pipeline is blocked until they are resolved or dismissed."
+          echo "VULN_GATE_CP1_STATUS=CRITICAL ALERT FOUND" >> "$GITHUB_ENV"
+          echo "::error title=[VULN-GATE] Blocked by critical Dependabot alert(s)::${REPOSITORY} has ${total_critical} open CRITICAL-severity Dependabot alert(s) - this check/pipeline is blocked until they are resolved or dismissed."
           printf '%s\n' "$summary_rows"
           exit 1
         fi
 
-        echo "VULN_GATE_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        echo "VULN_GATE_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
     - name: Report failure
       if: failure()
@@ -507,7 +507,7 @@ runs:
       env:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
       run: |
-        echo "::error title=❌ [VULN-GATE] Critical vulnerability gate failed::${REPOSITORY} is blocked — either the Dependabot Alerts API call failed, or an open CRITICAL-severity alert exists. Checkpoint — 1) Query alerts: ${VULN_GATE_CP1_STATUS:-⏭️ Not reached}. See the step above for affected package(s)/advisory ID(s)."
+        echo "::error title=[VULN-GATE] Critical vulnerability gate failed::${REPOSITORY} is blocked - either the Dependabot Alerts API call failed, or an open CRITICAL-severity alert exists. Checkpoint - 1) Query alerts: ${VULN_GATE_CP1_STATUS:-NOT REACHED}. See the step above for affected package(s)/advisory ID(s)."
 
     - name: Write action summary
       if: always()
@@ -517,18 +517,18 @@ runs:
         CRITICAL_COUNT: ${{ steps.check.outputs.critical-count }}
       run: |
         {
-          echo "## 🔒 Critical Dependabot Vulnerability Check"
+          echo "## Critical Dependabot Vulnerability Check"
           echo ""
           echo "| Field | Value |"
           echo "|-------|-------|"
           echo "| Repository | ${REPOSITORY} |"
           echo "| Open critical alerts found | ${CRITICAL_COUNT:-unknown} |"
           echo ""
-          echo "## 📋 Checkpoint Summary"
+          echo "## Checkpoint Summary"
           echo ""
           echo "| # | Checkpoint | Status |"
           echo "|---|------------|--------|"
-          echo "| 1 | Query open critical Dependabot alerts | ${VULN_GATE_CP1_STATUS:-⏭️ Not reached} |"
+          echo "| 1 | Query open critical Dependabot alerts | ${VULN_GATE_CP1_STATUS:-NOT REACHED} |"
         } >> "$GITHUB_STEP_SUMMARY"
 
 branding:

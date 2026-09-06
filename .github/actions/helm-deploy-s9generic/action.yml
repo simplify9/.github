@@ -181,8 +181,8 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "HELM_S9GEN_CP1_STATUS=⏳ Pending"
-          echo "HELM_S9GEN_CP2_STATUS=⏳ Pending"
+          echo "HELM_S9GEN_CP1_STATUS=PENDING"
+          echo "HELM_S9GEN_CP2_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Validate inputs
@@ -196,7 +196,7 @@ runs:
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
       run: |
         set -euo pipefail
-        echo "::group::🔎 Validate inputs"
+        echo "::group::Validate inputs"
         if [ -z "$CHART_PATH" ]; then
           # OCI registry deployment — validate required inputs.
           missing=""
@@ -232,7 +232,7 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
       run: |
         set -euo pipefail
-        echo "::group::☸️ [CHECKPOINT 1/2] Configure Kubernetes Context"
+        echo "::group::[CHECKPOINT 1/2] Configure Kubernetes Context"
         echo "Configuring Kubernetes context..."
         mkdir -p ~/.kube
         printf '%s' "$KUBECONFIG_B64" | base64 -d > ~/.kube/config
@@ -243,8 +243,8 @@ runs:
 
         echo "Cluster info:"
         kubectl cluster-info
-        echo "HELM_S9GEN_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Kubernetes context configured — namespace: $NAMESPACE"
+        echo "HELM_S9GEN_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Kubernetes context configured - namespace: $NAMESPACE"
         echo "::endgroup::"
 
     - name: Configure Helm registry authentication
@@ -257,7 +257,7 @@ runs:
         REGISTRY_PASSWORD: ${{ inputs.registry-password }}
       run: |
         set -euo pipefail
-        echo "::group::🔑 Configure Helm OCI registry authentication"
+        echo "::group::Configure Helm OCI registry authentication"
         echo "::add-mask::$REGISTRY_PASSWORD"
         echo "Configuring Helm registry authentication for $REGISTRY"
         registry_host="$REGISTRY"
@@ -299,7 +299,7 @@ runs:
         SECRET_SET_STRING_VALUES: ${{ inputs.secret-set-string-values }}
       run: |
         set -euo pipefail
-        echo "::group::🚀 [CHECKPOINT 2/2] Deploy Helm chart"
+        echo "::group::[CHECKPOINT 2/2] Deploy Helm chart"
 
         # Clean up any temporary files on exit (success or failure).
         VALUES_TMP=""
@@ -459,7 +459,7 @@ runs:
 
         if [ "${HELM_CODE}" -ne 0 ]; then
           echo "::endgroup::"
-          echo "::group::🩺 Failure diagnostics"
+          echo "::group::Failure diagnostics"
           echo "[helm-deploy] Helm upgrade failed. Last 60 lines of output:" >&2
           tail -60 "$HELM_LOG" >&2 || true
           echo "[helm-deploy] Cluster diagnostics (pods & recent events):" >&2
@@ -471,8 +471,8 @@ runs:
 
         # Outputs are set only after a successful deploy.
         echo "chart-url=${CHART_URL}" >> "$GITHUB_OUTPUT"
-        echo "HELM_S9GEN_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Chart deployed — release: $RELEASE_NAME, namespace: $NAMESPACE"
+        echo "HELM_S9GEN_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Chart deployed - release: $RELEASE_NAME, namespace: $NAMESPACE"
         echo "::endgroup::"
 
     - name: Verify deployment
@@ -482,7 +482,7 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
       run: |
         set -euo pipefail
-        echo "::group::🔍 Verify deployment"
+        echo "::group::Verify deployment"
         echo "Verifying deployment..."
 
         echo "Helm release status:"
@@ -512,9 +512,9 @@ runs:
       run: |
         set -euo pipefail
         if [ "$DEPLOY_OUTCOME" = "success" ]; then
-          status="✅ Succeeded"
+          status="SUCCEEDED"
         else
-          status="❌ Failed"
+          status="FAILED"
         fi
         if [ -n "$CHART_PATH" ]; then
           mode="local (${CHART_PATH})"
@@ -522,7 +522,7 @@ runs:
           mode="oci"
         fi
         {
-          echo "## ☸️ Helm Deploy"
+          echo "## Helm Deploy"
           echo ""
           echo "| Field | Value |"
           echo "| --- | --- |"
@@ -533,8 +533,8 @@ runs:
           echo "| Mode | ${mode} |"
           echo "| Chart URL | \`${CHART_URL:-n/a}\` |"
           echo "| Image | \`${DEPLOYED_IMAGE:-n/a}\` |"
-          echo "| K8s context | ${HELM_S9GEN_CP1_STATUS:-⏭️ Not reached} |"
-          echo "| Helm deploy | ${HELM_S9GEN_CP2_STATUS:-⏭️ Not reached} |"
+          echo "| K8s context | ${HELM_S9GEN_CP1_STATUS:-NOT REACHED} |"
+          echo "| Helm deploy | ${HELM_S9GEN_CP2_STATUS:-NOT REACHED} |"
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Report failure
@@ -544,7 +544,7 @@ runs:
         RELEASE_NAME: ${{ inputs.release-name }}
         NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::Release '$RELEASE_NAME' in namespace '$NAMESPACE'. Checkpoints — 1) K8s context: ${HELM_S9GEN_CP1_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_S9GEN_CP2_STATUS:-⏭️ Not reached}. Check chart source, image tag, and resource quotas."
+        echo "::error title=[HELM] Deploy failed::Release '$RELEASE_NAME' in namespace '$NAMESPACE'. Checkpoints - 1) K8s context: ${HELM_S9GEN_CP1_STATUS:-NOT REACHED} | 2) Helm deploy: ${HELM_S9GEN_CP2_STATUS:-NOT REACHED}. Check chart source, image tag, and resource quotas."
 
     - name: Helm registry logout
       if: always() && inputs.chart-path == ''

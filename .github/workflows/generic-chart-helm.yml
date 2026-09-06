@@ -271,7 +271,7 @@ jobs:
           SHA: ${{ github.sha }}
           ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${MAJOR} | Minor: ${MINOR} | SHA: ${SHA} | Triggered by: ${ACTOR}"
+          echo "::notice title=[VERSION] Semver - Job Started::Major: ${MAJOR} | Minor: ${MINOR} | SHA: ${SHA} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -298,7 +298,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🏷️'
           title: Version Job
           status: ${{ job.status }}
           details: |
@@ -329,7 +328,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -355,7 +353,7 @@ jobs:
           NUGET_ENABLED: ${{ inputs.package-nuget }}
           ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Enabled: ${NUGET_ENABLED} | Triggered by: ${ACTOR}"
+          echo "::notice title=[DOTNET] NuGet Publish - Job Started::Enabled: ${NUGET_ENABLED} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         if: ${{ inputs.package-nuget }}
@@ -420,7 +418,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔷'
           title: NuGet Job
           status: ${{ job.status }}
           details: |
@@ -460,7 +457,7 @@ jobs:
           REGISTRY_INPUT: ${{ inputs.container-registry }}
           ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::Version: ${VERSION} | Registry: ${REGISTRY_INPUT} | Triggered by: ${ACTOR}"
+          echo "::notice title=[DOCKER] Docker Build - Job Started::Version: ${VERSION} | Registry: ${REGISTRY_INPUT} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -489,13 +486,12 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          echo "✅ Docker image built and pushed — ${VERSION}"
+          echo "Docker image built and pushed - ${VERSION}"
 
       - name: Write build job summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🐳'
           title: Build Job
           status: ${{ job.status }}
           details: |
@@ -543,9 +539,9 @@ jobs:
           NAMESPACE: ${{ inputs.namespace }}
           ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=☸️ [HELM] Deploy to ${DEPLOY_ENV} — Job Started::App: ${APP_NAME} | Version: ${VERSION} | Namespace: ${NAMESPACE} | Triggered by: ${ACTOR}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=[HELM] Deploy to ${DEPLOY_ENV} - Job Started::App: ${APP_NAME} | Version: ${VERSION} | Namespace: ${NAMESPACE} | Triggered by: ${ACTOR}"
+          echo "CHECKPOINT_1_STATUS=PENDING" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=PENDING" >> "$GITHUB_ENV"
 
       - name: Generate dynamic ingress values
         id: ingress
@@ -608,8 +604,8 @@ jobs:
             echo -e "$OUTPUT"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/2] Ingress values generated — PASSED"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/2] Ingress values generated - PASSED"
 
       - name: Deploy to ${{ inputs.deploy-environment }} (via local composite 
           action)
@@ -665,8 +661,8 @@ jobs:
           APP_NAME: ${{ inputs.app-name }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/2] Helm deploy completed — PASSED: ${APP_NAME}@${VERSION}"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/2] Helm deploy completed - PASSED: ${APP_NAME}@${VERSION}"
 
       - name: Report deploy failure
         if: failure()
@@ -674,16 +670,15 @@ jobs:
           APP_NAME: ${{ inputs.app-name }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          echo "::error title=☸️ [HELM] Deploy Job Failed::App: ${APP_NAME} | Version: ${VERSION}"
-          echo "  Checkpoint 1 — Ingress values: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Helm deploy:    ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "::error title=[HELM] Deploy Job Failed::App: ${APP_NAME} | Version: ${VERSION}"
+          echo "  Checkpoint 1 - Ingress values: ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Helm deploy:    ${CHECKPOINT_2_STATUS:-NOT REACHED}"
 
       - name: Write deploy job summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '☸️'
-          title: Deploy Job — ${{ inputs.app-name }}
+          title: Deploy Job - ${{ inputs.app-name }}
           status: ${{ job.status }}
           details: |
             | Field | Value |
@@ -695,12 +690,12 @@ jobs:
             | Runner | ${{ runner.os }} |
             | Triggered by | ${{ github.actor }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Ingress values generated | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 1 | Ingress values generated | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
 
   tag:
     name: Tag

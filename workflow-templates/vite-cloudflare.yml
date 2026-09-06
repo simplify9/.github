@@ -14,8 +14,8 @@
 #   served index.html from the edge) — no custom Worker script required.
 #
 # BRANCHES:
-#   develop → deploy-develop job    → environment "develop"    (develop)
-#   main    → deploy-production job  → environment "production" (Production)
+#   develop -> deploy-develop job    -> environment "develop"    (develop)
+#   main    -> deploy-production job  -> environment "production" (Production)
 #
 # INPUTS (only the required values are declared below — see the reusable
 #   workflow for the full, documented input reference incl. node_version,
