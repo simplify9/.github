@@ -43,7 +43,7 @@ runs:
       run: |
         set -euo pipefail
         {
-          echo "XCODE_EXPORT_CP1_STATUS=⏳ Pending"
+          echo "XCODE_EXPORT_CP1_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Export IPA
@@ -54,7 +54,7 @@ runs:
         EXPORT_PATH: ${{ inputs.exportPath }}
       run: |
         set -euo pipefail
-        echo "::group::🍎 [CHECKPOINT 1/1] Export IPA"
+        echo "::group::[CHECKPOINT 1/1] Export IPA"
         if [[ ! -d "${ARCHIVE_PATH}" ]]; then
           echo "ERROR: Archive not found at '${ARCHIVE_PATH}'"
           exit 1
@@ -65,8 +65,8 @@ runs:
           -archivePath "${ARCHIVE_PATH}" \
           -exportOptionsPlist "${EXPORT_PLIST}" \
           -exportPath "${EXPORT_PATH}"
-        echo "XCODE_EXPORT_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ IPA exported — Output: ${EXPORT_PATH}"
+        echo "XCODE_EXPORT_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "IPA exported - Output: ${EXPORT_PATH}"
         echo "::endgroup::"
 
     - name: Report failure
@@ -76,7 +76,7 @@ runs:
         ARCHIVE_PATH: ${{ inputs.archivePath }}
       run: |
         set -euo pipefail
-        echo "::error title=❌ [IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${ARCHIVE_PATH}'. Check exportOptionsPlist path and signing configuration."
+        echo "::error title=[IOS] IPA export failed::xcodebuild -exportArchive failed for archive '${ARCHIVE_PATH}'. Check exportOptionsPlist path and signing configuration."
 
 branding:
   icon: 'upload'

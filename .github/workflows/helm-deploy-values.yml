@@ -3,7 +3,7 @@
 #
 # Deploys an ALREADY-PUBLISHED Helm chart from a classic Helm chart repository
 # (e.g. ChartMuseum) to a Kubernetes cluster. It does not build, package, or
-# publish anything — for the full build→publish→deploy pipeline use one of the
+# publish anything — for the full build->publish->deploy pipeline use one of the
 # *-cicd reusable workflows instead.
 #
 # The input contract mirrors the sibling templates (generic-chart-helm.yml et al)
@@ -391,7 +391,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -421,7 +420,7 @@ jobs:
             echo "::error title=Missing kubeconfig::Provide either the 'kubeconfig' or 'kubeconfig64' secret."
             exit 1
           fi
-          echo "✅ Kubeconfig secret provided."
+          echo "Kubeconfig secret provided."
 
       # Only the values file is needed from the caller repo (the chart is pulled
       # remotely), so a sparse, shallow checkout keeps this fast on large repos.

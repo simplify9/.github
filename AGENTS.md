@@ -7,12 +7,12 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 ## Repository Layout
 
 ```
-.github/                    ← workspace root (README.md, AGENTS.md, CLAUDE.md live here)
+.github/                    <- workspace root (README.md, AGENTS.md, CLAUDE.md live here)
 ├── .github/
-│   ├── workflows/          ← reusable workflows  (workflow_call triggers)
-│   └── actions/            ← composite actions    (uses: in steps)
-├── workflow-templates/     ← org starter templates surfaced in GitHub's "New workflow" UI
-└── profile/README.md       ← org profile page
+│   ├── workflows/          <- reusable workflows  (workflow_call triggers)
+│   └── actions/            <- composite actions    (uses: in steps)
+├── workflow-templates/     <- org starter templates surfaced in GitHub's "New workflow" UI
+└── profile/README.md       <- org profile page
 ```
 
 Every file in `.github/workflows/` is a **reusable workflow** — it has `on: workflow_call:` (and occasionally `on: workflow_dispatch:`) and is never run standalone. Every directory in `.github/actions/` is a **composite action** with its own `action.yml`. Every file in `workflow-templates/` is a thin starter caller (paired with a `.properties.json` metadata sidecar) that GitHub offers when a user clicks "New workflow" in an org repo.
@@ -114,7 +114,7 @@ This is a critical pattern. **Never mix Helm config and secrets in a single para
 Use `--set-string` for secrets because it bypasses Helm type coercion / shell parsing and prevents `SSL:`, `=`, or `//` characters from causing failures. At the composite-action layer the secret input is `secret_set_values` (`helm-generic`, snake_case) or `secret-set-string-values` (`helm-deploy` / `helm-deploy-s9generic`, kebab-case).
 
 ### Artifact Upload/Download Pairing
-When adding upload/download artifact pairs (e.g. mobile build → release jobs):
+When adding upload/download artifact pairs (e.g. mobile build -> release jobs):
 - Always use a matching `name:` input — never `artifact-ids:`
 - Upload with `actions/upload-artifact@v7`, download with `actions/download-artifact@v8`
 - Set `retention-days: 1` for build artifacts not needed beyond the pipeline run
@@ -129,25 +129,43 @@ All Docker/Helm/NuGet versioning flows through `actions/determine-semver`:
 
 Every composite action **must** follow the 4-pillar log output framework. This applies to all new actions and any modification to existing ones.
 
+**Emitted output is ASCII-only.** Everything a run prints to stdout, every `::notice` / `::warning` / `::error` title and message, every `::group::` title, and everything written to `$GITHUB_STEP_SUMMARY` contains no emoji, no Unicode arrows, and no em or en dashes. Use `-` as a separator and `->` where an arrow is meaningful. GitHub already renders its own severity iconography for annotations and its own pass/fail iconography for jobs and steps; duplicating that inside the message is redundant decoration. Plain-text logs are consumed by terminals, log shippers, `grep`, and clipboard paste into issues, and ASCII is the only encoding all of those handle identically.
+
 **4 Pillars:**
 1. **Meaningful and context-aware** — emit a `::notice::` announcement on the first step with key input values
 2. **Checkpoint-driven** — wrap each critical operation in `::group::`/`::endgroup::`, track status in **namespaced** `<PREFIX>_CP{N}_STATUS` env vars (e.g. `DOCKER_CP1_STATUS`, `HELM_DEPLOY_CP2_STATUS`). Never use bare `CHECKPOINT_N_STATUS` in a composite action — see the namespacing rule below
-3. **Systematically consistent** — use the canonical emoji/tag vocabulary below
-4. **Summarised** — write a structured section to `$GITHUB_STEP_SUMMARY`. Reusable workflows do this through the shared **`write-job-summary`** composite action (inputs: `title`, `status` = `${{ job.status }}`, optional `icon`, `details`); composite actions append their own summary table in an `if: always()` final step
+3. **Systematically consistent** — use the canonical tag and status vocabulary below
+4. **Summarised** — write a structured section to `$GITHUB_STEP_SUMMARY`. Reusable workflows do this through the shared **`write-job-summary`** composite action (inputs: `title`, `status` = `${{ job.status }}`, optional `details`); composite actions append their own summary table in an `if: always()` final step
 
-**Canonical emoji/tag vocabulary:**
+**Canonical domain tags:**
 
-| Domain | Tag | Emoji |
-|--------|-----|-------|
-| Docker | `[DOCKER]` | 🐳 |
-| Helm / Kubernetes | `[HELM]` | ☸️ |
-| Gateway API | `[GATEWAY]` | 🚪 |
-| .NET / NuGet | `[DOTNET]` | 🔷 |
-| Cloudflare Workers | `[CF-WORKERS]` | ⚡ |
-| iOS | `[IOS]` | 🍎 |
-| Android | `[ANDROID]` | 🤖 |
-| Versioning / Tagging | `[VERSION]` | 🏷️ |
-| Code Signing | `[SIGN]` | 🔏 |
+| Domain | Tag |
+|--------|-----|
+| Docker | `[DOCKER]` |
+| Helm / Kubernetes | `[HELM]` |
+| Gateway API | `[GATEWAY]` |
+| .NET / NuGet | `[DOTNET]` |
+| Cloudflare Workers | `[CF-WORKERS]` |
+| iOS | `[IOS]` |
+| Android | `[ANDROID]` |
+| Versioning / Tagging | `[VERSION]` |
+| Code Signing | `[SIGN]` |
+| Vulnerability gate | `[VULN-GATE]` |
+| React Native contract | `[RN-CONTRACT]` |
+| Job summary | `[SUMMARY]` |
+| Dependabot auto-merge | `[AUTO-MERGE]` |
+
+**Canonical status vocabulary** — bare uppercase words, no glyphs:
+
+| State | Token |
+|-------|-------|
+| Checkpoint initialised, not yet run | `PENDING` |
+| Checkpoint completed successfully | `PASSED` |
+| Checkpoint failed | `FAILED` |
+| Step deliberately not run | `SKIPPED` |
+| Job failed before reaching this checkpoint | `NOT REACHED` |
+| Job-level success (`write-job-summary`) | `SUCCESS` |
+| Operation-level success in a summary table | `SUCCEEDED` |
 
 **Step template for a composite action:**
 
@@ -157,18 +175,18 @@ steps:
   - name: Announce <action>
     shell: bash
     run: |
-      echo "::notice title=🏷️ [DOMAIN] Action Name::key: ${{ inputs.key }}"
+      echo "::notice title=[DOMAIN] Action Name::key: ${{ inputs.key }}"
       # <PREFIX> = a short, action-specific prefix (e.g. DOCKER, HELM_DEPLOY, CF_DOMAIN)
-      echo "<PREFIX>_CP1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-      echo "<PREFIX>_CP2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP2_STATUS=PENDING" >> "$GITHUB_ENV"
 
   # 2. Existing work step — wrap with group, set status at end
   - name: Do the work
     shell: bash
     run: |
-      echo "::group::🏷️ [CHECKPOINT 1/2] Step Name"
+      echo "::group::[CHECKPOINT 1/2] Step Name"
       # ... existing commands ...
-      echo "<PREFIX>_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
       echo "::endgroup::"
 
   # 3. For uses: steps — add a confirm step immediately after
@@ -176,14 +194,14 @@ steps:
   - name: Confirm step complete
     shell: bash
     run: |
-      echo "<PREFIX>_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+      echo "<PREFIX>_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
 
   # 4. Failure report (before summary)
   - name: Report failure
     if: failure()
     shell: bash
     run: |
-      echo "::error title=❌ [DOMAIN] Action failed::context. Checkpoints — 1) Name: ${<PREFIX>_CP1_STATUS:-⏭️ Not reached} | 2) Name: ${<PREFIX>_CP2_STATUS:-⏭️ Not reached}."
+      echo "::error title=[DOMAIN] Action failed::context. Checkpoints - 1) Name: ${<PREFIX>_CP1_STATUS:-NOT REACHED} | 2) Name: ${<PREFIX>_CP2_STATUS:-NOT REACHED}."
 
   # 5. Summary (always last, always runs)
   - name: Write action summary
@@ -192,29 +210,29 @@ steps:
     run: |
       EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
       cat >> "$GITHUB_STEP_SUMMARY" << "$EOF"
-      ## 🏷️ Action Title
+      ## Action Title
 
       | Field | Value |
       |-------|-------|
       | Key input | ${{ inputs.key }} |
       | Triggered by | ${{ github.actor }} |
 
-      ## 📋 Checkpoint Summary
+      ## Checkpoint Summary
 
       | # | Checkpoint | Status |
       |---|------------|--------|
-      | 1 | Step One | ${<PREFIX>_CP1_STATUS:-⏭️ Not reached} |
-      | 2 | Step Two | ${<PREFIX>_CP2_STATUS:-⏭️ Not reached} |
+      | 1 | Step One | ${<PREFIX>_CP1_STATUS:-NOT REACHED} |
+      | 2 | Step Two | ${<PREFIX>_CP2_STATUS:-NOT REACHED} |
       $EOF
 ```
 
 **Rules:**
+- **No emoji anywhere in emitted output.** Do not reintroduce a glyph vocabulary. Severity is carried by the workflow command (`::error` / `::warning` / `::notice`), and outcome is carried by the status token
 - **Namespace checkpoint env vars per action** — use `<PREFIX>_CP{N}_STATUS` (e.g. `DOCKER_CP1_STATUS`), never bare `CHECKPOINT_N_STATUS`. A composite action's `>> "$GITHUB_ENV"` writes leak into the **caller's** job environment, so a bare `CHECKPOINT_1_STATUS` silently overwrites the calling workflow's (and sibling actions') same-named checkpoints, corrupting their failure reports and summaries. The prefix must be unique per action (e.g. `IOS_CERT` vs `IOS_PROFILE`, `HELM_DEPLOY` vs `HELM_PKG`) so two actions in one job can't collide either
 - Use `EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)` for the heredoc delimiter — never a fixed string like `EOF` which can collide with step output
-- `<PREFIX>_CP{N}_STATUS` defaults to `⏭️ Skipped` (not `⏳ Pending`) when the step is always skipped (e.g. optional `if:` steps that never run in most call sites)
+- `<PREFIX>_CP{N}_STATUS` defaults to `SKIPPED` (not `PENDING`) when the step is always skipped (e.g. optional `if:` steps that never run in most call sites)
+- Never emit an empty annotation title (`title=::`) — if a tag is removed, remove the `title=` key with it
 - Do not add checkpoints for trivial one-liner steps (masking, `mkdir`, `chmod`) — only for operations that can meaningfully fail independently
-
----
 
 ## Deployment Infrastructure
 
@@ -235,16 +253,16 @@ All twelve workflows live in `.github/workflows/`. (When in doubt, `ls .github/w
 
 | Workflow | Purpose | Key inputs |
 |---|---|---|
-| `next-cloudflare-worker.yaml` | Next.js (OpenNext adapter) → Cloudflare Workers | `project_name`, `environment`, `route`, `package_manager`, `opennextjs_version` |
-| `vite-cloudflare-worker.yml` | Vite SPA → Cloudflare Workers static assets (native SPA routing, no Worker script) | `project_name`, `environment`, `route` (required), `assets_dir` |
+| `next-cloudflare-worker.yaml` | Next.js (OpenNext adapter) -> Cloudflare Workers | `project_name`, `environment`, `route`, `package_manager`, `opennextjs_version` |
+| `vite-cloudflare-worker.yml` | Vite SPA -> Cloudflare Workers static assets (native SPA routing, no Worker script) | `project_name`, `environment`, `route` (required), `assets_dir` |
 
 Both call `generate-wrangler-config` to produce `wrangler.toml` dynamically, and `write-job-summary`.
 
-### Service / Backend (Docker + Helm → Kubernetes)
+### Service / Backend (Docker + Helm -> Kubernetes)
 
 | Workflow | Purpose | Key inputs |
 |---|---|---|
-| `reusable-service-cicd.yml` | Consolidated pipeline: semver → optional NuGet → Docker → publish chart (`github-oci` / `chartmuseum` / `both`) → optional deploy (`ingress-nginx` or `gateway-api`) → tag | `chart-name` (required), `chart-publish-method`, `deploy`, `routing-mode` |
+| `reusable-service-cicd.yml` | Consolidated pipeline: semver -> optional NuGet -> Docker -> publish chart (`github-oci` / `chartmuseum` / `both`) -> optional deploy (`ingress-nginx` or `gateway-api`) -> tag | `chart-name` (required), `chart-publish-method`, `deploy`, `routing-mode` |
 | `generic-chart-helm.yml` | Full CI/CD deploying `s9genericchart` over **ingress-nginx**, with optional EF Core migration init Job; tags after a successful deploy | `app-name`, `namespace`, `ingress-hosts`, `init-job-image` |
 | `generic-gateway-helm-template.yml` | Gateway-first CI/CD deploying `s9genericchart-v2` behind the **Cilium Gateway API** (auto-onboards listeners + cert-manager Certificates); supports `gateway`/`ingress`/`dual` | `app-name`, `gateway-hostnames`, `routing-mode`, `gateway-section-names` |
 | `helm-deploy-values.yml` | Deploy-only: deploys an already-published chart from a ChartMuseum-style repo using a caller values file (no build/package/tag) | `release-name`, `chart-name`, `chart-repo`, `namespace`, `values-file` |
@@ -253,16 +271,16 @@ Both call `generate-wrangler-config` to produce `wrangler.toml` dynamically, and
 
 | Workflow | Purpose |
 |---|---|
-| `gateway-chart-cicd.yml` | CI/CD for a Cilium Gateway API-aware Helm chart: compute SemVer → `helm lint --strict` + routing/ConfigMap render assertions (via `yq`) → package → push to ChartMuseum → tag origin |
+| `gateway-chart-cicd.yml` | CI/CD for a Cilium Gateway API-aware Helm chart: compute SemVer -> `helm lint --strict` + routing/ConfigMap render assertions (via `yq`) -> package -> push to ChartMuseum -> tag origin |
 
 ### Mobile
 
 | Workflow | Purpose | Key inputs |
 |---|---|---|
-| `ios-build.yml` | React Native / native iOS → TestFlight. Builds + archives + exports on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API | `workspace`, `scheme`, `release-environment`, `disable-release` |
-| `android-build.yml` | React Native Android AAB → Google Play | `app-id`, `gradle-task`, `version-code-offset`, `release-environment`, `disable-release` |
-| `flutter-ios-build.yml` | Flutter iOS → TestFlight. `flutter build ipa` on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API. Major/minor from `marketing-prefix`; patch/build counters from `pubspec.yaml` + `run_number` | `macos-runner`, `xcode-version`, `marketing-prefix`, `app-slug`, `release-environment`, `disable-release` |
-| `flutter-android-build.yml` | Flutter Android AAB → Google Play. `flutter build appbundle` with `key.properties` signing | `app-id`, `app-slug`, `version-code-offset`, `release-environment`, `disable-release` |
+| `ios-build.yml` | React Native / native iOS -> TestFlight. Builds + archives + exports on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API | `workspace`, `scheme`, `release-environment`, `disable-release` |
+| `android-build.yml` | React Native Android AAB -> Google Play | `app-id`, `gradle-task`, `version-code-offset`, `release-environment`, `disable-release` |
+| `flutter-ios-build.yml` | Flutter iOS -> TestFlight. `flutter build ipa` on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API. Major/minor from `marketing-prefix`; patch/build counters from `pubspec.yaml` + `run_number` | `macos-runner`, `xcode-version`, `marketing-prefix`, `app-slug`, `release-environment`, `disable-release` |
+| `flutter-android-build.yml` | Flutter Android AAB -> Google Play. `flutter build appbundle` with `key.properties` signing | `app-id`, `app-slug`, `version-code-offset`, `release-environment`, `disable-release` |
 
 All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a critical alert blocks the build itself, not just the release, so CI stops wasting a runner on a release that can't ship — `critical-vuln-gate`'s own `skipped` result, e.g. build-only runs, is explicitly allowed through) and a `release_with_environment` job gated by `if: release-environment != '' && !disable-release && needs.build.result == 'success' && (needs.critical-vuln-gate.result == 'success' || == 'skipped')`, bound to the named GitHub Environment. (Earlier revisions of `release_with_environment`'s `if` checked only the input flags — since any custom job `if` replaces GitHub's implicit success()-over-`needs` check, that meant a failed build or a failed gate would NOT actually block the TestFlight/Play Store upload; fixed 2026-07-12.) They use **marketplace** release actions (`apple-actions/upload-testflight-build@v5`, `r0adkll/upload-google-play@v1`) — there is **no** Docker-based upload action. The Flutter and RN iOS workflows both reuse `ios-install-cert` / `ios-install-profile` for signing; Flutter sets up the SDK with `subosito/flutter-action@v2`. Per-branch environment selection (e.g. `android-staging` vs `android-production`) is done by the caller template's `workflow_dispatch` jobs, gated on `github.ref_name`.
 
@@ -321,8 +339,8 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - `gateway-onboard` — Cluster-mutating (logic in `onboard.sh`): ensures the parent Gateway has the HTTP/HTTPS listeners and cert-manager Certificates for the requested hostnames before deploy. No outputs. Consumes the host/section lists from `gateway-routing`.
 
 ### .NET
-- `dotnet-build` — Resolves a build target (existing `*.sln` or an ephemeral generated one), then `restore` → `build` → optional `test`. Output: `build-target`.
-- `dotnet-pack-push` — `dotnet pack --no-build` → `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. Outputs: `packages-pushed`, `package-paths`.
+- `dotnet-build` — Resolves a build target (existing `*.sln` or an ephemeral generated one), then `restore` -> `build` -> optional `test`. Output: `build-target`.
+- `dotnet-pack-push` — `dotnet pack --no-build` -> `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. Outputs: `packages-pushed`, `package-paths`.
 
 **Project-list inputs** (`projects` / `test-projects` on `dotnet-build`, `projects` on `dotnet-pack-push`, and the `nuget-projects` workflow input) accept one or more glob patterns as a **space- OR newline-separated** list. A YAML `|` block scalar (one project per line) is honoured in full. These are split with `read -rd '' -a` — plain `read -ra` stops at the first newline and silently drops every entry after the first, so never revert to it.
 
@@ -334,12 +352,12 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - `ios-install-cert` — Imports a base64 `.p12` into a temporary keychain. Inputs: `p12Base64`, `p12Password`, `keychainPath`. Exports `KEYCHAIN_PATH` to `$GITHUB_ENV`.
 - `ios-install-profile` — Installs a base64 `.mobileprovision` and extracts its UUID/Name. Input: `profileBase64`. Exports `IOS_PROFILE_UUID` / `IOS_PROFILE_NAME` to `$GITHUB_ENV`, plus best-effort `IOS_PROFILE_TEAM_ID` / `IOS_PROFILE_BUNDLE_ID` (empty, never fatal, if the profile omits them) so callers building an `ExportOptions.plist` don't re-decode the profile secret.
 - `xcode-build` — `xcodebuild archive` (manual signing by default). Inputs: `workspace`, `scheme`, `configuration`, `archivePath`, `signingStyle`, `developmentTeam`, `provisioningProfileUuid`, `keychainPath`.
-- `xcode-export` — `xcodebuild -exportArchive` → `.ipa`. Inputs: `archivePath`, `exportOptionsPlist`, `exportPath`.
+- `xcode-export` — `xcodebuild -exportArchive` -> `.ipa`. Inputs: `archivePath`, `exportOptionsPlist`, `exportPath`.
 
 (There is no `xcode-setup` action — CocoaPods, Ruby/Bundler, and Xcode selection are handled inline by `ios-build.yml`.)
 
 ### Shared
-- `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` → ✅ SUCCESS / ❌ FAILED), `icon`, `details`. Used by every reusable workflow.
+- `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` -> SUCCESS / FAILED), `details`. Used by every reusable workflow.
 - `check-critical-vulns` — Fails if the repository has any open critical-severity Dependabot alert. Uses `Link`-header cursor pagination against `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=critical` — this endpoint does **not** support page-number pagination (`page=N` is rejected with HTTP 400). Inputs: `dependabot-alerts-token` (required — a PAT/App token, **not** `GITHUB_TOKEN`, which cannot access this API regardless of granted permissions; see the `critical-vuln-gate.yml` note above), `repository` (defaults to the calling repo). Output: `critical-count`. Fails closed on every error path (network failure, missing/rejected token, bad response, or a real critical alert). Reused at three call sites: the `critical-vuln-gate` reusable workflow (PR-time check + auto-merge gate) and the build-time gate embedded in every deploy/build reusable workflow.
 
 ---
@@ -363,7 +381,7 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - Gradle uses `gradle/actions/setup-gradle@v5` (Gradle home caching). Do **not** use `gradle/gradle-build-action` (archived). Do **not** add `cache: gradle` to `actions/setup-java` — it invokes `gradle-build-action` internally and conflicts with `setup-gradle`. Do not add a manual `actions/cache` step for `~/.gradle` — `setup-gradle` owns Gradle home caching.
 - The workflow **itself** sets `org.gradle.caching=true` in the project's `gradle.properties` (the caller no longer needs to add it manually).
 - **NDK defaults to `27.1.12297006` (r27b LTS)** for RN 0.85, overridable per caller via the `android-ndk-version` input, and installed via `sdkmanager`, not `actions/cache` — `/usr/local/lib/android/sdk/` is root-owned on GitHub-hosted runners, so `tar` extraction fails with `Cannot utime` / `Cannot change mode`. `sdkmanager` has the correct elevated permissions. The step **skips the install when `/usr/local/lib/android/sdk/ndk/<version>` already exists**: `sdkmanager` installs side-by-side, and the runner image already ships several NDKs (27.3/28.2/29.0 on ubuntu-24.04), so an unconditional install added ~2.8 GB of a second copy the build never resolved. Callers should set `android-ndk-version` to the `ndkVersion` in their own `android/build.gradle`; an empty string skips NDK setup entirely.
-- **Runner disk exhaustion is the Android pipeline's signature failure — never debug the reported Gradle task first.** A release RN build does not fit next to everything `ubuntu-24.04` preinstalls. A full filesystem truncates the JVM's writes rather than refusing them, so Gradle fails in whichever task was writing at the time and the error names the wrong culprit: a cut-off merged baseline profile surfaces as `:app:compileReleaseArtProfile` → `Class rules don't support flags, but 'HSP' were specified`; a cut-off AAB surfaces as `:app:signReleaseBundle` / `:app:packageReleaseBundle` → `Location not within channel boundaries`; only sometimes does the honest `java.io.IOException: No space left on device` appear. It is timing-dependent, so **the same commit can fail and then pass on re-run** — that non-determinism is the tell. The `free-disk-space` input (default `true`) reclaims ~20 GB of unused toolchains before anything downloads; the build prints free space before and after Gradle, and the failure report emits an explicit out-of-disk error under 1 GB. Only set `free-disk-space: false` if a caller genuinely needs .NET/GHC/Swift/PowerShell/CodeQL in the same job.
+- **Runner disk exhaustion is the Android pipeline's signature failure — never debug the reported Gradle task first.** A release RN build does not fit next to everything `ubuntu-24.04` preinstalls. A full filesystem truncates the JVM's writes rather than refusing them, so Gradle fails in whichever task was writing at the time and the error names the wrong culprit: a cut-off merged baseline profile surfaces as `:app:compileReleaseArtProfile` -> `Class rules don't support flags, but 'HSP' were specified`; a cut-off AAB surfaces as `:app:signReleaseBundle` / `:app:packageReleaseBundle` -> `Location not within channel boundaries`; only sometimes does the honest `java.io.IOException: No space left on device` appear. It is timing-dependent, so **the same commit can fail and then pass on re-run** — that non-determinism is the tell. The `free-disk-space` input (default `true`) reclaims ~20 GB of unused toolchains before anything downloads; the build prints free space before and after Gradle, and the failure report emits an explicit out-of-disk error under 1 GB. Only set `free-disk-space: false` if a caller genuinely needs .NET/GHC/Swift/PowerShell/CodeQL in the same job.
 - **`gradle-react-native-architectures` (default `arm64-v8a`) overwrites `reactNativeArchitectures` in the project's `gradle.properties`** — the workflow wins over whatever is checked in, so a caller's checked-in value is not what CI builds. `arm64-v8a` alone is the right default for current production devices and keeps the AAB small; a caller that genuinely needs more (say `armeabi-v7a` for old 32-bit installs) passes the list explicitly. Adding `x86`/`x86_64` is almost always wrong — they are emulator targets and mostly inflate the bundle. Decide it per app; do not infer the intent from a checked-in `abiFilters` list, which is frequently stale relative to what the app actually ships.
 - **Node.js 24 opt-in:** both jobs set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` so `actions/cache`, `actions/setup-java@v5`, and `gradle/actions/setup-gradle@v5` use Node 24 ahead of GitHub's Node 20 retirement.
 - `use-jetifier` (default `true`) runs `npx jetify` for AndroidX migration; disable for projects that don't need it.

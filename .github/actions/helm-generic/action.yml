@@ -188,8 +188,8 @@ runs:
       shell: bash
       run: |
         {
-          echo "HELM_GENERIC_KUBECONFIG_STATUS=⏳ Pending"
-          echo "HELM_GENERIC_DEPLOY_STATUS=⏳ Pending"
+          echo "HELM_GENERIC_KUBECONFIG_STATUS=PENDING"
+          echo "HELM_GENERIC_DEPLOY_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Process kubeconfig input
@@ -200,7 +200,7 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
       run: |
         set -euo pipefail
-        echo "::group::☸️ [CHECKPOINT 1/2] Process Kubeconfig"
+        echo "::group::[CHECKPOINT 1/2] Process Kubeconfig"
         DATA="${KUBECONFIG_DATA:-}"
         if [ -z "$DATA" ]; then
           echo "kubeconfig_data input is required but empty." >&2
@@ -224,8 +224,8 @@ runs:
         fi
         chmod 600 "$KCFG_PATH"
         echo "kubeconfig_path=${KCFG_PATH}" >> "$GITHUB_OUTPUT"
-        echo "HELM_GENERIC_KUBECONFIG_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Kubeconfig configured — namespace: ${NAMESPACE}"
+        echo "HELM_GENERIC_KUBECONFIG_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Kubeconfig configured - namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
     - name: Set KUBECONFIG env
@@ -372,7 +372,7 @@ runs:
         ATOMIC: ${{ inputs.atomic }}
       run: |
         set -euo pipefail
-        echo "::group::☸️ [CHECKPOINT 2/2] Helm Upgrade / Install"
+        echo "::group::[CHECKPOINT 2/2] Helm Upgrade / Install"
 
         if [ -n "$CHART_REPO" ]; then
           # --force-update so a stale 's9generic' alias from a prior run (reused/self-hosted runner)
@@ -471,8 +471,8 @@ runs:
           ${SECRET_SET_ARGS[@]+"${SECRET_SET_ARGS[@]}"} \
           --timeout "${HELM_TIMEOUT}" \
           ${ATOMIC_ARGS[@]+"${ATOMIC_ARGS[@]}"} ${EXTRA_ARGS_ARR[@]+"${EXTRA_ARGS_ARR[@]}"}
-        echo "HELM_GENERIC_DEPLOY_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ Helm deploy complete — app: ${APP_NAME}, namespace: ${NAMESPACE}"
+        echo "HELM_GENERIC_DEPLOY_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "Helm deploy complete - app: ${APP_NAME}, namespace: ${NAMESPACE}"
         echo "::endgroup::"
 
     - name: Show release status
@@ -507,12 +507,12 @@ runs:
       run: |
         set -euo pipefail
         if [ "${DEPLOY_OUTCOME:-}" = "success" ]; then
-          status="✅ Succeeded"
+          status="SUCCEEDED"
         else
-          status="❌ Failed"
+          status="FAILED"
         fi
         {
-          echo "## ☸️ Helm Generic Deploy"
+          echo "## Helm Generic Deploy"
           echo ""
           echo "| Field | Value |"
           echo "| --- | --- |"
@@ -521,8 +521,8 @@ runs:
           echo "| Namespace | \`${NAMESPACE}\` |"
           echo "| Chart | \`${CHART_REF:-${CHART}}\` |"
           echo "| Chart repo | \`${CHART_REPO:-n/a}\` |"
-          echo "| Kubeconfig | ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} |"
-          echo "| Helm deploy | ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached} |"
+          echo "| Kubeconfig | ${HELM_GENERIC_KUBECONFIG_STATUS:-NOT REACHED} |"
+          echo "| Helm deploy | ${HELM_GENERIC_DEPLOY_STATUS:-NOT REACHED} |"
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Report failure
@@ -532,7 +532,7 @@ runs:
         APP_NAME: ${{ inputs.app_name }}
         NAMESPACE: ${{ inputs.namespace }}
       run: |
-        echo "::error title=❌ [HELM] Deploy failed::App '${APP_NAME}' in namespace '${NAMESPACE}'. Checkpoints — 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-⏭️ Not reached} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-⏭️ Not reached}."
+        echo "::error title=[HELM] Deploy failed::App '${APP_NAME}' in namespace '${NAMESPACE}'. Checkpoints - 1) Kubeconfig: ${HELM_GENERIC_KUBECONFIG_STATUS:-NOT REACHED} | 2) Helm deploy: ${HELM_GENERIC_DEPLOY_STATUS:-NOT REACHED}."
 
     - name: Clean up kubeconfig
       if: always()

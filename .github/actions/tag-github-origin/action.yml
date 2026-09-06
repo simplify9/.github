@@ -91,12 +91,12 @@ runs:
       run: |
         set -euo pipefail
         echo "::add-mask::$GITHUB_TOKEN"
-        echo "::group::🏷️ [CHECKPOINT 1/1] Create Git Tag"
+        echo "::group::[CHECKPOINT 1/1] Create Git Tag"
 
         # Validate inputs (values come from env, never interpolated into the script).
         for var in GITHUB_TOKEN REPOSITORY TAG SHA; do
           if [ -z "${!var}" ]; then
-            echo "::error title=❌ [VERSION] Missing input::$var is required"
+            echo "::error title=[VERSION] Missing input::$var is required"
             exit 1
           fi
         done
@@ -129,7 +129,7 @@ runs:
         # Outputs are written only on the success paths, so a consumer never sees
         # a 'ref' for a tag that was not actually created/verified.
         if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-          echo "✅ Created tag '$TAG' on $REPOSITORY"
+          echo "Created tag '$TAG' on $REPOSITORY"
           {
             echo "created=true"
             echo "ref=refs/tags/$TAG"
@@ -142,7 +142,7 @@ runs:
           # commits (a semver collision / lost update from racing the tag-based
           # version computation) — fail loudly rather than silently mislabel an
           # artifact published under a version owned by another commit.
-          echo "Tag '$TAG' already exists — verifying it points at $SHA…"
+          echo "Tag '$TAG' already exists - verifying it points at $SHA..."
           existing_file="$(mktemp)"
           existing_code="$(curl -sS \
             --max-time 30 \
@@ -158,19 +158,19 @@ runs:
           rm -f "$existing_file"
 
           if [ "$existing_code" = "200" ] && [ -n "$existing_sha" ] && [ "$existing_sha" != "$SHA" ]; then
-            echo "::error title=❌ [VERSION] Tag collision::Tag '$TAG' already exists on $REPOSITORY but points at $existing_sha, not $SHA. Another run likely published this version for a different commit. Bump major/minor (or delete the stray tag) before retrying."
+            echo "::error title=[VERSION] Tag collision::Tag '$TAG' already exists on $REPOSITORY but points at $existing_sha, not $SHA. Another run likely published this version for a different commit. Bump major/minor (or delete the stray tag) before retrying."
             exit 1
           fi
 
           # Same commit (re-run/retry) — or the existing ref could not be read
           # for a definitive comparison — so treat as idempotent success.
-          echo "ℹ️ Tag '$TAG' already exists on $REPOSITORY and points at the same commit — nothing to do"
+          echo "Tag '$TAG' already exists on $REPOSITORY and points at the same commit - nothing to do"
           {
             echo "created=false"
             echo "ref=refs/tags/$TAG"
           } >> "$GITHUB_OUTPUT"
         else
-          echo "❌ Failed to create tag. HTTP Status: $http_code"
+          echo "Failed to create tag. HTTP Status: $http_code"
           echo "Response: $response_body"
           exit 1
         fi
@@ -183,7 +183,7 @@ runs:
         TAG: ${{ inputs.tag }}
         REPOSITORY: ${{ inputs.repository }}
       run: |
-        echo "::error title=❌ [VERSION] Git tag creation failed::Failed to create tag '$TAG' on $REPOSITORY. Check the GitHub token has contents:write permission and the SHA is valid. HTTP status is logged above."
+        echo "::error title=[VERSION] Git tag creation failed::Failed to create tag '$TAG' on $REPOSITORY. Check the GitHub token has contents:write permission and the SHA is valid. HTTP status is logged above."
 
 branding:
   icon: 'tag'

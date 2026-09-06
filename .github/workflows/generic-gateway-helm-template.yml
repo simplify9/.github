@@ -484,7 +484,7 @@ jobs:
     steps:
       - name: Announce version job
         run: |
-          echo "::notice title=🏷️ [VERSION] Semver — Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=[VERSION] Semver - Job Started::Major: ${{ inputs.major-version }} | Minor: ${{ inputs.minor-version }} | SHA: ${{ github.sha }} | Triggered by: ${{ github.actor }}"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -511,7 +511,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🏷️'
           title: Version Job
           status: ${{ job.status }}
           details: |
@@ -542,7 +541,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -564,7 +562,7 @@ jobs:
     steps:
       - name: Announce nuget job
         run: |
-          echo "::notice title=🔷 [DOTNET] NuGet Publish — Job Started::Enabled: ${{ inputs.package-nuget }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=[DOTNET] NuGet Publish - Job Started::Enabled: ${{ inputs.package-nuget }} | Triggered by: ${{ github.actor }}"
 
       # NOTE: the per-step `if: inputs.package-nuget` guards were removed — the
       # whole job is already gated by the job-level `if` above, so the steps
@@ -633,7 +631,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔷'
           title: NuGet Job
           status: ${{ job.status }}
           details: |
@@ -671,7 +668,7 @@ jobs:
     steps:
       - name: Announce build job
         run: |
-          echo "::notice title=🐳 [DOCKER] Docker Build — Job Started::Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
+          echo "::notice title=[DOCKER] Docker Build - Job Started::Version: ${{ needs.version.outputs.version }} | Registry: ${{ inputs.container-registry }} | Triggered by: ${{ github.actor }}"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -704,13 +701,12 @@ jobs:
 
       - name: Confirm Docker image built
         run: |
-          echo "✅ Docker image built and pushed — ${{ needs.version.outputs.version }}"
+          echo "Docker image built and pushed - ${{ needs.version.outputs.version }}"
 
       - name: Write build job summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🐳'
           title: Build Job
           status: ${{ job.status }}
           details: |
@@ -752,9 +748,9 @@ jobs:
     steps:
       - name: Announce deploy job
         run: |
-          echo "::notice title=☸️ [HELM] Gateway Deploy — Job Started::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }} | Routing: ${{ inputs.routing-mode }} | Triggered by: ${{ github.actor }}"
-          echo "CHECKPOINT_1_STATUS=⏳ Pending" >> "$GITHUB_ENV"
-          echo "CHECKPOINT_2_STATUS=⏳ Pending" >> "$GITHUB_ENV"
+          echo "::notice title=[HELM] Gateway Deploy - Job Started::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }} | Routing: ${{ inputs.routing-mode }} | Triggered by: ${{ github.actor }}"
+          echo "CHECKPOINT_1_STATUS=PENDING" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_2_STATUS=PENDING" >> "$GITHUB_ENV"
 
       # Routing/config values are rendered by a dedicated, unit-tested action that
       # emits a Helm values file (passed to helm-generic via values_file) plus the
@@ -786,7 +782,7 @@ jobs:
           ingress-proxy-body-size: ${{ inputs.ingress-proxy-body-size }}
 
       - name: Mark routing checkpoint
-        run: echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        run: echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
 
       # Renders inputs.tolerations (a bare YAML list) into its own values file,
       # since the single values_file slot above already carries the gateway-routing
@@ -875,29 +871,28 @@ jobs:
 
       - name: Confirm Helm deployed
         run: |
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/2] Helm deploy completed — PASSED: ${{ inputs.app-name }} in ${{ inputs.namespace }}"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/2] Helm deploy completed - PASSED: ${{ inputs.app-name }} in ${{ inputs.namespace }}"
 
       - name: Expose chart metadata output
         id: chartmeta
         shell: bash
         run: |
           echo "helm-chart=${{ inputs.chart-repo }}/${{ inputs.chart-name }}" >> "$GITHUB_OUTPUT"
-          echo "✅ Deploy complete — ${{ inputs.app-name }}@${{ needs.version.outputs.version }} in ${{ inputs.namespace }}"
+          echo "Deploy complete - ${{ inputs.app-name }}@${{ needs.version.outputs.version }} in ${{ inputs.namespace }}"
 
       - name: Report deploy failure
         if: failure()
         run: |
-          echo "::error title=☸️ [HELM] Deploy Job Failed::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }}"
-          echo "  Checkpoint 1 — Routing values: ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Helm deploy:    ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "::error title=[HELM] Deploy Job Failed::App: ${{ inputs.app-name }} | Version: ${{ needs.version.outputs.version }} | Namespace: ${{ inputs.namespace }}"
+          echo "  Checkpoint 1 - Routing values: ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Helm deploy:    ${CHECKPOINT_2_STATUS:-NOT REACHED}"
 
       - name: Write deploy job summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '☸️'
-          title: Gateway Deploy — ${{ inputs.app-name }}
+          title: Gateway Deploy - ${{ inputs.app-name }}
           status: ${{ job.status }}
           details: |
             | Field | Value |
@@ -911,12 +906,12 @@ jobs:
             | Runner | ${{ runner.os }} |
             | Triggered by | ${{ github.actor }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Routing values generated | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 1 | Routing values generated | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Helm deployment | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
 
   tag:
     name: Tag

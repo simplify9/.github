@@ -4,7 +4,7 @@
 
 Founded in 2014, Simplify9 is an AI driven software design and consultancy company delivering software engineering, cloud, and intelligent automation. We've shipped 200+ projects across logistics, fintech, insurance, tourism, and retail — processing 100M+ transactions for 50+ clients in 15+ countries.
 
-🌐 [simplify9.com](https://simplify9.com) &nbsp;·&nbsp; 📍 Dubai, UAE &nbsp;·&nbsp; Amman, Jordan &nbsp;·&nbsp; ✉️ [info@simplify9.com](mailto:info@simplify9.com)
+[simplify9.com](https://simplify9.com) &nbsp;·&nbsp; Dubai, UAE &nbsp;·&nbsp; Amman, Jordan &nbsp;·&nbsp; [info@simplify9.com](mailto:info@simplify9.com)
 
 ---
 

@@ -41,7 +41,7 @@ name: Generic Gateway Helm Chart CI/CD (reusable)
 on:
   workflow_call:
     inputs:
-      # ⚠️ KEEP IN SYNC with the workflow_dispatch.inputs block below — GitHub
+      # KEEP IN SYNC with the workflow_dispatch.inputs block below — GitHub
       # Actions does not support YAML anchors in workflow files, so the two
       # input blocks are duplicated by necessity and will silently drift if one
       # side is edited without the other.
@@ -87,8 +87,8 @@ on:
         default: true
         type: boolean
       validate-configmap:
-        description: Validate ConfigMap gating and key routing (config.data → 
-          ConfigMap, environmentVariables → Secret)
+        description: Validate ConfigMap gating and key routing (config.data -> 
+          ConfigMap, environmentVariables -> Secret)
         required: false
         default: true
         type: boolean
@@ -120,7 +120,7 @@ on:
 
   workflow_dispatch:
     inputs:
-      # ⚠️ KEEP IN SYNC with the workflow_call.inputs block above (see note there).
+      # KEEP IN SYNC with the workflow_call.inputs block above (see note there).
       chart-path:
         description: Path to the Helm chart directory
         required: false
@@ -163,8 +163,8 @@ on:
         default: true
         type: boolean
       validate-configmap:
-        description: Validate ConfigMap gating and key routing (config.data → 
-          ConfigMap, environmentVariables → Secret)
+        description: Validate ConfigMap gating and key routing (config.data -> 
+          ConfigMap, environmentVariables -> Secret)
         required: false
         default: true
         type: boolean
@@ -200,7 +200,7 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=🏷️ [VERSION] Chart Semver — Job Started::Line: ${MAJOR}.${MINOR} | Run: ${RUN_NUMBER} | Triggered by: ${ACTOR}"
+          echo "::notice title=[VERSION] Chart Semver - Job Started::Line: ${MAJOR}.${MINOR} | Run: ${RUN_NUMBER} | Triggered by: ${ACTOR}"
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -227,7 +227,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🏷️'
           title: Chart Version Job
           status: ${{ job.status }}
           details: |
@@ -257,11 +256,11 @@ jobs:
           VALIDATE_CONFIGMAP: ${{ inputs.validate-configmap }}
         run: |
           set -euo pipefail
-          echo "::notice title=☸️ [HELM] Chart Validation — Job Started::Chart: ${CHART_PATH} | Version: ${VERSION} | Triggered by: ${ACTOR}"
+          echo "::notice title=[HELM] Chart Validation - Job Started::Chart: ${CHART_PATH} | Version: ${VERSION} | Triggered by: ${ACTOR}"
           {
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=$( [ "${VALIDATE_ROUTING}" = "true" ] && echo '⏳ Pending' || echo '⏭️ Skipped' )"
-            echo "CHECKPOINT_3_STATUS=$( [ "${VALIDATE_CONFIGMAP}" = "true" ] && echo '⏳ Pending' || echo '⏭️ Skipped' )"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=$( [ "${VALIDATE_ROUTING}" = "true" ] && echo 'PENDING' || echo 'SKIPPED' )"
+            echo "CHECKPOINT_3_STATUS=$( [ "${VALIDATE_CONFIGMAP}" = "true" ] && echo 'PENDING' || echo 'SKIPPED' )"
           } >> "$GITHUB_ENV"
 
       - name: Checkout code
@@ -293,11 +292,11 @@ jobs:
           CHART_PATH: ${{ inputs.chart-path }}
         run: |
           set -euo pipefail
-          echo "::group::☸️ [CHECKPOINT 1/3] Helm lint (strict)"
-          echo "→ Chart path: ${CHART_PATH}"
+          echo "::group::[CHECKPOINT 1/3] Helm lint (strict)"
+          echo "Chart path: ${CHART_PATH}"
           helm lint --strict "${CHART_PATH}"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/3] Helm lint — PASSED"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/3] Helm lint - PASSED"
           echo "::endgroup::"
 
       - name: Validate routing render modes
@@ -307,7 +306,7 @@ jobs:
           CHART_PATH: ${{ inputs.chart-path }}
         run: |
           set -euo pipefail
-          echo "::group::🧭 [CHECKPOINT 2/3] Routing render modes"
+          echo "::group::[CHECKPOINT 2/3] Routing render modes"
 
           # Parse the rendered manifest with yq and assert on the SET of resource
           # kinds. This is robust to indentation / field ordering, unlike grepping
@@ -331,7 +330,7 @@ jobs:
             rendered="$(helm template "$label" "$CHART_PATH" "$@")"
             assert_kind "$label" "Ingress"   "$expect_ingress"   "$rendered"
             assert_kind "$label" "HTTPRoute" "$expect_httproute" "$rendered"
-            echo "→ Mode '${label}' rendered as expected (Ingress=${expect_ingress}, HTTPRoute=${expect_httproute})."
+            echo "Mode '${label}' rendered as expected (Ingress=${expect_ingress}, HTTPRoute=${expect_httproute})."
           }
 
           check_mode default      false true
@@ -339,8 +338,8 @@ jobs:
           check_mode gateway-only false true  --set ingress.enabled=false --set gateway.enabled=true
           check_mode dual         true  true  --set ingress.enabled=true  --set gateway.enabled=true
 
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/3] Routing render modes validated — PASSED"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/3] Routing render modes validated - PASSED"
           echo "::endgroup::"
 
       - name: Validate ConfigMap toggle behavior
@@ -350,7 +349,7 @@ jobs:
           CHART_PATH: ${{ inputs.chart-path }}
         run: |
           set -euo pipefail
-          echo "::group::🗂️ [CHECKPOINT 3/3] ConfigMap toggle behavior"
+          echo "::group::[CHECKPOINT 3/3] ConfigMap toggle behavior"
 
           # Select only the ConfigMap document from a rendered manifest stream.
           configmap_doc() {
@@ -362,7 +361,7 @@ jobs:
             echo "::error::ConfigMap should not render by default when config.enabled=false." >&2
             exit 1
           fi
-          echo "→ ConfigMap disabled-by-default behavior is valid."
+          echo "ConfigMap disabled-by-default behavior is valid."
 
           enabled_rendered="$(helm template cfg-enabled "$CHART_PATH" \
             --set config.enabled=true \
@@ -397,9 +396,9 @@ jobs:
             exit 1
           fi
 
-          echo "→ ConfigMap gating, config.data rendering, and environmentVariables→Secret routing are valid."
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/3] ConfigMap behavior validated — PASSED"
+          echo "ConfigMap gating, config.data rendering, and environmentVariables->Secret routing are valid."
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 3/3] ConfigMap behavior validated - PASSED"
           echo "::endgroup::"
 
       - name: Report validate-chart failure
@@ -410,16 +409,15 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          echo "::error title=☸️ [HELM] Chart Validation Failed::Chart: ${CHART_PATH} | Version: ${VERSION}"
-          echo "  Checkpoint 1 — Helm lint:        ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Routing modes:    ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — ConfigMap toggle: ${CHECKPOINT_3_STATUS:-❌ Not reached}"
+          echo "::error title=[HELM] Chart Validation Failed::Chart: ${CHART_PATH} | Version: ${VERSION}"
+          echo "  Checkpoint 1 - Helm lint:        ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Routing modes:    ${CHECKPOINT_2_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 3 - ConfigMap toggle: ${CHECKPOINT_3_STATUS:-NOT REACHED}"
 
       - name: Write validate-chart summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '☸️'
           title: Helm Chart Validation
           status: ${{ job.status }}
           details: |
@@ -431,13 +429,13 @@ jobs:
             | Runner | ${{ runner.os }} |
             | Triggered by | ${{ github.actor }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Helm lint (strict) | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Routing render modes | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | ConfigMap toggle behavior | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
+            | 1 | Helm lint (strict) | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Routing render modes | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | ConfigMap toggle behavior | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
 
   package-and-push:
     name: Package and push chart
@@ -457,10 +455,10 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=☸️ [HELM] Package & Push — Job Started::Version: ${VERSION} | Target: ${TARGET} | Triggered by: ${ACTOR}"
+          echo "::notice title=[HELM] Package & Push - Job Started::Version: ${VERSION} | Target: ${TARGET} | Triggered by: ${ACTOR}"
           {
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=⏳ Pending"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=PENDING"
           } >> "$GITHUB_ENV"
 
       - name: Checkout code
@@ -496,7 +494,7 @@ jobs:
           UPDATE_DEPS: ${{ inputs.update-dependencies }}
         run: |
           set -euo pipefail
-          echo "::group::📦 [CHECKPOINT 1/2] Package chart"
+          echo "::group::[CHECKPOINT 1/2] Package chart"
           mkdir -p "$DEST"
 
           CHART_NAME="$(helm show chart "$CHART_PATH" | awk '$1=="name:" { print $2; exit }')"
@@ -523,9 +521,9 @@ jobs:
             echo "chart-package=$PACKAGE_FILE"
           } >> "$GITHUB_OUTPUT"
 
-          echo "→ Packaged ${CHART_NAME} version ${VERSION} at ${PACKAGE_FILE}."
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/2] Chart packaged — PASSED: ${CHART_NAME}@${VERSION}"
+          echo "Packaged ${CHART_NAME} version ${VERSION} at ${PACKAGE_FILE}."
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/2] Chart packaged - PASSED: ${CHART_NAME}@${VERSION}"
           echo "::endgroup::"
 
       - name: Upload chart package(s) to ChartMuseum
@@ -542,7 +540,7 @@ jobs:
           DEST: ${{ inputs.package-destination }}
         run: |
           set -euo pipefail
-          echo "::group::🚀 [CHECKPOINT 2/2] Upload to ChartMuseum"
+          echo "::group::[CHECKPOINT 2/2] Upload to ChartMuseum"
 
           if [ -z "${CHARTMUSEUM_URL}" ]; then
             echo "::error::chartmuseum-url input is empty." >&2
@@ -567,7 +565,7 @@ jobs:
           upload_body="$(mktemp)"
           trap 'rm -f "${curl_config}" "${upload_body}"' EXIT
           for package_file in "${chart_packages[@]}"; do
-            echo "→ Uploading '$(basename "${package_file}")' to ChartMuseum..."
+            echo "Uploading '$(basename "${package_file}")' to ChartMuseum..."
             # Capture the HTTP status (instead of --fail) so a retried upload that the
             # server already stored — e.g. the original 201 response was lost and
             # `--retry` re-POSTed, getting a 409 "already exists" — is treated as
@@ -580,10 +578,10 @@ jobs:
               "${CHARTMUSEUM_URL}")"
             case "${http_code}" in
               2??)
-                echo "✅ Package '$(basename "${package_file}")' uploaded successfully (HTTP ${http_code})."
+                echo "Package '$(basename "${package_file}")' uploaded successfully (HTTP ${http_code})."
                 ;;
               409)
-                echo "::notice::Package '$(basename "${package_file}")' already present in ChartMuseum (HTTP 409) — treating as success (idempotent re-upload)."
+                echo "::notice::Package '$(basename "${package_file}")' already present in ChartMuseum (HTTP 409) - treating as success (idempotent re-upload)."
                 ;;
               *)
                 echo "::error::Upload of '$(basename "${package_file}")' failed (HTTP ${http_code})." >&2
@@ -594,8 +592,8 @@ jobs:
           done
 
           echo "chart-repo-url=${CHARTMUSEUM_URL}" >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/2] Chart uploaded to ChartMuseum — PASSED"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/2] Chart uploaded to ChartMuseum - PASSED"
           echo "::endgroup::"
 
       - name: Report package-and-push failure
@@ -606,15 +604,14 @@ jobs:
           TARGET: ${{ inputs.chartmuseum-url }}
         run: |
           set -euo pipefail
-          echo "::error title=☸️ [HELM] Package & Push Job Failed::Version: ${VERSION} | Target: ${TARGET}"
-          echo "  Checkpoint 1 — Chart packaged:     ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — ChartMuseum upload: ${CHECKPOINT_2_STATUS:-❌ Not reached}"
+          echo "::error title=[HELM] Package & Push Job Failed::Version: ${VERSION} | Target: ${TARGET}"
+          echo "  Checkpoint 1 - Chart packaged:     ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - ChartMuseum upload: ${CHECKPOINT_2_STATUS:-NOT REACHED}"
 
       - name: Write package-and-push summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '☸️'
           title: Helm Chart Package + Push
           status: ${{ job.status }}
           details: |
@@ -628,12 +625,12 @@ jobs:
             | Runner | ${{ runner.os }} |
             | Triggered by | ${{ github.actor }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Chart packaged | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Chart uploaded | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
+            | 1 | Chart packaged | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Chart uploaded | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
 
   tag:
     name: Tag release

@@ -142,7 +142,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -170,12 +169,12 @@ jobs:
           ROUTE: ${{ inputs.route }}
           ACTOR: ${{ github.actor }}
         run: |
-          echo "::notice title=⚡ [CF-WORKERS] Cloudflare Workers Deploy — Job Started::Project: ${PROJECT_NAME}-${DEPLOY_ENV} | Route: ${ROUTE} | Triggered by: ${ACTOR}"
+          echo "::notice title=[CF-WORKERS] Cloudflare Workers Deploy - Job Started::Project: ${PROJECT_NAME}-${DEPLOY_ENV} | Route: ${ROUTE} | Triggered by: ${ACTOR}"
           {
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=⏳ Pending"
-            echo "CHECKPOINT_3_STATUS=⏳ Pending"
-            echo "CHECKPOINT_4_STATUS=⏳ Pending"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=PENDING"
+            echo "CHECKPOINT_3_STATUS=PENDING"
+            echo "CHECKPOINT_4_STATUS=PENDING"
           } >> "$GITHUB_ENV"
 
       - name: Checkout
@@ -232,27 +231,27 @@ jobs:
           INSTALL_ARGS: ${{ inputs.install_args }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ [CHECKPOINT 1/4] Install dependencies"
+          echo "::group::[CHECKPOINT 1/4] Install dependencies"
           # Split install_args into a word array and pass each as a separate quoted
           # argument so it can never break out into the shell. npm ci enforces a
           # frozen lockfile, so extra args are intentionally not applied there.
           read -r -a EXTRA_ARGS <<< "$INSTALL_ARGS"
           case "$PM_TOOL" in
-            yarn) echo "→ Install command: yarn install"; yarn install "${EXTRA_ARGS[@]}" ;;
-            pnpm) echo "→ Install command: pnpm install"; pnpm install "${EXTRA_ARGS[@]}" ;;
-            npm)  echo "→ Install command: npm ci"; npm ci ;;
+            yarn) echo "Install command: yarn install"; yarn install "${EXTRA_ARGS[@]}" ;;
+            pnpm) echo "Install command: pnpm install"; pnpm install "${EXTRA_ARGS[@]}" ;;
+            npm)  echo "Install command: npm ci"; npm ci ;;
           esac
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/4] Dependencies installed — PASSED"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/4] Dependencies installed - PASSED"
           echo "::endgroup::"
 
       - name: Lint
         if: ${{ inputs.run_lint }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ Lint"
+          echo "::group::Lint"
           $PM_RUN lint
-          echo "✅ Lint — PASSED"
+          echo "Lint - PASSED"
           echo "::endgroup::"
 
       - name: Pre-Build Custom Commands
@@ -261,7 +260,7 @@ jobs:
           PRE_BUILD_COMMANDS: ${{ inputs.pre_build_commands }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ Pre-build custom commands"
+          echo "::group::Pre-build custom commands"
           SCRIPT="$(mktemp "${RUNNER_TEMP}/pre_build.XXXXXX.sh")"
           printf '%s\n' "$PRE_BUILD_COMMANDS" > "$SCRIPT"
           bash -euo pipefail "$SCRIPT"
@@ -273,11 +272,11 @@ jobs:
           ASSETS_DIR: ${{ inputs.assets_dir }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ [CHECKPOINT 2/4] Build Vite project"
-          echo "→ Build script: $BUILD_SCRIPT | Assets dir: $ASSETS_DIR"
+          echo "::group::[CHECKPOINT 2/4] Build Vite project"
+          echo "Build script: $BUILD_SCRIPT | Assets dir: $ASSETS_DIR"
           $PM_RUN "$BUILD_SCRIPT"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/4] Vite build completed — PASSED"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/4] Vite build completed - PASSED"
           echo "::endgroup::"
 
       # No custom worker.js: Cloudflare serves the SPA fallback natively via
@@ -313,8 +312,8 @@ jobs:
           grep -F "custom_domain = true" wrangler.toml
           grep -F "directory = \"./${ASSETS_DIR}\"" wrangler.toml
           grep -F 'not_found_handling = "single-page-application"' wrangler.toml
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/4] wrangler.toml validated — PASSED"
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 3/4] wrangler.toml validated - PASSED"
 
       # Wrangler is installed and managed by wrangler-action; no global install.
       - name: Deploy with Wrangler
@@ -325,7 +324,7 @@ jobs:
           accountId: ${{ secrets.cloudflare_account_id }}
 
       - name: Mark deploy checkpoint
-        run: echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        run: echo "CHECKPOINT_4_STATUS=PASSED" >> "$GITHUB_ENV"
 
       - name: Report deploy failure
         if: failure()
@@ -334,18 +333,17 @@ jobs:
           DEPLOY_ENV: ${{ inputs.environment }}
           ROUTE: ${{ inputs.route }}
         run: |
-          echo "::error title=⚡ [CF-WORKERS] Deploy Job Failed::Project '${PROJECT_NAME}-${DEPLOY_ENV}' failed | Route: ${ROUTE}"
-          echo "  Checkpoint 1 — Dependencies:      ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Vite build:        ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — wrangler.toml:     ${CHECKPOINT_3_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 4 — Deploy:            ${CHECKPOINT_4_STATUS:-❌ Not reached}"
+          echo "::error title=[CF-WORKERS] Deploy Job Failed::Project '${PROJECT_NAME}-${DEPLOY_ENV}' failed | Route: ${ROUTE}"
+          echo "  Checkpoint 1 - Dependencies:      ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Vite build:        ${CHECKPOINT_2_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 3 - wrangler.toml:     ${CHECKPOINT_3_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 4 - Deploy:            ${CHECKPOINT_4_STATUS:-NOT REACHED}"
 
       - name: Write job summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '⚡'
-          title: Cloudflare Workers Deploy — ${{ inputs.project_name }}
+          title: Cloudflare Workers Deploy - ${{ inputs.project_name }}
           status: ${{ job.status }}
           details: |
             | Field | Value |
@@ -358,11 +356,11 @@ jobs:
             | Triggered by | ${{ github.actor }} |
             | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Dependencies installed | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Vite build | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | wrangler.toml validated | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
-            | 4 | Deploy | ${{ env.CHECKPOINT_4_STATUS || '⏭️ Not reached' }} |
+            | 1 | Dependencies installed | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Vite build | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | wrangler.toml validated | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
+            | 4 | Deploy | ${{ env.CHECKPOINT_4_STATUS || 'NOT REACHED' }} |

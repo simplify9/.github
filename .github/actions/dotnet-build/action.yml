@@ -116,7 +116,7 @@ runs:
         # steps and "Report failure" can read them without leaking variables
         # into the caller's job environment.
         echo "phase=Resolve" >> "$GITHUB_OUTPUT"
-        echo "::group::🔷 Resolve build target"
+        echo "::group::Resolve build target"
 
         # Expand a whitespace-separated list of glob patterns into a unique,
         # newline-free list of matching files, excluding build output dirs.
@@ -152,7 +152,7 @@ runs:
             target="${ROOT_SOLUTIONS[0]}"
             echo "Multiple solutions found; using the root-level solution: $target"
           else
-            echo "::error title=❌ [DOTNET] Ambiguous solution::Found ${#SOLUTIONS[@]} solutions and no single root-level solution. Restructure the repo or remove extra .sln files."
+            echo "::error title=[DOTNET] Ambiguous solution::Found ${#SOLUTIONS[@]} solutions and no single root-level solution. Restructure the repo or remove extra .sln files."
             printf '  - %s\n' "${SOLUTIONS[@]}"
             exit 1
           fi
@@ -170,7 +170,7 @@ runs:
             mapfile -t BUILD_SET < <(printf '%s\n' "${BUILD_SET[@]}" | awk 'NF && !seen[$0]++')
           fi
           if [[ ${#BUILD_SET[@]} -eq 0 ]]; then
-            echo "::error title=❌ [DOTNET] No projects found::No *.sln and no projects matched '$PROJECTS'."
+            echo "::error title=[DOTNET] No projects found::No *.sln and no projects matched '$PROJECTS'."
             exit 1
           fi
           echo "Resolved ${#BUILD_SET[@]} project(s):"
@@ -193,7 +193,7 @@ runs:
       run: |
         set -euo pipefail
         echo "phase=Restore" >> "$GITHUB_OUTPUT"
-        echo "::group::🔷 [1/3] Restore Dependencies"
+        echo "::group::[1/3] Restore Dependencies"
         echo "Restoring: $BUILD_TARGET"
         dotnet restore "$BUILD_TARGET"
         echo "::endgroup::"
@@ -207,7 +207,7 @@ runs:
       run: |
         set -euo pipefail
         echo "phase=Build" >> "$GITHUB_OUTPUT"
-        echo "::group::🔷 [2/3] Build"
+        echo "::group::[2/3] Build"
         echo "Building: $BUILD_TARGET ($CONFIGURATION)"
         dotnet build "$BUILD_TARGET" --configuration "$CONFIGURATION" --no-restore
         echo "::endgroup::"
@@ -223,7 +223,7 @@ runs:
         set -euo pipefail
         shopt -s globstar nullglob
         echo "phase=Test" >> "$GITHUB_OUTPUT"
-        echo "::group::🔷 [3/3] Run Tests"
+        echo "::group::[3/3] Run Tests"
 
         # Expand the test glob(s) the same way the build target was resolved.
         declare -a TEST_SET=()
@@ -245,10 +245,10 @@ runs:
           # that would otherwise produce a false-green run.
           mapfile -t LOOKS_LIKE_TESTS < <(find . -iname '*test*.csproj' -not -path '*/obj/*' -not -path '*/bin/*' | sort)
           if [[ ${#LOOKS_LIKE_TESTS[@]} -gt 0 ]]; then
-            echo "::warning title=⚠️ [DOTNET] Tests not run::run-tests is enabled but '$TEST_PROJECTS' matched no projects, yet ${#LOOKS_LIKE_TESTS[@]} test-looking project(s) exist. Tests did NOT run — check the test-projects glob."
+            echo "::warning title=[DOTNET] Tests not run::run-tests is enabled but '$TEST_PROJECTS' matched no projects, yet ${#LOOKS_LIKE_TESTS[@]} test-looking project(s) exist. Tests did NOT run - check the test-projects glob."
             printf '  - %s\n' "${LOOKS_LIKE_TESTS[@]}"
           else
-            echo "No test projects matched '$TEST_PROJECTS' and none were found in the repo — skipping tests."
+            echo "No test projects matched '$TEST_PROJECTS' and none were found in the repo - skipping tests."
           fi
           echo "::endgroup::"
           exit 0
@@ -258,7 +258,7 @@ runs:
         mkdir -p "$results_dir"
         echo "Running ${#TEST_SET[@]} test project(s):"
         for test_project in "${TEST_SET[@]}"; do
-          echo "→ $test_project"
+          echo "$test_project"
           # --no-build is safe: every test project is part of the build target.
           # trx logs give machine-readable results; consumers can publish them
           # or add GitHubActionsTestLogger for inline annotations.
@@ -280,7 +280,7 @@ runs:
         BUILD_PHASE: ${{ steps.test.outputs.phase || steps.build.outputs.phase || steps.restore.outputs.phase || steps.resolve.outputs.phase || 'Setup' }}
         BUILD_TARGET: ${{ steps.resolve.outputs.build-target || 'unresolved' }}
       run: |
-        echo "::error title=❌ [DOTNET] Build failed::Failed during the '${BUILD_PHASE:-Setup}' phase. Target: ${BUILD_TARGET:-unresolved}, configuration: ${CONFIGURATION}."
+        echo "::error title=[DOTNET] Build failed::Failed during the '${BUILD_PHASE:-Setup}' phase. Target: ${BUILD_TARGET:-unresolved}, configuration: ${CONFIGURATION}."
 
 branding:
   icon: 'package'

@@ -551,7 +551,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🏷️'
           title: Version Job
           status: ${{ job.status }}
           details: |
@@ -583,7 +582,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -625,7 +623,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔷'
           title: NuGet Publish Job
           status: ${{ job.status }}
           details: |
@@ -670,7 +667,7 @@ jobs:
           # repeating the same tr pipeline.
           OWNER_LOWER="$(echo "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
 
-          echo "::group::🐳 CI build context"
+          echo "::group::CI build context"
           printf '%-14s%s\n' 'Version'  "${VERSION}"
           printf '%-14s%s\n' 'Registry' "${REGISTRY}"
           printf '%-14s%s\n' 'Chart method' "${PUBLISH_METHOD}"
@@ -679,10 +676,10 @@ jobs:
           # Seed checkpoint state; each stage flips its own entry to PASSED.
           {
             echo "OWNER_LOWER=${OWNER_LOWER}"
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=⏳ Pending"
-            echo "CHECKPOINT_3_STATUS=⏳ Pending"
-            echo "CHECKPOINT_4_STATUS=⏳ Pending"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=PENDING"
+            echo "CHECKPOINT_3_STATUS=PENDING"
+            echo "CHECKPOINT_4_STATUS=PENDING"
           } >> "$GITHUB_ENV"
 
       - name: Checkout code
@@ -707,7 +704,7 @@ jobs:
           KUBECONFIG_GW_SET: ${{ secrets.kubeconfig-gateway != '' }}
         run: |
           set -euo pipefail
-          echo "::group::🐳 [CHECKPOINT 1/4] Validate chart publish configuration"
+          echo "::group::[CHECKPOINT 1/4] Validate chart publish configuration"
 
           # The publish method defaults to 'both'. An explicitly empty or
           # unrecognised method is a hard failure, so a caller can never silently
@@ -862,8 +859,8 @@ jobs:
           printf '%-16s%s\n' 'Publish method'  "${PUBLISH_METHOD}"
           printf '%-16s%s\n' 'Publish target'  "${PUBLISH_TARGET}"
           printf '%-16s%s\n' 'Deploy'          "${DEPLOY} (source: ${DEPLOY_SOURCE}, routing: ${ROUTING_MODE})"
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [1/4] Chart configuration validated"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[1/4] Chart configuration validated"
           echo "::endgroup::"
 
       - name: Build and push Docker image
@@ -883,8 +880,8 @@ jobs:
 
       - name: Confirm Docker image built
         run: |
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [2/4] Docker image built and pushed"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[2/4] Docker image built and pushed"
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
@@ -901,7 +898,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "::group::☸️ Prepare Helm chart metadata"
+          echo "::group::Prepare Helm chart metadata"
 
           # Lowercase for OCI/registry correctness; export for yq's strenv().
           IMAGE_REPOSITORY="$(echo "${CONTAINER_REGISTRY}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
@@ -936,7 +933,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "::group::☸️ [CHECKPOINT 3/4] Package Helm Chart"
+          echo "::group::[CHECKPOINT 3/4] Package Helm Chart"
 
           PACKAGE_DESTINATION="./helm-packages"
           mkdir -p "$PACKAGE_DESTINATION"
@@ -960,9 +957,9 @@ jobs:
           fi
 
           echo "package-file=${PACKAGE_FILE}" >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
 
-          echo "✅ [3/4] Helm chart packaged: ${PACKAGE_FILE}"
+          echo "[3/4] Helm chart packaged: ${PACKAGE_FILE}"
           echo "::endgroup::"
 
       - name: Push Helm chart to GHCR OCI
@@ -984,7 +981,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "::group::☸️ [CHECKPOINT 4/4] Push Helm Chart to GHCR OCI"
+          echo "::group::[CHECKPOINT 4/4] Push Helm Chart to GHCR OCI"
 
           echo "::add-mask::${REGISTRY_PASSWORD}"
 
@@ -1004,9 +1001,9 @@ jobs:
           helm push "$PACKAGE_FILE" "$CHART_PUSH_URL"
 
           echo "chart-url=${CHART_FULL_URL}" >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_4_STATUS=PASSED" >> "$GITHUB_ENV"
 
-          echo "✅ [4/4] Helm chart pushed"
+          echo "[4/4] Helm chart pushed"
           echo "::endgroup::"
 
           # The one run-level success annotation: a pointer to the published artifact.
@@ -1027,7 +1024,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "::group::☸️ [CHECKPOINT 4/4] Push Helm Chart to ChartMuseum"
+          echo "::group::[CHECKPOINT 4/4] Push Helm Chart to ChartMuseum"
 
           echo "::add-mask::${CHARTMUSEUM_PASSWORD}"
 
@@ -1083,9 +1080,9 @@ jobs:
 
           CHART_FULL_URL="${CM_BASE}/charts/${CHART_NAME}-${VERSION}.tgz"
           echo "chart-url=${CHART_FULL_URL}" >> "$GITHUB_OUTPUT"
-          echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+          echo "CHECKPOINT_4_STATUS=PASSED" >> "$GITHUB_ENV"
 
-          echo "✅ [4/4] Helm chart pushed to ChartMuseum"
+          echo "[4/4] Helm chart pushed to ChartMuseum"
           echo "::endgroup::"
 
           # The one run-level success annotation: a pointer to the published artifact.
@@ -1099,12 +1096,12 @@ jobs:
         run: |
           # Single error annotation surfaces the failure at the top of the run;
           # the checkpoint breakdown stays in the (collapsible) log for triage.
-          echo "::error title=CI build failed for ${CHART_NAME} ${VERSION}::Failed before completing all 4 checkpoints — see the run log for the first ❌."
+          echo "::error title=CI build failed for ${CHART_NAME} ${VERSION}::Failed before completing all 4 checkpoints - see the run log for the first FAILED checkpoint."
           echo "::group::Checkpoint breakdown"
-          printf '%-26s%s\n' '1 — Config validation'  "${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          printf '%-26s%s\n' '2 — Docker build'        "${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          printf '%-26s%s\n' '3 — Helm chart packaged' "${CHECKPOINT_3_STATUS:-❌ Not reached}"
-          printf '%-26s%s\n' '4 — Helm chart pushed'   "${CHECKPOINT_4_STATUS:-❌ Not reached}"
+          printf '%-26s%s\n' '1 - Config validation'  "${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          printf '%-26s%s\n' '2 - Docker build'        "${CHECKPOINT_2_STATUS:-NOT REACHED}"
+          printf '%-26s%s\n' '3 - Helm chart packaged' "${CHECKPOINT_3_STATUS:-NOT REACHED}"
+          printf '%-26s%s\n' '4 - Helm chart pushed'   "${CHECKPOINT_4_STATUS:-NOT REACHED}"
           echo "::endgroup::"
 
       # Compute the dynamic summary pieces that cannot be expressed as static
@@ -1136,7 +1133,7 @@ jobs:
             echo "CHART_INSTALL_SUMMARY<<CHART_INSTALL_EOF"
             if [ -n "${CHART_URL}" ]; then
               echo ""
-              echo "## ☸️ Install"
+              echo "## Install"
               echo ""
               echo '```bash'
               if [ "${PUBLISH_METHOD}" = "chartmuseum" ]; then
@@ -1165,8 +1162,7 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🐳'
-          title: CI Build — ${{ inputs.chart-name }}
+          title: CI Build - ${{ inputs.chart-name }}
           status: ${{ job.status }}
           details: |
             | Field | Value |
@@ -1178,14 +1174,14 @@ jobs:
             | Branch | `${{ github.ref_name }}` |
             | Runner | ${{ runner.os }} |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Config validated | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Docker image built | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | Helm chart packaged | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
-            | 4 | Helm chart pushed | ${{ env.CHECKPOINT_4_STATUS || '⏭️ Not reached' }} |
+            | 1 | Config validated | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Docker image built | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | Helm chart packaged | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
+            | 4 | Helm chart pushed | ${{ env.CHECKPOINT_4_STATUS || 'NOT REACHED' }} |
             ${{ env.CHART_INSTALL_SUMMARY }}
 
   deploy:
@@ -1233,7 +1229,7 @@ jobs:
           HELM_SET_VALUES: ${{ inputs.helm-set-values }}
         run: |
           set -euo pipefail
-          echo "::group::☸️ Resolve deploy parameters and routing values"
+          echo "::group::Resolve deploy parameters and routing values"
 
           # Effective chart source: explicit override, else inherit publish
           # method. 'both' publishes to two targets, so it has no single inherited
@@ -1363,7 +1359,7 @@ jobs:
           HOST_LIST: ${{ steps.params.outputs.onboard-hosts }}
         run: |
           set -euo pipefail
-          echo "::group::☸️ Onboard gateway hostnames"
+          echo "::group::Onboard gateway hostnames"
 
           # *.sf9.io hosts are served by the shared wildcard listener and were
           # excluded from the onboarding list — nothing to do if that's all of them.
@@ -1492,7 +1488,7 @@ jobs:
             fi
           done < <(printf '%s\n' "${HOST_LIST}")
 
-          echo "✅ Gateway hostnames onboarded"
+          echo "Gateway hostnames onboarded"
           echo "::endgroup::"
 
       - name: Deploy Helm chart to cluster
@@ -1535,8 +1531,7 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '☸️'
-          title: Deploy — ${{ inputs.chart-name }}
+          title: Deploy - ${{ inputs.chart-name }}
           status: ${{ job.status }}
           details: |
             | Field | Value |

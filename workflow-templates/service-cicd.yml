@@ -20,17 +20,17 @@
 #   commit — all via the Simplify9 reusable workflow.
 #
 # CHART PUBLISH METHOD (optional — defaults to 'both'):
-#   both        → publishes to GHCR OCI AND ChartMuseum (the default, used below).
-#                 Requires chart-repo-url + the chartmuseum-username /
-#                 chartmuseum-password secrets. When deploying, the chart is
-#                 pulled from OCI by default (set deploy-chart-source: chartmuseum
-#                 to override).
-#   github-oci  → publishes the chart to GHCR as an OCI artifact only
-#                 (oci://ghcr.io/<owner>/charts/<chart-name>). No extra secrets
-#                 needed; uses the built-in GITHUB_TOKEN. Drop the chart-repo-url
-#                 input and the chartmuseum-* secrets if you switch to this.
-#   chartmuseum → publishes to a ChartMuseum repository only. Requires
-#                 chart-repo-url + the chartmuseum-* secrets.
+#   both        -> publishes to GHCR OCI AND ChartMuseum (the default, used below).
+#                  Requires chart-repo-url + the chartmuseum-username /
+#                  chartmuseum-password secrets. When deploying, the chart is
+#                  pulled from OCI by default (set deploy-chart-source: chartmuseum
+#                  to override).
+#   github-oci  -> publishes the chart to GHCR as an OCI artifact only
+#                  (oci://ghcr.io/<owner>/charts/<chart-name>). No extra secrets
+#                  needed; uses the built-in GITHUB_TOKEN. Drop the chart-repo-url
+#                  input and the chartmuseum-* secrets if you switch to this.
+#   chartmuseum -> publishes to a ChartMuseum repository only. Requires
+#                  chart-repo-url + the chartmuseum-* secrets.
 #
 # DEPLOY (optional — off by default):
 #   Set deploy: true to roll the published chart onto a cluster. Pick the

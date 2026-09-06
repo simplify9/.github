@@ -138,14 +138,14 @@ runs:
         PLATFORMS: ${{ inputs.platforms }}
       run: |
         set -euo pipefail
-        echo "::group::🐳 Docker build context"
+        echo "::group::Docker build context"
         printf '%-12s%s\n' 'Image'     "$IMAGE_NAME:$VERSION"
         printf '%-12s%s\n' 'Registry'  "$REGISTRY"
         printf '%-12s%s\n' 'Platforms' "$PLATFORMS"
         echo "::endgroup::"
         {
-          echo "DOCKER_CP1_STATUS=⏳ Pending"
-          echo "DOCKER_CP2_STATUS=⏳ Pending"
+          echo "DOCKER_CP1_STATUS=PENDING"
+          echo "DOCKER_CP2_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
     - name: Set up QEMU
@@ -169,8 +169,8 @@ runs:
         REGISTRY: ${{ inputs.registry }}
       run: |
         set -euo pipefail
-        echo "DOCKER_CP1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ [1/2] Registry auth — $REGISTRY"
+        echo "DOCKER_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "[1/2] Registry auth - $REGISTRY"
 
     - name: Sanitize branch tag
       id: branchtag
@@ -193,7 +193,7 @@ runs:
           safe=""
         fi
         echo "value=${safe}" >> "$GITHUB_OUTPUT"
-        echo "🏷️ Branch tag: '${safe:-<none>}'"
+        echo "Branch tag: '${safe:-<none>}'"
 
     - name: Extract metadata
       id: meta
@@ -240,8 +240,8 @@ runs:
         DIGEST: ${{ steps.build.outputs.digest }}
       run: |
         set -euo pipefail
-        echo "DOCKER_CP2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-        echo "✅ [2/2] Image pushed — $IMAGE_NAME:$VERSION ($DIGEST)"
+        echo "DOCKER_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
+        echo "[2/2] Image pushed - $IMAGE_NAME:$VERSION ($DIGEST)"
 
     - name: Report failure
       if: failure()
@@ -251,7 +251,7 @@ runs:
         VERSION: ${{ inputs.version }}
         REGISTRY: ${{ inputs.registry }}
       run: |
-        echo "::error title=Docker build failed for $IMAGE_NAME:$VERSION::Registry $REGISTRY — auth: ${DOCKER_CP1_STATUS:-❌ Not reached} | build/push: ${DOCKER_CP2_STATUS:-❌ Not reached}"
+        echo "::error title=Docker build failed for $IMAGE_NAME:$VERSION::Registry $REGISTRY - auth: ${DOCKER_CP1_STATUS:-NOT REACHED} | build/push: ${DOCKER_CP2_STATUS:-NOT REACHED}"
 
 branding:
   icon: 'package'

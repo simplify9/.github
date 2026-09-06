@@ -9,8 +9,8 @@
 #   Replace all values marked with # REPLACE with your app-specific values.
 #
 # BRANCHES:
-#   develop → triggers iOS Dev job → uploads to ios-develop environment
-#   main    → triggers iOS Prod job → uploads to ios-production environment
+#   develop -> triggers iOS Dev job -> uploads to ios-develop environment
+#   main    -> triggers iOS Prod job -> uploads to ios-production environment
 #
 # INPUTS (only non-default values are declared — see generic template for
 #   full input reference):

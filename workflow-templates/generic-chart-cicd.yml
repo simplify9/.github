@@ -14,23 +14,23 @@
 #   https://charts.sf9.io by the reusable workflow — you do NOT vendor a chart.
 #
 # WHAT IT DOES:
-#   Computes a semantic version from git tags → (optionally) publishes NuGet
-#   packages → builds & pushes a Docker image → deploys the s9genericchart to
+#   Computes a semantic version from git tags -> (optionally) publishes NuGet
+#   packages -> builds & pushes a Docker image -> deploys the s9genericchart to
 #   Kubernetes via Helm (dynamic ingress hosts/paths/TLS, optional EF Core
-#   migration init-Job) → tags the commit on a successful deploy.
+#   migration init-Job) -> tags the commit on a successful deploy.
 #
 # BRANCHES:
-#   develop → deploy-develop job  → namespace "develop"     / GitHub env develop
-#   main    → deploy-main job     → namespace "production"   / GitHub env Production
+#   develop -> deploy-develop job  -> namespace "develop"     / GitHub env develop
+#   main    -> deploy-main job     -> namespace "production"   / GitHub env Production
 #
 # TWO "environment" INPUTS — DON'T CONFUSE THEM:
-#   environment        → the app's RUNTIME environment name, injected as the
-#                        Helm value `environment=` (e.g. develop, Production)
-#                        and into the app (ASPNETCORE_ENVIRONMENT, etc.).
-#   deploy-environment → the GITHUB Environment for the deploy job — activates
-#                        protection rules (required reviewers, wait timers) and
-#                        environment-scoped secrets. Best practice: set it per
-#                        branch so develop and production are gated separately.
+#   environment        -> the app's RUNTIME environment name, injected as the
+#                         Helm value `environment=` (e.g. develop, Production)
+#                         and into the app (ASPNETCORE_ENVIRONMENT, etc.).
+#   deploy-environment -> the GITHUB Environment for the deploy job — activates
+#                         protection rules (required reviewers, wait timers) and
+#                         environment-scoped secrets. Best practice: set it per
+#                         branch so develop and production are gated separately.
 #
 # INPUTS (only the commonly-set values are declared here — see the reusable
 #   workflow for the full, documented input reference):
@@ -78,7 +78,7 @@ jobs:
       # atomic: true                         # roll back automatically on a failed deploy (default true)
       # helm-timeout-minutes: "15"           # default 10
 
-      # ── Ingress (index-aligned: host[i] ↔ tls-secret[i]; paths apply to all) ─
+      # ── Ingress (index-aligned: host[i] <-> tls-secret[i]; paths apply to all) ─
       ingress-hosts: |                       # REPLACE
         api-stg.example.com
         api-stg.example.me
@@ -145,7 +145,7 @@ jobs:
       # atomic: true
       # helm-timeout-minutes: "15"
 
-      # ── Ingress (index-aligned: host[i] ↔ tls-secret[i]; paths apply to all) ─
+      # ── Ingress (index-aligned: host[i] <-> tls-secret[i]; paths apply to all) ─
       ingress-hosts: |                       # REPLACE
         api.example.com
         api.example.me

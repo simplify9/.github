@@ -145,7 +145,6 @@ jobs:
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '🔒'
           title: Critical Dependabot Vulnerability Gate
           status: ${{ job.status }}
 
@@ -173,12 +172,12 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "::notice title=⚡ [CF-WORKERS] Next.js Deploy — Job Started::Project: ${PROJECT_NAME}-${DEPLOY_ENV} | Triggered by: ${ACTOR}"
+          echo "::notice title=[CF-WORKERS] Next.js Deploy - Job Started::Project: ${PROJECT_NAME}-${DEPLOY_ENV} | Triggered by: ${ACTOR}"
           {
-            echo "CHECKPOINT_1_STATUS=⏳ Pending"
-            echo "CHECKPOINT_2_STATUS=⏳ Pending"
-            echo "CHECKPOINT_3_STATUS=⏳ Pending"
-            echo "CHECKPOINT_4_STATUS=⏳ Pending"
+            echo "CHECKPOINT_1_STATUS=PENDING"
+            echo "CHECKPOINT_2_STATUS=PENDING"
+            echo "CHECKPOINT_3_STATUS=PENDING"
+            echo "CHECKPOINT_4_STATUS=PENDING"
           } >> "$GITHUB_ENV"
 
       - name: Checkout
@@ -258,27 +257,27 @@ jobs:
           INSTALL_ARGS: ${{ inputs.install_args }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ [CHECKPOINT 1/4] Install dependencies"
+          echo "::group::[CHECKPOINT 1/4] Install dependencies"
           # Split install_args into a word array and pass each as a separate quoted
           # argument so it can never break out into the shell. npm ci enforces a
           # frozen lockfile, so extra args are intentionally not applied there.
           read -r -a EXTRA_ARGS <<< "$INSTALL_ARGS"
           case "$PM_TOOL" in
-            yarn) echo "→ Install command: yarn install"; yarn install "${EXTRA_ARGS[@]}" ;;
-            pnpm) echo "→ Install command: pnpm install"; pnpm install "${EXTRA_ARGS[@]}" ;;
-            npm)  echo "→ Install command: npm ci"; npm ci ;;
+            yarn) echo "Install command: yarn install"; yarn install "${EXTRA_ARGS[@]}" ;;
+            pnpm) echo "Install command: pnpm install"; pnpm install "${EXTRA_ARGS[@]}" ;;
+            npm)  echo "Install command: npm ci"; npm ci ;;
           esac
-          echo "CHECKPOINT_1_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 1/4] Dependencies installed — PASSED"
+          echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 1/4] Dependencies installed - PASSED"
           echo "::endgroup::"
 
       - name: Lint
         if: ${{ inputs.run_lint }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ Lint"
+          echo "::group::Lint"
           $PM_RUN lint
-          echo "✅ Lint — PASSED"
+          echo "Lint - PASSED"
           echo "::endgroup::"
 
       # Persist Next.js incremental build cache across runs for faster builds.
@@ -297,21 +296,21 @@ jobs:
           BUILD_SCRIPT: ${{ inputs.build_script }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ [CHECKPOINT 2/4] Build Next.js application"
-          echo "→ Build script: $BUILD_SCRIPT"
+          echo "::group::[CHECKPOINT 2/4] Build Next.js application"
+          echo "Build script: $BUILD_SCRIPT"
           $PM_RUN "$BUILD_SCRIPT"
-          echo "CHECKPOINT_2_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 2/4] Next.js build completed — PASSED"
+          echo "CHECKPOINT_2_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 2/4] Next.js build completed - PASSED"
           echo "::endgroup::"
 
       - name: Create OpenNext.js configuration (if absent)
         run: |
           set -euo pipefail
-          echo "::group::⚡ OpenNext.js configuration"
+          echo "::group::OpenNext.js configuration"
           if [ -f open-next.config.ts ] || [ -f open-next.config.js ] || [ -f open-next.config.mjs ]; then
-            echo "→ Using project-provided OpenNext config (not overwriting)."
+            echo "Using project-provided OpenNext config (not overwriting)."
           else
-            echo "→ No OpenNext config found; generating a default open-next.config.ts."
+            echo "No OpenNext config found; generating a default open-next.config.ts."
             cat > open-next.config.ts << 'EOF'
           import { defineCloudflareConfig } from "@opennextjs/cloudflare";
 
@@ -325,8 +324,8 @@ jobs:
           OPENNEXT_VERSION: ${{ inputs.opennextjs_version }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ Install OpenNext.js Cloudflare adapter & Wrangler"
-          echo "→ Adapter: @opennextjs/cloudflare@${OPENNEXT_VERSION}"
+          echo "::group::Install OpenNext.js Cloudflare adapter & Wrangler"
+          echo "Adapter: @opennextjs/cloudflare@${OPENNEXT_VERSION}"
           # Installed transiently (not saved to package.json / lockfile). Wrangler
           # is a required peer of the adapter and is needed by the bundle build.
           # --legacy-peer-deps avoids hard-failing on unrelated peer ranges
@@ -351,11 +350,11 @@ jobs:
           OPENNEXT_VERSION: ${{ inputs.opennextjs_version }}
         run: |
           set -euo pipefail
-          echo "::group::⚡ [CHECKPOINT 3/4] Build Cloudflare Workers bundle"
-          echo "→ Using OpenNext.js Cloudflare adapter: ${OPENNEXT_VERSION}"
+          echo "::group::[CHECKPOINT 3/4] Build Cloudflare Workers bundle"
+          echo "Using OpenNext.js Cloudflare adapter: ${OPENNEXT_VERSION}"
           npx opennextjs-cloudflare build
-          echo "CHECKPOINT_3_STATUS=✅ PASSED" >> "$GITHUB_ENV"
-          echo "✅ [CHECKPOINT 3/4] CF Workers bundle built — PASSED"
+          echo "CHECKPOINT_3_STATUS=PASSED" >> "$GITHUB_ENV"
+          echo "[CHECKPOINT 3/4] CF Workers bundle built - PASSED"
           echo "::endgroup::"
 
       - name: Deploy with Wrangler
@@ -366,7 +365,7 @@ jobs:
           accountId: ${{ secrets.cloudflare_account_id }}
 
       - name: Mark deploy checkpoint
-        run: echo "CHECKPOINT_4_STATUS=✅ PASSED" >> "$GITHUB_ENV"
+        run: echo "CHECKPOINT_4_STATUS=PASSED" >> "$GITHUB_ENV"
 
       - name: Report deploy failure
         if: failure()
@@ -375,18 +374,17 @@ jobs:
           DEPLOY_ENV: ${{ inputs.environment }}
         run: |
           set -euo pipefail
-          echo "::error title=⚡ [CF-WORKERS] Deploy Job Failed::Project '${PROJECT_NAME}-${DEPLOY_ENV}' failed"
-          echo "  Checkpoint 1 — Dependencies:      ${CHECKPOINT_1_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 2 — Next.js build:     ${CHECKPOINT_2_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 3 — CF Workers bundle: ${CHECKPOINT_3_STATUS:-❌ Not reached}"
-          echo "  Checkpoint 4 — Deploy:            ${CHECKPOINT_4_STATUS:-❌ Not reached}"
+          echo "::error title=[CF-WORKERS] Deploy Job Failed::Project '${PROJECT_NAME}-${DEPLOY_ENV}' failed"
+          echo "  Checkpoint 1 - Dependencies:      ${CHECKPOINT_1_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 2 - Next.js build:     ${CHECKPOINT_2_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 3 - CF Workers bundle: ${CHECKPOINT_3_STATUS:-NOT REACHED}"
+          echo "  Checkpoint 4 - Deploy:            ${CHECKPOINT_4_STATUS:-NOT REACHED}"
 
       - name: Write job summary
         if: always()
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
-          icon: '⚡'
-          title: Next.js → Cloudflare Workers Deploy — ${{ inputs.project_name 
+          title: Next.js -> Cloudflare Workers Deploy - ${{ inputs.project_name 
             }}
           status: ${{ job.status }}
           details: |
@@ -400,11 +398,11 @@ jobs:
             | Triggered by | ${{ github.actor }} |
             | Run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-            ## 📋 Checkpoint Summary
+            ## Checkpoint Summary
 
             | # | Checkpoint | Status |
             |---|------------|--------|
-            | 1 | Dependencies installed | ${{ env.CHECKPOINT_1_STATUS || '⏭️ Not reached' }} |
-            | 2 | Next.js build | ${{ env.CHECKPOINT_2_STATUS || '⏭️ Not reached' }} |
-            | 3 | CF Workers bundle | ${{ env.CHECKPOINT_3_STATUS || '⏭️ Not reached' }} |
-            | 4 | Deploy | ${{ env.CHECKPOINT_4_STATUS || '⏭️ Not reached' }} |
+            | 1 | Dependencies installed | ${{ env.CHECKPOINT_1_STATUS || 'NOT REACHED' }} |
+            | 2 | Next.js build | ${{ env.CHECKPOINT_2_STATUS || 'NOT REACHED' }} |
+            | 3 | CF Workers bundle | ${{ env.CHECKPOINT_3_STATUS || 'NOT REACHED' }} |
+            | 4 | Deploy | ${{ env.CHECKPOINT_4_STATUS || 'NOT REACHED' }} |

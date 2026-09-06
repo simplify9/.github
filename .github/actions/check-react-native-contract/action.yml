@@ -77,7 +77,7 @@ runs:
         set -uo pipefail
 
         result="$(python3 "${GITHUB_ACTION_PATH}/resolve_versions.py" --dir "$WORKING_DIRECTORY")" || {
-          echo "::error title=❌ [RN-CONTRACT] Checker failed to run::resolve_versions.py exited non-zero."
+          echo "::error title=[RN-CONTRACT] Checker failed to run::resolve_versions.py exited non-zero."
           exit 1
         }
 
@@ -101,28 +101,28 @@ runs:
 
         case "$status" in
           NOT_A_REACT_NATIVE_REPO|NO_PACKAGE_JSON)
-            echo "::notice title=⏭️ [RN-CONTRACT] Skipped::No react-native dependency found in ${WORKING_DIRECTORY} -- nothing to check."
+            echo "::notice title=[RN-CONTRACT] Skipped::No react-native dependency found in ${WORKING_DIRECTORY} -- nothing to check."
             exit 0
             ;;
           OK)
-            echo "::notice title=✅ [RN-CONTRACT] Versions match::react ${react} matches what react-native ${rn} requires (via ${source})."
+            echo "::notice title=[RN-CONTRACT] Versions match::react ${react} matches what react-native ${rn} requires (via ${source})."
             exit 0
             ;;
           DRIFT)
-            echo "::error title=❌ [RN-CONTRACT] react does not match react-native::${reason}. This combination installs and builds cleanly but THROWS at runtime ('Incompatible React versions') the first time the app calls findNodeHandle or another Paper-bound API -- which happens on the first screen with a list, a text input, or a native-driver animation. Fix: set react (and react-test-renderer) to ${expected}, or upgrade react-native to a release whose renderer expects react ${react}."
+            echo "::error title=[RN-CONTRACT] react does not match react-native::${reason}. This combination installs and builds cleanly but THROWS at runtime ('Incompatible React versions') the first time the app calls findNodeHandle or another Paper-bound API -- which happens on the first screen with a list, a text input, or a native-driver animation. Fix: set react (and react-test-renderer) to ${expected}, or upgrade react-native to a release whose renderer expects react ${react}."
             exit 1
             ;;
           DUPLICATE_REACT)
-            echo "::error title=❌ [RN-CONTRACT] Multiple react versions in the tree::${reason}. The renderer captures one react instance's internals while components use another, which breaks hooks and context in ways that are very hard to diagnose. Fix: dedupe (yarn dedupe / npm dedupe) or add a resolutions/overrides entry pinning a single react version."
+            echo "::error title=[RN-CONTRACT] Multiple react versions in the tree::${reason}. The renderer captures one react instance's internals while components use another, which breaks hooks and context in ways that are very hard to diagnose. Fix: dedupe (yarn dedupe / npm dedupe) or add a resolutions/overrides entry pinning a single react version."
             exit 1
             ;;
           *)
             msg="${reason:-status was ${status}}"
             if [[ "$FAIL_ON_UNKNOWN" == "true" ]]; then
-              echo "::error title=❌ [RN-CONTRACT] Could not verify the version contract::${msg}. Failing closed: this check cannot confirm the app is safe, and passing here would manufacture false confidence. Set fail-on-unknown: false to downgrade this to a warning."
+              echo "::error title=[RN-CONTRACT] Could not verify the version contract::${msg}. Failing closed: this check cannot confirm the app is safe, and passing here would manufacture false confidence. Set fail-on-unknown: false to downgrade this to a warning."
               exit 1
             fi
-            echo "::warning title=⚠️ [RN-CONTRACT] Could not verify the version contract::${msg}. fail-on-unknown is false, so this is not blocking."
+            echo "::warning title=[RN-CONTRACT] Could not verify the version contract::${msg}. fail-on-unknown is false, so this is not blocking."
             exit 0
             ;;
         esac
