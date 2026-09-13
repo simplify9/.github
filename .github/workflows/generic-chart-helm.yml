@@ -35,17 +35,22 @@ on:
         default: '**/*.csproj'
         type: string
       dotnet-version:
-        description: '.NET SDK version to use for NuGet packaging'
+        description: '.NET SDK version to use for NuGet packaging and the test-before-build job'
         required: false
         default: '8.0.x'
         type: string
       test-projects:
-        description: 'Test projects to run before packing (glob pattern)'
+        description: 'Test projects to run before packing, and before the image build when test-before-build is true (glob pattern)'
         required: false
         default: '**/*Tests/*.csproj'
         type: string
       run-tests:
         description: 'Whether to run tests before packing'
+        required: false
+        default: false
+        type: boolean
+      test-before-build:
+        description: 'Run test-projects in their own job before the image build; if they fail, nothing is built or deployed. Independent of package-nuget and run-tests.'
         required: false
         default: false
         type: boolean
@@ -428,11 +433,53 @@ jobs:
             | Branch | `${{ github.ref_name }}` |
             | Runner | ${{ runner.os }} |
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    if: ${{ inputs.test-before-build }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Announce test job
+        env:
+          TEST_PROJECTS: ${{ inputs.test-projects }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "::notice title=[DOTNET] Tests Before Build - Job Started::Projects: ${TEST_PROJECTS} | Triggered by: ${ACTOR}"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Dotnet Restore, Build, and Test
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        with:
+          projects: '**/*.csproj'
+          test-projects: ${{ inputs.test-projects }}
+          configuration: 'Release'
+          dotnet-version: ${{ inputs.dotnet-version }}
+          run-tests: 'true'
+
+      - name: Write test job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Test Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Test projects | `${{ inputs.test-projects }}` |
+            | .NET SDK | `${{ inputs.dotnet-version }}` |
+            | Branch | `${{ github.ref_name }}` |
+
   build:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [version, nuget, critical-vuln-gate]
+    needs: [version, nuget, test, critical-vuln-gate]
     permissions:
       contents: write
       packages: write   # push image to ghcr.io when falling back to GITHUB_TOKEN
@@ -441,10 +488,13 @@ jobs:
     # itself (not just the deploy step) and CI stops wasting build time on a
     # release that can't ship. It is conditionally skipped (non-release runs),
     # so 'skipped' must be allowed here or every non-release build would break.
+    # test runs only when the caller sets test-before-build, so 'skipped' is allowed
+    # for it too; when it runs, a failure stops the build and everything after it.
     if: >-
       ${{ !cancelled()
           && needs.version.result == 'success'
           && (needs.nuget.result == 'success' || needs.nuget.result == 'skipped')
+          && (needs.test.result == 'success' || needs.test.result == 'skipped')
           && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
       == 'skipped')
       }}
