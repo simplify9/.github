@@ -192,8 +192,13 @@ runs:
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
         set -uo pipefail
-        echo "::add-mask::$DEPENDABOT_TOKEN"
-        echo "::add-mask::$GITHUB_READ_TOKEN"
+        # Mask only non-empty values: a bare `::add-mask::` makes the runner
+        # warn "Can't add secret mask for empty string" -- which every
+        # build-time (push) gate hit, since those never forward github-token
+        # (it's only needed for PR-branch verification). A missing
+        # dependabot-alerts-token still fails closed just below.
+        if [[ -n "$DEPENDABOT_TOKEN" ]]; then echo "::add-mask::$DEPENDABOT_TOKEN"; fi
+        if [[ -n "$GITHUB_READ_TOKEN" ]]; then echo "::add-mask::$GITHUB_READ_TOKEN"; fi
         echo "::group::[CHECKPOINT 1/1] Query Open Critical Dependabot Alerts"
 
         if [[ -z "$DEPENDABOT_TOKEN" ]]; then
