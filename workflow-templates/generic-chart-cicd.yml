@@ -101,6 +101,12 @@ jobs:
       # init-job-connstring-env: "ConnectionStrings__MyDb"
       # init-job-image-pull-secret: "myorgcr"             # default sf9cr; '' for public images
 
+      # ── Tests before the image build (optional — uncomment to enable) ──────
+      # Runs test-projects in their own job; if they fail, nothing is built or
+      # deployed. Shares test-projects / dotnet-version with the NuGet block
+      # below, so set each key only once.
+      # test-before-build: true
+
       # ── NuGet publishing (optional — uncomment to enable) ───────────────────
       # nuget-projects takes one or more globs/paths: a single glob, a space-
       # separated list, or one entry per line as a YAML `|` block (all honoured
@@ -167,6 +173,12 @@ jobs:
       # init-job-secret-key: "connection-string"
       # init-job-connstring-env: "ConnectionStrings__MyDb"
       # init-job-image-pull-secret: "myorgcr"
+
+      # ── Tests before the image build (optional — uncomment to enable) ──────
+      # Runs test-projects in their own job; if they fail, nothing is built or
+      # deployed. Shares test-projects / dotnet-version with the NuGet block
+      # below, so set each key only once.
+      # test-before-build: true
 
       # ── NuGet publishing (optional — uncomment to enable) ───────────────────
       # nuget-projects takes one or more globs/paths: a single glob, a space-

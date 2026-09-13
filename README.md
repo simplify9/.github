@@ -318,6 +318,9 @@ Full CI/CD that builds a Docker image and deploys the shared **`s9genericchart`*
 | `environment` | | — | `environment` Helm value (e.g. `Development`) |
 | `helm-set-values` | | — | Extra non-secret `--set` values |
 | `package-nuget` | | `false` | Build & publish NuGet packages |
+| `test-before-build` | | `false` | Run `test-projects` in their own job before the image build; if they fail, nothing is built or deployed |
+| `test-projects` | | `**/*Tests/*.csproj` | Test projects for `test-before-build` and for NuGet packing (glob) |
+| `dotnet-version` | | `8.0.x` | .NET SDK for `test-before-build` and NuGet packing |
 | `init-job-image` | | `''` | If set, runs a K8s migration Job before deploy |
 | `init-job-secret-name` | | `''` | Secret holding the migration connection string |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
