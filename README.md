@@ -317,6 +317,8 @@ Full CI/CD that builds a Docker image and deploys the shared **`s9genericchart`*
 | `service-target-port` | | — | Service `targetPort` |
 | `environment` | | — | `environment` Helm value (e.g. `Development`) |
 | `helm-set-values` | | — | Extra non-secret `--set` values |
+| `image-pull-secret` | | `sf9cr` | `image.pullSecret` for the chart; empty renders no `imagePullSecrets` (clusters that pull through an attached registry; needs `s9genericchart` 1.0.8+) |
+| `secret-values-prefix` | | `''` | Prepended to every line of the `helm-set-secret-values` secret, e.g. `environmentVariables.` for a secret holding bare `KEY=VALUE` lines |
 | `package-nuget` | | `false` | Build & publish NuGet packages |
 | `test-before-build` | | `false` | Run `test-projects` in their own job before the image build; if they fail, nothing is built or deployed |
 | `test-projects` | | `**/*Tests/*.csproj` | Test projects for `test-before-build` and for NuGet packing (glob) |
