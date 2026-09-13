@@ -708,7 +708,7 @@ Thin `workflow_call` wrapper around the `check-critical-vulns` composite action:
 
 **Required secrets:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" on the calling repo — pass `secrets.DEPENDABOT_ALERTS_TOKEN`; `GITHUB_TOKEN` cannot access the Dependabot Alerts API regardless of granted permissions, confirmed by live testing).
 
-**Outputs:** none directly from the workflow; the underlying `check-critical-vulns` action's `critical-count` output is available to the job that calls it.
+**Outputs:** none directly from the workflow; the underlying `check-critical-vulns` action's `critical-count` output is available to the job that calls it. When the gate fails on real alerts it also uploads `critical-vulns-<repo>-<run_id>.csv` as a run artifact (unzipped, kept 5 days) — see [Blocking-alerts CSV report](#blocking-alerts-csv-report--a-fix-list-to-hand-to-an-agent).
 
 ```yaml
 jobs:
@@ -730,7 +730,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py`, for its PR-branch npm verification — see below) keep logic in a sibling script; the rest is inline bash.
+All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -791,7 +791,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
-| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; output `critical-count`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR's own HEAD branch lockfile (`parse_yarn_lock.py` sibling script for `yarn.lock`; `package-lock.json` handled inline via `jq`) — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
+| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; outputs `critical-count`, `report-name`, `report-path`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When it fails on real alerts, uploads every still-blocking alert as an unzipped `critical-vulns-<repo>-<run_id>.csv` run artifact (`alerts_to_csv.jq` sibling filter) — see [Blocking-alerts CSV report](#blocking-alerts-csv-report--a-fix-list-to-hand-to-an-agent). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR's own HEAD branch lockfile (`parse_yarn_lock.py` sibling script for `yarn.lock`; `package-lock.json` handled inline via `jq`) — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
 
 ---
 
@@ -1136,6 +1136,45 @@ reintroduce the code-injection risk `pull_request_target` is normally dangerous 
 already grants `contents: write`) is used only to read the lockfile — composite actions
 can't read the `secrets` context directly, so it must be passed in explicitly even though
 it's just the workflow's own ambient token.
+
+### Blocking-alerts CSV report — a fix list to hand to an agent
+
+When `check-critical-vulns` fails because of real alerts (not an API/token error), it writes
+every still-blocking alert to `critical-vulns-<repo>-<run_id>.csv` and uploads it as a run
+artifact. Alerts cleared by PR-branch verification are left out, so the file always matches
+the blocking count. The upload uses `archive: false`, so the artifact downloads as the `.csv`
+itself rather than a zip; it's kept for 5 days, and re-running the job produces a fresh one.
+The `[VULN-GATE] Fix list` annotation and the job summary both name the file.
+
+**Getting it:** failed run → **Summary** → **Artifacts** → `critical-vulns-<repo>-<run_id>.csv`.
+Hand it to your coding agent alongside the repo checkout.
+
+**Columns** (one row per alert, RFC 4180 quoting — multi-line cells stay inside quotes):
+
+| Column(s) | Meaning |
+|---|---|
+| `repository`, `alert_number`, `alert_url` | Which alert, and its Dependabot page |
+| `ghsa_id`, `cve_id`, `advisory_url` | Advisory identifiers (`cve_id` empty when none is assigned) |
+| `severity`, `cvss_score`, `cvss_vector` | CVSS v4 if present, else v3, else the legacy score (the API reports a missing version as `0.0`, treated as absent) |
+| `ecosystem`, `package`, `manifest_path` | What to change, and the file Dependabot flagged it in |
+| `relationship`, `scope` | `direct` / `transitive` / `unknown`; `runtime` / `development` |
+| `vulnerable_version_range`, `first_patched_version` | The target — an empty `first_patched_version` means no fix is published |
+| `suggested_fix` | Generic hint built from the columns above: direct → bump; transitive → upgrade the parent, or force the version via the ecosystem's override mechanism (npm `overrides` / yarn `resolutions` / pnpm `overrides`, NuGet direct `PackageReference`, …); no patch → remove or replace |
+| `summary`, `cwes`, `references` | Advisory title, CWE IDs with names, reference URLs (space-separated) |
+| `alert_created_at`, `description` | When the alert opened; the full advisory markdown (last column — often several KB) |
+
+**Spreadsheet safety:** `summary` and `description` are third-party-authored, so a leading
+`=`, `+`, `-` or `@` gets a `'` prefix (CSV-injection guard). Structured columns stay verbatim —
+e.g. GitHub's exact-version range `= 1.0.0` — because a tool acting on them needs the exact value.
+
+**Never changes the verdict:** if the CSV can't be built, the step emits a
+`[VULN-GATE] CSV report not generated` warning and uploads nothing; the gate still fails closed
+on the alert count alone. The column logic lives in the sibling `alerts_to_csv.jq`.
+
+**No caller changes:** `upload-artifact` authenticates with the runner's own token, not
+`GITHUB_TOKEN` scopes, so every existing call site gets this as-is. Its `name:` is set to the
+file name on purpose — `overwrite` deletes by `name`, while `archive: false` names the artifact
+after the file, so without it a job re-run in the same run would hit a 409 name conflict.
 
 ### Secrets — why a real PAT, not `GITHUB_TOKEN`
 
