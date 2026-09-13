@@ -96,6 +96,26 @@
 # network/registry), so an unprobed failure would silently clear every npm
 # alert in the run instead of failing closed.
 #
+# CSV REPORT (added 2026-09-13): the log and job summary only ever showed the
+# GHSA ID, package and link for each blocking alert, so fixing one meant
+# opening every alert by hand. When the gate fails on real alerts, it now also
+# writes every still-blocking alert (PR-branch-cleared ones excluded, so it
+# always matches the reported count) to critical-vulns-<repo>-<run_id>.csv --
+# advisory IDs, CVSS, package/manifest/relationship, vulnerable range, first
+# patched version, a suggested fix and the full advisory text -- and uploads
+# it as an unzipped run artifact (upload-artifact `archive: false`, kept 5
+# days) that a developer can download and hand straight to a coding agent.
+# Columns and escaping rules live in the sibling alerts_to_csv.jq. Best-effort
+# by design: if the CSV can't be built, the step warns and uploads nothing,
+# and the gate still fails closed on the alert count alone. Not produced on
+# API/token errors (nothing trustworthy to report) or on a pass.
+#
+# The upload step sets `name:` to the file name even though `archive: false`
+# names the artifact after the file anyway: upload-artifact's `overwrite`
+# deletes by the `name` input (default "artifact"), so without it a job
+# re-run -- same run, same file name -- would fail with a 409 name conflict
+# instead of replacing the earlier attempt's CSV.
+#
 # Inputs:
 #   dependabot-alerts-token  (required)  A PAT/App token (NOT GITHUB_TOKEN) with
 #                             "Dependabot alerts: read" on the target repo.
@@ -119,6 +139,10 @@
 #   critical-count  Number of open critical-severity alerts found, AFTER
 #                   PR-branch verification (see above) has cleared any it
 #                   could confirm are already fixed in this PR's branch.
+#   report-name     File (and artifact) name of the blocking-alerts CSV, e.g.
+#                   critical-vulns-my-repo-123456789.csv. Empty unless the
+#                   gate failed on real alerts AND the CSV was built.
+#   report-path     Absolute runner path of that CSV. Empty in the same cases.
 # =============================================================================
 name: 'Check Critical Dependabot Vulnerabilities'
 author: 'Simplify9'
@@ -139,6 +163,12 @@ outputs:
   critical-count:
     description: 'Number of open critical-severity Dependabot alerts found (after PR-branch verification). Set on both pass and fail.'
     value: ${{ steps.check.outputs.critical-count }}
+  report-name:
+    description: 'File (and artifact) name of the blocking-alerts CSV. Empty unless the gate failed on real alerts and the CSV was built.'
+    value: ${{ steps.check.outputs.report-name }}
+  report-path:
+    description: 'Absolute runner path of the blocking-alerts CSV. Empty in the same cases as report-name.'
+    value: ${{ steps.check.outputs.report-path }}
 
 runs:
   using: "composite"
@@ -480,9 +510,30 @@ runs:
           echo "::endgroup::"
         fi
 
+        # Blocking-alerts CSV report (see CSV REPORT in the header and
+        # alerts_to_csv.jq). Only built when there is something to fix, and
+        # never allowed to change the verdict: any failure here degrades to a
+        # warning plus empty report outputs, and the gate still fails on
+        # total_critical below. `cleared_numbers` is only set when PR-branch
+        # verification actually ran, hence the :- default under `set -u`.
+        report_name=""
+        report_path=""
+        if [[ "$total_critical" -gt 0 ]]; then
+          report_dir="${RUNNER_TEMP}/critical-vulns-report"
+          report_name="critical-vulns-${REPOSITORY##*/}-${GITHUB_RUN_ID}.csv"
+          report_path="${report_dir}/${report_name}"
+          if ! { mkdir -p "$report_dir" && jq -r --arg repo "$REPOSITORY" --arg cleared "${cleared_numbers:-}" -f "$GITHUB_ACTION_PATH/alerts_to_csv.jq" "$alerts_file" > "$report_path"; }; then
+            echo "::warning title=[VULN-GATE] CSV report not generated::Could not build ${report_name} -- no report artifact this run. The gate verdict is unaffected."
+            report_name=""
+            report_path=""
+          fi
+        fi
+
         rm -f "$alerts_file"
 
         echo "critical-count=${total_critical}" >> "$GITHUB_OUTPUT"
+        echo "report-name=${report_name}" >> "$GITHUB_OUTPUT"
+        echo "report-path=${report_path}" >> "$GITHUB_OUTPUT"
         EOF="$(dd if=/dev/urandom bs=15 count=1 status=none | base64)"
         {
           echo "alert-summary<<$EOF"
@@ -495,19 +546,40 @@ runs:
         if [[ "$total_critical" -gt 0 ]]; then
           echo "VULN_GATE_CP1_STATUS=CRITICAL ALERT FOUND" >> "$GITHUB_ENV"
           echo "::error title=[VULN-GATE] Blocked by critical Dependabot alert(s)::${REPOSITORY} has ${total_critical} open CRITICAL-severity Dependabot alert(s) - this check/pipeline is blocked until they are resolved or dismissed."
+          if [[ -n "$report_name" ]]; then
+            echo "::notice title=[VULN-GATE] Fix list: ${report_name}::Every blocking alert -- vulnerable range, first patched version, suggested fix and full advisory -- is in ${report_name} under this run's Artifacts (Summary page, kept 5 days). Download it and hand it to your coding agent."
+          fi
           printf '%s\n' "$summary_rows"
           exit 1
         fi
 
         echo "VULN_GATE_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
+    # See CSV REPORT in the header -- in particular why `name:` must equal the
+    # file name for `overwrite` to work alongside `archive: false`.
+    - name: Upload blocking-alerts CSV report
+      if: failure() && steps.check.outputs.report-path != ''
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ steps.check.outputs.report-name }}
+        path: ${{ steps.check.outputs.report-path }}
+        archive: false
+        overwrite: true
+        retention-days: 5
+        if-no-files-found: warn
+
     - name: Report failure
       if: failure()
       shell: bash
       env:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
+        REPORT_NAME: ${{ steps.check.outputs.report-name }}
       run: |
-        echo "::error title=[VULN-GATE] Critical vulnerability gate failed::${REPOSITORY} is blocked - either the Dependabot Alerts API call failed, or an open CRITICAL-severity alert exists. Checkpoint - 1) Query alerts: ${VULN_GATE_CP1_STATUS:-NOT REACHED}. See the step above for affected package(s)/advisory ID(s)."
+        report_hint=""
+        if [[ -n "$REPORT_NAME" ]]; then
+          report_hint=", or download ${REPORT_NAME} from this run's Artifacts for the full fix list"
+        fi
+        echo "::error title=[VULN-GATE] Critical vulnerability gate failed::${REPOSITORY} is blocked - either the Dependabot Alerts API call failed, or an open CRITICAL-severity alert exists. Checkpoint - 1) Query alerts: ${VULN_GATE_CP1_STATUS:-NOT REACHED}. See the step above for affected package(s)/advisory ID(s)${report_hint}."
 
     - name: Write action summary
       if: always()
@@ -515,6 +587,7 @@ runs:
       env:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
         CRITICAL_COUNT: ${{ steps.check.outputs.critical-count }}
+        REPORT_NAME: ${{ steps.check.outputs.report-name }}
       run: |
         {
           echo "## Critical Dependabot Vulnerability Check"
@@ -523,6 +596,9 @@ runs:
           echo "|-------|-------|"
           echo "| Repository | ${REPOSITORY} |"
           echo "| Open critical alerts found | ${CRITICAL_COUNT:-unknown} |"
+          if [[ -n "$REPORT_NAME" ]]; then
+            echo "| Fix list (CSV) | \`${REPORT_NAME}\` in this run's Artifacts, kept 5 days - hand it to your coding agent |"
+          fi
           echo ""
           echo "## Checkpoint Summary"
           echo ""
