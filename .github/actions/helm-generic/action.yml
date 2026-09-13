@@ -88,6 +88,13 @@ inputs:
       Applied after extra_set_values, so secrets take precedence over same-keyed non-secret values.
     required: false
     default: ''
+  secret_set_values_prefix:
+    description: |-
+      Optional text prepended to every line of secret_set_values before it is applied, e.g.
+      "environmentVariables." when the secret holds bare KEY=VALUE lines. Empty (default) applies
+      the lines as they are.
+    required: false
+    default: ''
   values_file:
     description: |-
       Optional path(s) to Helm values YAML file(s) passed via `-f`, one path per line.
@@ -367,6 +374,7 @@ runs:
         HELM_TIMEOUT: ${{ inputs.helm_timeout }}
         EXTRA_SET_VALUES: ${{ inputs.extra_set_values }}
         SECRET_SET_VALUES: ${{ inputs.secret_set_values }}
+        SECRET_SET_VALUES_PREFIX: ${{ inputs.secret_set_values_prefix }}
         VALUES_FILE: ${{ inputs.values_file }}
         EXTRA_ARGS: ${{ inputs.extra_args }}
         ATOMIC: ${{ inputs.atomic }}
@@ -426,6 +434,17 @@ runs:
         # non-secret pairs so a secret value wins over a same-keyed extra_set_values entry.
         SECRET_SET_ARGS=()
         if [ -n "${SECRET_SET_VALUES//[[:space:]]/}" ]; then
+          # secret_set_values_prefix (e.g. "environmentVariables.") is prepended to every
+          # non-blank line, for secrets that hold bare KEY=VALUE lines.
+          if [ -n "${SECRET_SET_VALUES_PREFIX:-}" ]; then
+            PREFIXED=""
+            while IFS= read -r line; do
+              line="${line#"${line%%[![:space:]]*}"}"
+              [ -z "$line" ] && continue
+              PREFIXED+="${SECRET_SET_VALUES_PREFIX}${line}"$'\n'
+            done <<< "$SECRET_SET_VALUES"
+            SECRET_SET_VALUES="$PREFIXED"
+          fi
           build_set_args --set-string mask <<< "$SECRET_SET_VALUES"
           SECRET_SET_ARGS=( ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} )
         fi

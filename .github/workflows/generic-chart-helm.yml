@@ -106,6 +106,22 @@ on:
         description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
+      image-pull-secret:
+        description: >-
+          Name of the imagePullSecret the chart references (image.pullSecret). Empty renders no
+          imagePullSecrets, for clusters that pull through an attached registry (needs
+          s9genericchart 1.0.8 or later).
+        required: false
+        default: 'sf9cr'
+        type: string
+      secret-values-prefix:
+        description: >-
+          Text prepended to every line of the helm-set-secret-values secret, e.g.
+          'environmentVariables.' when the secret holds bare KEY=VALUE lines. Empty (default)
+          applies the lines as they are.
+        required: false
+        default: ''
+        type: string
 
       # Dynamic deployment value inputs (generic, not prefixed with environment)
       environment:
@@ -692,13 +708,14 @@ jobs:
             environment=${{ inputs.environment }}
             service.targetPort=${{ inputs.service-target-port }}
             ${{ steps.ingress.outputs.ingress-values }}
-            image.pullSecret=sf9cr
+            image.pullSecret=${{ inputs.image-pull-secret }}
             ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-nginx
             ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=50m
             ${{ inputs.helm-set-values }}
 
           # Sensitive values: applied as masked --set-string (no type coercion), not --set.
           secret_set_values: ${{ secrets.helm-set-secret-values }}
+          secret_set_values_prefix: ${{ inputs.secret-values-prefix }}
 
           # Kubeconfig (raw YAML or base64; your secret works for both)
           kubeconfig_data: ${{ secrets.kubeconfig }}
