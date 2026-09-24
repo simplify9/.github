@@ -30,8 +30,12 @@ on:
         type: boolean
         default: false
 
+# Must cover every scope the reusable workflow's jobs request: a called workflow
+# can't elevate the token, so a missing scope fails the run before it starts.
+#   contents: write + security-events: read -> build, critical-vuln-gate and
+#   release_with_environment jobs
 permissions:
-  contents: read
+  contents: write
   security-events: read
 
 concurrency:

@@ -12,8 +12,11 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 │   ├── workflows/          <- reusable workflows  (workflow_call triggers)
 │   └── actions/            <- composite actions    (uses: in steps)
 ├── workflow-templates/     <- org starter templates surfaced in GitHub's "New workflow" UI
+├── scripts/fleet/          <- maintainer audits (run locally, not from CI)
 └── profile/README.md       <- org profile page
 ```
+
+`scripts/fleet/audit_template_permissions.py` (offline) checks that every template grants what its reusable workflow requests; `scripts/fleet/audit_caller_permissions.py <workflow>` (needs `gh`) checks that every org caller still starts after a `permissions:` change. Both exit 1 on any failure.
 
 Every file in `.github/workflows/` is a **reusable workflow** — it has `on: workflow_call:` (and occasionally `on: workflow_dispatch:`) and is never run standalone. Every directory in `.github/actions/` is a **composite action** with its own `action.yml`. Every file in `workflow-templates/` is a thin starter caller (paired with a `.properties.json` metadata sidecar) that GitHub offers when a user clicks "New workflow" in an org repo.
 
@@ -57,12 +60,12 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | Action | Version | Notes |
 |---|---|---|
 | `actions/checkout` | `@v7` | |
-| `actions/setup-node` | `@v6` | |
-| `actions/setup-dotnet` | `@v5` | |
-| `actions/setup-java` | `@v5` | |
+| `actions/setup-node` | `@v7` | |
+| `actions/setup-dotnet` | `@v6` | `dotnet-build` action |
+| `actions/setup-java` | `@v6.0.1` | Exact patch pin (Android + Flutter Android); Dependabot's minor/patch group bumps it |
 | `actions/upload-artifact` | `@v7` | |
 | `actions/download-artifact` | `@v8` | Always download by `name:`, never by `artifact-ids:` |
-| `actions/cache` | `@v5` (and `@v4` in some CF workflows) | |
+| `actions/cache` | `@v5` (and `@v4` in `next-cloudflare-worker.yaml`) | |
 | `azure/setup-helm` | `@v5` | Installs latest stable Helm unless a version is pinned |
 | `azure/setup-kubectl` | `@v5` | |
 | `docker/setup-buildx-action` | `@v4` | |
@@ -89,7 +92,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 
 ### Composite Actions
 - File: `.github/actions/<name>/action.yml`
-- `runs.using: "composite"` always — **all 19 actions in this repo are composite**; none are Docker- or JavaScript-based
+- `runs.using: "composite"` always — **all 20 actions in this repo are composite**; none are Docker- or JavaScript-based
 - Every `run:` step must have `shell: bash`
 - Every input must have `description:` and a sensible `default:` (or `required: true`)
 - Outputs must have a `value:` expression pointing to a step output
@@ -101,6 +104,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 - All inputs must have `description:`, `type:`, and `required:` set explicitly
 - Secrets are declared under `on.workflow_call.secrets:` — never passed as inputs
 - Branch-to-environment mapping is **not** done with `if:` checks on `github.ref` inside these workflows. Instead it is delegated to `determine-semver` via `release-branch: ${{ github.event.repository.default_branch }}`: a build on the default branch produces a clean release version + git tag; any other branch produces a qualified prerelease tag (`x.y.z-<branch>.<run>`) and is not treated as a release. Caller workflows / templates do the per-branch gating with `if: github.ref_name == '...'` and choose the GitHub Environment.
+- **Widening a job's `permissions:` is a breaking change for callers.** A called workflow can only downgrade the caller's token; if any nested job requests a scope above the caller's grant, GitHub rejects the whole run before any job starts. Every current caller pins an explicit workflow-level `permissions:` block, so unlisted scopes are `none` for them. Before merging a scope increase, run `scripts/fleet/audit_caller_permissions.py .github/workflows/<name>.yml` (it reads the requests from the file, scans every org caller on `main`/`develop`/`staging`, and exits 1 if any caller would fail to start), roll the new grant out to callers first, re-run until it reports 0, then merge. Narrowing permissions is always safe
 - Deploy jobs bind to a GitHub Environment via a `deploy-environment` / `release-environment` / `gh-environment` input (use environment protection rules for approvals), and where a deploy is optional it is gated by a boolean (`deploy: false` in `reusable-service-cicd.yml`) or by leaving the environment input empty
 
 ### Secrets vs Inputs for Helm
@@ -247,7 +251,7 @@ steps:
 
 ## Workflow Reference
 
-All twelve workflows live in `.github/workflows/`. (When in doubt, `ls .github/workflows` is the source of truth — this table is maintained, not generated.)
+All thirteen workflows live in `.github/workflows/`. (When in doubt, `ls .github/workflows` is the source of truth — this table is maintained, not generated.)
 
 ### Frontend / Cloudflare
 
@@ -282,7 +286,7 @@ Both call `generate-wrangler-config` to produce `wrangler.toml` dynamically, and
 | `flutter-ios-build.yml` | Flutter iOS -> TestFlight. `flutter build ipa` on a macOS runner; uploads from `ubuntu-latest` via App Store Connect API. Major/minor from `marketing-prefix`; patch/build counters from `pubspec.yaml` + `run_number` | `macos-runner`, `xcode-version`, `marketing-prefix`, `app-slug`, `release-environment`, `disable-release` |
 | `flutter-android-build.yml` | Flutter Android AAB -> Google Play. `flutter build appbundle` with `key.properties` signing | `app-id`, `app-slug`, `version-code-offset`, `release-environment`, `disable-release` |
 
-All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a critical alert blocks the build itself, not just the release, so CI stops wasting a runner on a release that can't ship — `critical-vuln-gate`'s own `skipped` result, e.g. build-only runs, is explicitly allowed through) and a `release_with_environment` job gated by `if: release-environment != '' && !disable-release && needs.build.result == 'success' && (needs.critical-vuln-gate.result == 'success' || == 'skipped')`, bound to the named GitHub Environment. (Earlier revisions of `release_with_environment`'s `if` checked only the input flags — since any custom job `if` replaces GitHub's implicit success()-over-`needs` check, that meant a failed build or a failed gate would NOT actually block the TestFlight/Play Store upload; fixed 2026-07-12.) They use **marketplace** release actions (`apple-actions/upload-testflight-build@v5`, `r0adkll/upload-google-play@v1`) — there is **no** Docker-based upload action. The Flutter and RN iOS workflows both reuse `ios-install-cert` / `ios-install-profile` for signing; Flutter sets up the SDK with `subosito/flutter-action@v2`. Per-branch environment selection (e.g. `android-staging` vs `android-production`) is done by the caller template's `workflow_dispatch` jobs, gated on `github.ref_name`.
+All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a critical alert blocks the build itself, not just the release, so CI stops wasting a runner on a release that can't ship — `critical-vuln-gate`'s own `skipped` result, e.g. build-only runs, is explicitly allowed through) and a `release_with_environment` job gated by `if: release-environment != '' && !disable-release && needs.build.result == 'success' && (needs.critical-vuln-gate.result == 'success' || == 'skipped')`, bound to the named GitHub Environment. (Earlier revisions of `release_with_environment`'s `if` checked only the input flags — since any custom job `if` replaces GitHub's implicit success()-over-`needs` check, that meant a failed build or a failed gate would NOT actually block the TestFlight/Play Store upload; fixed 2026-07-12.) They use **marketplace** release actions (`apple-actions/upload-testflight-build@v5`, `r0adkll/upload-google-play@v1`) — there is **no** Docker-based upload action. The Flutter and RN iOS workflows both reuse `ios-install-cert` / `ios-install-profile` for signing; Flutter sets up the SDK with `subosito/flutter-action@v2`. Per-branch environment selection (e.g. `android-staging` vs `android-production`) is done by the caller template's `develop` / `production` jobs (triggered by `push` to `develop`/`main` or `workflow_dispatch`), gated on `github.ref_name`.
 
 ### Security
 
@@ -292,32 +296,43 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 
 > **`dependabot-alerts-token` — GITHUB_TOKEN does not work here.** Confirmed by live testing (2026-07-12): the Dependabot Alerts REST API rejects the ephemeral Actions `GITHUB_TOKEN` outright ("Resource not accessible by integration"), regardless of what `permissions:` are granted anywhere in the call chain. This gate requires a real Personal Access Token or GitHub App installation token with "Dependabot alerts: read", stored as the org secret `DEPENDABOT_ALERTS_TOKEN`. Every caller — including every one of the ten reusable workflows this gate is embedded in — must explicitly forward it (`dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}` at each nesting level, ultimately sourced from `secrets.DEPENDABOT_ALERTS_TOKEN`), since custom secrets are never automatically available inside a called reusable workflow.
 
+### React Native PR gate
+
+| Workflow | Purpose | Key inputs |
+|---|---|---|
+| `react-native-contract-gate.yml` | Thin `workflow_call` wrapper around `check-react-native-contract`, producing the single check `rn-contract / check` (mark it **required** on the branch Dependabot targets, usually `develop`). Fails a PR when the resolved `react` doesn't exactly match the version `react-native`'s bundled renderer requires, or when `react` is duplicated in the tree — a runtime crash that type-check, lint, jest and Metro bundling all miss. Called from the `react-native-contract-check` template. `contents: read` only; no secrets. | `working-directory` (default `.`), `fail-on-unknown` (default `true`, fail closed), `runner` (default `ubuntu-latest`) |
+
+**Never add a `yarn install` (or any install/execute) step to this gate** — it runs on plain `pull_request` against PR-controlled `package.json`/lockfile, and installing would execute freshly-published dependency code. It reads the lockfile statically and fetches only the renderer file it needs. See the README's React Native contract section for the full rationale.
+
 ---
 
 ## Workflow Templates
 
-`workflow-templates/` holds the ten starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
+`workflow-templates/` holds the eleven starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
 
 | Template | Calls reusable workflow | Trigger |
 |---|---|---|
 | `service-cicd` | `reusable-service-cicd.yml` | `push` on `main` + `workflow_dispatch` |
-| `generic-chart-cicd` | `generic-chart-helm.yml` | `push` on `staging`, `main` + `workflow_dispatch` |
-| `next-cloudflare` | `next-cloudflare-worker.yaml` | `push` on `staging`, `main` + `workflow_dispatch` |
-| `vite-cloudflare` | `vite-cloudflare-worker.yml` | `push` on `staging`, `main` + `workflow_dispatch` |
-| `android-app` | `android-build.yml` | `workflow_dispatch` only |
-| `ios-app` | `ios-build.yml` | `workflow_dispatch` only |
-| `flutter-android-app` | `flutter-android-build.yml` | `workflow_dispatch` only |
-| `flutter-ios-app` | `flutter-ios-build.yml` | `workflow_dispatch` only |
-| `critical-vuln-check` | `critical-vuln-gate.yml` | `pull_request` on `main`, `develop` |
-| `dependabot-auto-merge` | `critical-vuln-gate.yml` (+ inline auto-merge job) | `pull_request` on `main`, `develop` |
+| `generic-chart-cicd` | `generic-chart-helm.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `next-cloudflare` | `next-cloudflare-worker.yaml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `vite-cloudflare` | `vite-cloudflare-worker.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `android-app` | `android-build.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `ios-app` | `ios-build.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `flutter-android-app` | `flutter-android-build.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `flutter-ios-app` | `flutter-ios-build.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
+| `critical-vuln-check` | `critical-vuln-gate.yml` | `pull_request_target` on `main`, `develop` |
+| `dependabot-auto-merge` | `critical-vuln-gate.yml` (+ inline auto-merge job) | `pull_request_target` on `main`, `develop` |
+| `react-native-contract-check` | `react-native-contract-gate.yml` | `pull_request` on `main`, `develop` |
 
-**When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The two Cloudflare and the two Helm-service templates gate per-branch with `if: github.ref`/`github.ref_name`; the four mobile templates are `workflow_dispatch`-only and gate the dev/prod jobs on `github.ref_name`; the two Security templates trigger on `pull_request` only (never `push`) and call `critical-vuln-gate.yml` rather than gating on branch/environment.
+**When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The deploy/build templates (both Cloudflare, `generic-chart-cicd`, and the four mobile ones) trigger on `push` to `develop`/`main` plus `workflow_dispatch`, and gate a dev job and a prod job per branch with `if:` on `github.ref` / `github.ref_name`; `service-cicd` triggers on `main` only. The two Security templates trigger on **`pull_request_target`** (never `push`): Dependabot's own PRs get no repository secrets and a read-only token under plain `pull_request`, so the gate could never read `DEPENDABOT_ALERTS_TOKEN`. That is safe only because they never check out or execute PR code. `react-native-contract-check` deliberately uses plain **`pull_request`**, because it must read the PR's own `package.json` and lockfile; it needs no secrets and must never install or run PR code.
+
+**A template's `permissions:` must cover every scope that any job in its reusable workflow requests** — including the `critical-vuln-gate` job. The template's block is the ceiling the called workflow runs under, so a missing scope makes every repo created from it fail on its first run, before any job starts ("The nested job … is requesting 'contents: write', but is only allowed 'contents: read'"). Five templates shipped broken this way after #135 bulk-added `contents: write` to the reusable workflows without updating them. Any change to a reusable workflow's or a template's `permissions:` must leave `scripts/fleet/audit_template_permissions.py` (offline, run from the repo root) reporting 0 failures.
 
 ---
 
 ## Composite Action Reference
 
-All 19 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
+All 20 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
 
 ### Versioning & Tagging
 - `determine-semver` — Computes the next `major.minor.patch` from git tags. Inputs: `major`, `minor`, `release-branch`, `current-ref`, `build-id`. Outputs: `version`, `git-tag`, `is-release`.
@@ -356,6 +371,9 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 (There is no `xcode-setup` action — CocoaPods, Ruby/Bundler, and Xcode selection are handled inline by `ios-build.yml`.)
 
+### React Native
+- `check-react-native-contract` — Static (never installs or executes PR code) check that the lockfile-resolved `react` exactly matches the version `react-native`'s shipped renderer asserts, and that `react` isn't duplicated; reads the expected version from `node_modules` when present, otherwise fetches only the renderer file from the CDN. Falls back to Fabric's `reconcilerVersion` on RN ≥ 0.86 (Paper removed) and fails closed if it still can't determine the contract. Inputs: `working-directory`, `fail-on-unknown`. Outputs: `status`, `react`, `expected-react`. Used by `react-native-contract-gate.yml`.
+
 ### Shared
 - `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` -> SUCCESS / FAILED), `details`. Used by every reusable workflow.
 - `check-critical-vulns` — Fails if the repository has any open critical-severity Dependabot alert. Uses `Link`-header cursor pagination against `GET /repos/{owner}/{repo}/dependabot/alerts?state=open&severity=critical` — this endpoint does **not** support page-number pagination (`page=N` is rejected with HTTP 400). Inputs: `dependabot-alerts-token` (required — a PAT/App token, **not** `GITHUB_TOKEN`, which cannot access this API regardless of granted permissions; see the `critical-vuln-gate.yml` note above), `repository` (defaults to the calling repo). Outputs: `critical-count`, `report-name`, `report-path`. On a failure caused by real alerts it also uploads the still-blocking alerts as an unzipped `critical-vulns-<repo>-<run_id>.csv` run artifact (5-day retention) built by the sibling `alerts_to_csv.jq` — best-effort, it can never change the verdict. The upload step's `name:` must equal the file name: `overwrite` deletes by `name`, while `archive: false` names the artifact after the file. Fails closed on every error path (network failure, missing/rejected token, bad response, or a real critical alert). Reused at three call sites: the `critical-vuln-gate` reusable workflow (PR-time check + auto-merge gate) and the build-time gate embedded in every deploy/build reusable workflow.
@@ -383,7 +401,7 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - **NDK defaults to `27.1.12297006` (r27b LTS)** for RN 0.85, overridable per caller via the `android-ndk-version` input, and installed via `sdkmanager`, not `actions/cache` — `/usr/local/lib/android/sdk/` is root-owned on GitHub-hosted runners, so `tar` extraction fails with `Cannot utime` / `Cannot change mode`. `sdkmanager` has the correct elevated permissions. The step **skips the install when `/usr/local/lib/android/sdk/ndk/<version>` already exists**: `sdkmanager` installs side-by-side, and the runner image already ships several NDKs (27.3/28.2/29.0 on ubuntu-24.04), so an unconditional install added ~2.8 GB of a second copy the build never resolved. Callers should set `android-ndk-version` to the `ndkVersion` in their own `android/build.gradle`; an empty string skips NDK setup entirely.
 - **Runner disk exhaustion is the Android pipeline's signature failure — never debug the reported Gradle task first.** A release RN build does not fit next to everything `ubuntu-24.04` preinstalls. A full filesystem truncates the JVM's writes rather than refusing them, so Gradle fails in whichever task was writing at the time and the error names the wrong culprit: a cut-off merged baseline profile surfaces as `:app:compileReleaseArtProfile` -> `Class rules don't support flags, but 'HSP' were specified`; a cut-off AAB surfaces as `:app:signReleaseBundle` / `:app:packageReleaseBundle` -> `Location not within channel boundaries`; only sometimes does the honest `java.io.IOException: No space left on device` appear. It is timing-dependent, so **the same commit can fail and then pass on re-run** — that non-determinism is the tell. The `free-disk-space` input (default `true`) reclaims ~20 GB of unused toolchains before anything downloads; the build prints free space before and after Gradle, and the failure report emits an explicit out-of-disk error under 1 GB. Only set `free-disk-space: false` if a caller genuinely needs .NET/GHC/Swift/PowerShell/CodeQL in the same job.
 - **`gradle-react-native-architectures` (default `arm64-v8a`) overwrites `reactNativeArchitectures` in the project's `gradle.properties`** — the workflow wins over whatever is checked in, so a caller's checked-in value is not what CI builds. `arm64-v8a` alone is the right default for current production devices and keeps the AAB small; a caller that genuinely needs more (say `armeabi-v7a` for old 32-bit installs) passes the list explicitly. Adding `x86`/`x86_64` is almost always wrong — they are emulator targets and mostly inflate the bundle. Decide it per app; do not infer the intent from a checked-in `abiFilters` list, which is frequently stale relative to what the app actually ships.
-- **Node.js 24 opt-in:** both jobs set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` so `actions/cache`, `actions/setup-java@v5`, and `gradle/actions/setup-gradle@v5` use Node 24 ahead of GitHub's Node 20 retirement.
+- **Node.js 24 opt-in:** both jobs set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` so `actions/cache`, `actions/setup-java@v6.0.1`, and `gradle/actions/setup-gradle@v5` use Node 24 ahead of GitHub's Node 20 retirement.
 - `use-jetifier` (default `true`) runs `npx jetify` for AndroidX migration; disable for projects that don't need it.
 
 ---
@@ -412,7 +430,7 @@ All 19 actions are composite. Call them in job steps with `uses: simplify9/.gith
 4. Bind deploy/release jobs to a GitHub Environment input and gate optional deploys with a boolean (`deploy:`) or an empty-environment check
 5. Upload artifacts with `retention-days: 1` unless the artifact has a cross-pipeline use case
 6. Call `write-job-summary` (with `status: ${{ job.status }}`) at the end of each job
-7. If the workflow should be offered as a starter, add a paired `workflow-templates/<name>.yml` + `.properties.json`
+7. If the workflow should be offered as a starter, add a paired `workflow-templates/<name>.yml` + `.properties.json`, whose `permissions:` grants every scope the workflow's jobs request (verify with `scripts/fleet/audit_template_permissions.py`)
 
 ---
 

@@ -35,10 +35,11 @@ on:
     branches: [develop, main]
   workflow_dispatch:
 
-# The reusable workflow only checks out the repo and deploys via the Cloudflare
-# API token; no write scopes are needed.
+# Must cover every scope the reusable workflow's jobs request: a called workflow
+# can't elevate the token, so a missing scope fails the run before it starts.
+#   contents: write + security-events: read -> critical-vuln-gate and deploy jobs
 permissions:
-  contents: read
+  contents: write
   security-events: read
 
 concurrency:
