@@ -262,6 +262,8 @@ All thirteen workflows live in `.github/workflows/`. (When in doubt, `ls .github
 
 Both call `generate-wrangler-config` to produce `wrangler.toml` dynamically, and `write-job-summary`.
 
+`vite-cloudflare-worker.yml`'s deploy job can install private `@simplify9/*` npm packages from GitHub Packages with the built-in token: it requests `contents: read, packages: read`, exports `GITHUB_TOKEN` **job-wide** (Yarn 1 expands `${GITHUB_TOKEN}` in `.npmrc` on *every* invocation — setup-node's `yarn cache dir`, install, lint, build, and wrangler-action's `yarn wrangler` — and aborts with `Failed to replace env in config` if it is unset, so a per-step env is not enough), and writes a job-scoped user npmrc (`NPM_CONFIG_USERCONFIG`) holding the `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` **placeholder**, so a repo `.npmrc` with only the scope line works. Callers must grant `packages: read`; each consuming repo needs Read under the package's **Manage Actions access**. `next-cloudflare-worker.yaml` does **not** have this yet.
+
 ### Service / Backend (Docker + Helm -> Kubernetes)
 
 | Workflow | Purpose | Key inputs |

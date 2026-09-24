@@ -22,7 +22,24 @@
 #   cloudflare_api_token   (required)  Cloudflare API token (Workers + DNS).
 #   cloudflare_account_id  (required)  Cloudflare Account ID.
 #
+# Permissions (the CALLER must grant at least these -- a called workflow can't
+# elevate the token, so a missing scope fails the run before any job starts):
+#   contents: write, security-events: read   critical-vuln-gate job
+#   contents: read,  packages: read          deploy job
+#
+# Private npm packages (@simplify9/* on GitHub Packages, npm.pkg.github.com):
+#   The deploy job exports the built-in GITHUB_TOKEN (no PAT/secret needed) and
+#   configures npm.pkg.github.com auth, so the repo .npmrc only needs:
+#     @simplify9:registry=https://npm.pkg.github.com
+#   (a committed `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` line also
+#   works). One-time per consuming repo: in each package's settings -> Manage
+#   Actions access, add the repo with Read access, or installs return 403.
+#
 # Usage:
+#   permissions:
+#     contents: write
+#     security-events: read
+#     packages: read
 #   jobs:
 #     deploy:
 #       uses: simplify9/.github/.github/workflows/vite-cloudflare-worker.yml@main
@@ -157,10 +174,20 @@ jobs:
     concurrency:
       group: deploy-${{ inputs.project_name }}-${{ inputs.environment }}
       cancel-in-progress: false
+    # The token is exported to every step below (see env), so dependency
+    # install scripts can see it: keep it to read-only repo + package access.
+    # packages: read lets yarn/npm/pnpm install @simplify9/* from GitHub
+    # Packages. The CALLER must grant packages: read too (a called workflow
+    # can't elevate), or the run fails to start.
     permissions:
-      contents: write
-
-      security-events: read
+      contents: read
+      packages: read
+    # Job-level, not per-step: yarn 1 expands ${GITHUB_TOKEN} in .npmrc on
+    # EVERY invocation (setup-node's `yarn cache dir`, install, lint, build and
+    # wrangler-action's `yarn wrangler`) and aborts with "Failed to replace env
+    # in config" when it is unset.
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Announce deploy job
         env:
@@ -183,6 +210,20 @@ jobs:
           # No git writes after checkout; don't leave the token in .git/config for
           # later install/build steps.
           persist-credentials: false
+
+      # Auth for npm.pkg.github.com, so a repo .npmrc only needs the scope line
+      # (@simplify9:registry=https://npm.pkg.github.com) and local installs don't
+      # break when GITHUB_TOKEN is unset. Writes the ${GITHUB_TOKEN} placeholder,
+      # never the token; a repo .npmrc with its own _authToken line still wins.
+      # Same job-scoped user-config mechanism setup-node's registry-url uses.
+      - name: Configure GitHub Packages auth
+        run: |
+          set -euo pipefail
+          NPMRC="${RUNNER_TEMP}/.npmrc"
+          if [[ -f "${HOME}/.npmrc" ]]; then cp "${HOME}/.npmrc" "$NPMRC"; fi
+          # shellcheck disable=SC2016 # literal placeholder, expanded by the package manager
+          printf '%s\n' '//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}' >> "$NPMRC"
+          echo "NPM_CONFIG_USERCONFIG=${NPMRC}" >> "$GITHUB_ENV"
 
       # Enable Corepack BEFORE setup-node so its pnpm cache can resolve the
       # pnpm binary. (Only needed for pnpm.)
