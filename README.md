@@ -222,6 +222,8 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
+**Required caller permissions:** `contents: write` + `security-events: read` (critical-vuln gate) and `packages: read` (deploy job), exactly as for [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml). Private `@simplify9/*` npm packages from GitHub Packages work the same way too (built-in `GITHUB_TOKEN`, scope-only `.npmrc`, one-time **Manage Actions access** grant): see that section.
+
 ---
 
 #### `vite-cloudflare-worker.yml`
@@ -1571,7 +1573,7 @@ If the bad commit is on more than one branch, repeat on each affected branch.
 - Vite (`vite-cloudflare-worker.yml`): set `assets_dir: dist`.
 - Next.js (`next-cloudflare-worker.yaml`): default `assets_dir` is `.open-next/assets` — change only if your build differs.
 
-### Vite: `@simplify9/*` package install fails (GitHub Packages)
+### Vite / Next.js: `@simplify9/*` package install fails (GitHub Packages)
 
 | Symptom | Cause | Fix |
 |---|---|---|
