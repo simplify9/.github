@@ -32,10 +32,12 @@ on:
 
 # Must cover every scope the reusable workflow's jobs request: a called workflow
 # can't elevate the token, so a missing scope fails the run before it starts.
-#   contents: write + security-events: read -> critical-vuln-gate and deploy jobs
+#   contents: write + security-events: read -> critical-vuln-gate job
+#   packages: read -> deploy job installs @simplify9/* from GitHub Packages
 permissions:
   contents: write
   security-events: read
+  packages: read
 
 concurrency:
   group: vite-cf-${{ github.workflow }}-${{ github.ref }}

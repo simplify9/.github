@@ -222,6 +222,8 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
+**Required caller permissions:** `contents: write` + `security-events: read` (critical-vuln gate) and `packages: read` (deploy job), exactly as for [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml). Private `@simplify9/*` npm packages from GitHub Packages work the same way too (built-in `GITHUB_TOKEN`, scope-only `.npmrc`, one-time **Manage Actions access** grant): see that section.
+
 ---
 
 #### `vite-cloudflare-worker.yml`
@@ -243,6 +245,23 @@ Builds a Vite single-page app and deploys it to Cloudflare Workers **static asse
 **Required secrets:** `cloudflare_api_token`, `cloudflare_account_id`, `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — pass `secrets.DEPENDABOT_ALERTS_TOKEN`; `GITHUB_TOKEN` cannot access this API regardless of granted permissions)
 
 > Unlike the Next.js workflow, `route` is **required** here.
+
+**Required caller permissions:** `contents: write` + `security-events: read` (critical-vuln gate) and `packages: read` (deploy job). A called workflow can't elevate the token, so a caller whose `permissions:` block omits any of these fails before a job starts ("The nested job 'deploy' is requesting 'packages: read', but is only allowed 'packages: none'").
+
+```yaml
+permissions:
+  contents: write
+  security-events: read
+  packages: read
+```
+
+**Private `@simplify9/*` npm packages (GitHub Packages):** the deploy job exports the built-in `GITHUB_TOKEN` (no PAT or extra secret) and configures auth for `npm.pkg.github.com` itself, so the repo's `.npmrc` only needs the scope mapping:
+
+```ini
+@simplify9:registry=https://npm.pkg.github.com
+```
+
+A committed `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}` line also works in CI, but it makes Yarn 1 refuse to run on any machine where `GITHUB_TOKEN` isn't exported, so prefer the scope-only form and set the token per machine (`npm config set //npm.pkg.github.com/:_authToken <token with read:packages>`). **One-time per consuming repo:** open each package's settings -> **Manage Actions access** -> add the repo with **Read**, or installs return 401/403.
 
 ---
 
@@ -1553,6 +1572,14 @@ If the bad commit is on more than one branch, repeat on each affected branch.
 
 - Vite (`vite-cloudflare-worker.yml`): set `assets_dir: dist`.
 - Next.js (`next-cloudflare-worker.yaml`): default `assets_dir` is `.open-next/assets` — change only if your build differs.
+
+### Vite / Next.js: `@simplify9/*` package install fails (GitHub Packages)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Run fails before any job starts: `The nested job 'deploy' is requesting 'packages: read', but is only allowed 'packages: none'` | The caller's `permissions:` block omits `packages: read` | Add `packages: read` to the caller workflow's `permissions:` on **every** branch that triggers it (`develop` and `main`) |
+| `Setup Node.js` fails: `error Error: Failed to replace env in config: ${GITHUB_TOKEN}` | Yarn 1 found `${GITHUB_TOKEN}` in `.npmrc` with the variable unset (only on a workflow version before the fix, or locally) | Re-run on the current `@main`; locally, export `GITHUB_TOKEN` or switch `.npmrc` to the scope-only form above |
+| `Install dependencies` fails: `401 Unauthorized` / `403 Forbidden` from `npm.pkg.github.com` | The consuming repo hasn't been granted access to the package | Package settings -> **Manage Actions access** -> add the repo with **Read** |
 
 ### Helm parse error: "SSL: command not found" or malformed `--set` value
 
