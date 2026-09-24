@@ -70,15 +70,16 @@ This repo also ships **org workflow templates** (`workflow-templates/`) that app
 | Template (in "New workflow") | Wraps | Default triggers |
 |---|---|---|
 | Service CI/CD Pipeline | `reusable-service-cicd.yml` | `push` -> `main`, `workflow_dispatch` |
-| Generic Chart Helm CI/CD | `generic-chart-helm.yml` | `push` -> `staging`/`main`, `workflow_dispatch` |
-| Next.js + Cloudflare Workers | `next-cloudflare-worker.yaml` | `push` -> `staging`/`main`, `workflow_dispatch` |
-| Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` -> `staging`/`main`, `workflow_dispatch` |
-| Android App CI/CD | `android-build.yml` | `workflow_dispatch` |
-| iOS App CI/CD | `ios-build.yml` | `workflow_dispatch` |
-| Flutter Android App CI/CD | `flutter-android-build.yml` | `workflow_dispatch` |
-| Flutter iOS App CI/CD | `flutter-ios-build.yml` | `workflow_dispatch` |
-| Critical Vulnerability Check | `critical-vuln-gate.yml` | `pull_request` -> `main`, `develop` |
-| Dependabot Auto-Merge | `critical-vuln-gate.yml` | `pull_request` -> `main`, `develop` |
+| Generic Chart Helm CI/CD | `generic-chart-helm.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| Next.js + Cloudflare Workers | `next-cloudflare-worker.yaml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| Android App CI/CD | `android-build.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| iOS App CI/CD | `ios-build.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| Flutter Android App CI/CD | `flutter-android-build.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| Flutter iOS App CI/CD | `flutter-ios-build.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
+| Critical Vulnerability Check | `critical-vuln-gate.yml` | `pull_request_target` -> `main`, `develop` |
+| Dependabot Auto-Merge | `critical-vuln-gate.yml` | `pull_request_target` -> `main`, `develop` |
+| React Native Contract Check | `react-native-contract-gate.yml` | `pull_request` -> `main`, `develop` |
 
 ---
 
