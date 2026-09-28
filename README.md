@@ -738,7 +738,7 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
-**Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed). Also forwards `github-token: secrets.GITHUB_TOKEN` to `check-critical-vulns` so it can verify npm alerts against the PR's own branch — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock) below.
+**Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed). Also forwards `github-token: secrets.GITHUB_TOKEN` to `check-critical-vulns` so it can verify npm and direct Maven alerts against the PR's own branch — see [PR-branch verification](#pr-branch-verification--breaking-the-fix-your-own-block-deadlock) below.
 
 ---
 
@@ -750,7 +750,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` and `parse_maven_pom.py` for PR-branch verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -811,7 +811,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
-| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; outputs `critical-count`, `report-name`, `report-path`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When it fails on real alerts, uploads every still-blocking alert as an unzipped `critical-vulns-<repo>-<run_id>.csv` run artifact (`alerts_to_csv.jq` sibling filter) — see [Blocking-alerts CSV report](#blocking-alerts-csv-report--a-fix-list-to-hand-to-an-agent). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR's own HEAD branch lockfile (`parse_yarn_lock.py` sibling script for `yarn.lock`; `package-lock.json` handled inline via `jq`) — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
+| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; outputs `critical-count`, `report-name`, `report-path`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When it fails on real alerts, uploads every still-blocking alert as an unzipped `critical-vulns-<repo>-<run_id>.csv` run artifact (`alerts_to_csv.jq` sibling filter) — see [Blocking-alerts CSV report](#blocking-alerts-csv-report--a-fix-list-to-hand-to-an-agent). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR-head lockfile and direct Maven alerts against the PR-head `pom.xml` (`parse_yarn_lock.py` and `parse_maven_pom.py` are sibling parsers) — see [PR-branch verification](#pr-branch-verification--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
 
 ---
 
@@ -1081,17 +1081,17 @@ explicit branch-aware logic so it isn't skipped when `vuln-gate` itself was skip
 - **PR-time** (`critical-vuln-check.yml` + branch protection): on `main`, mark the check **required** in branch protection — merge is physically blocked while any critical alert is open. On `develop`, leave it present but **not required** — a visible red check, no block.
 - **Build-time** (embedded directly as an early job in 10 of the 11 other reusable workflows in this repo — everything except the chart-lint-only `gateway-chart-cicd.yml` — triggered on `push`, not `pull_request`): re-checks at actual deploy time. This is **not** subject to the Dependabot secrets restriction below (that restriction is specific to `pull_request`-family events; `push` never carries it), and it's the real safety net on any repo where branch protection can't enforce anything at all — e.g. private repos on a plan tier below GitHub Team/Enterprise, where classic branch protection is unavailable outright (`403: Upgrade to GitHub Pro`). The build-time gate still blocks an actual release even with zero branch protection configured.
 
-### PR-branch verification (npm only) — breaking the fix-your-own-block deadlock
+### PR-branch verification — breaking the fix-your-own-block deadlock
 
 A critical alert only clears once its fix lands on the **default** branch — GitHub never
 re-scans a PR's own branch. That's a real deadlock on `main`: a PR that itself contains the
 fix for the only open critical alert could never merge, because the alert was still "open"
 by definition until that exact merge happened.
 
-`check-critical-vulns` breaks this for **npm** specifically. When it runs under
+`check-critical-vulns` breaks this for **npm and direct Maven dependencies**. When it runs under
 `pull_request_target` (i.e. from `critical-vuln-gate.yml`, not the build-time embedded uses,
-which run on `push` and have no PR to compare against), it re-checks every open
-npm-ecosystem alert against the PR's own HEAD branch: it reads the flagged package's
+which run on `push` and have no PR to compare against), it re-checks supported open
+alerts against the PR's own HEAD branch. For npm, it reads the flagged package's
 **lockfile** (`package-lock.json` or `yarn.lock` — not the manifest, which shows a requested
 range, not the resolved version) at the PR head ref, and if **every** resolved occurrence of
 that package falls outside the alert's `vulnerable_version_range`, that alert no longer
@@ -1100,6 +1100,12 @@ resolves to different versions at different points in the dependency tree (confi
 `form-data` resolved to both a patched version nested under one dependency and a vulnerable
 version at the top level, in the same lockfile) — one unpatched occurrence still means the
 vulnerability is present.
+
+For Maven, the action reads the alert's exact `pom.xml` at the PR head. It accepts one
+direct dependency with a literal version or a property defined in that POM. It checks the
+version against the alert's vulnerable range. Profile overrides, missing or inherited
+versions, non-three-part versions, and unsupported range forms stay blocking. The action
+parses the POM as data; it does not run Maven or PR code.
 
 **Lockfile fallback:** if the alert's recorded `manifest_path` genuinely 404s at the PR head
 (the PR deleted it — e.g. it migrated `package-lock.json` -> `yarn.lock` as part of the fix,
@@ -1134,8 +1140,8 @@ at all (registry unreachable, no network), so an unchecked failure here would si
 skipped entirely for that run (all alerts stay blocking), the same fail-closed fallback as a
 missing `github-token`.
 
-**Scope, deliberately narrow:** this only applies to the npm ecosystem for now (NuGet,
-Composer, pip, Maven, GitHub Actions, and Docker all still fail closed, exactly as before —
+**Scope, deliberately narrow:** npm and simple direct Maven declarations can clear. NuGet,
+Composer, pip, GitHub Actions, and Docker still fail closed, exactly as before —
 a genuinely open, unrelated critical alert still blocks the PR, whatever ecosystem it's in).
 An org-wide audit (2026-07-14) found npm makes up 96% of open critical alerts here, so this
 covers the overwhelming majority of real cases; the rest still need the manual `fix_started`
@@ -1246,7 +1252,7 @@ write-heavy scripts concurrently with it — they likely share the same abuse-de
 even though the vulnerability is actually gone.** Confirmed live on
 `gig-insureapp-survey-mobile#40`: the dev deleted `package-lock.json` and moved to
 `yarn.lock` + `resolutions` as part of the fix. The alert's recorded `manifest_path` still
-said `package-lock.json` — [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock)
+said `package-lock.json` — [PR-branch verification](#pr-branch-verification--breaking-the-fix-your-own-block-deadlock)
 tried to read that exact file at the PR head, got nothing (it no longer existed), and per its
 fail-closed design left all 5 alerts blocking, even though every flagged package was already
 resolved to a patched version in the new `yarn.lock`. Fixed org-wide (2026-07-23):

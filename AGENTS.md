@@ -298,6 +298,8 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 
 > **`dependabot-alerts-token` — GITHUB_TOKEN does not work here.** Confirmed by live testing (2026-07-12): the Dependabot Alerts REST API rejects the ephemeral Actions `GITHUB_TOKEN` outright ("Resource not accessible by integration"), regardless of what `permissions:` are granted anywhere in the call chain. This gate requires a real Personal Access Token or GitHub App installation token with "Dependabot alerts: read", stored as the org secret `DEPENDABOT_ALERTS_TOKEN`. Every caller — including every one of the ten reusable workflows this gate is embedded in — must explicitly forward it (`dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}` at each nesting level, ultimately sourced from `secrets.DEPENDABOT_ALERTS_TOKEN`), since custom secrets are never automatically available inside a called reusable workflow.
 
+PR-time `check-critical-vulns` verification reads npm lockfiles and direct Maven `pom.xml` versions from the PR head. The Maven parser only accepts a literal or same-POM property version for one direct dependency and fails closed on profile overrides or versions it cannot verify. Build-time gates still query alerts on the default branch.
+
 ### React Native PR gate
 
 | Workflow | Purpose | Key inputs |
