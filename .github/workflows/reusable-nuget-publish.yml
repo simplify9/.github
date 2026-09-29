@@ -33,7 +33,9 @@
 #   Optional:
 #     major-version       string  SemVer major component.         (default: '1')
 #     minor-version       string  SemVer minor component.         (default: '0')
-#     dotnet-version      string  .NET SDK version to install.    (default: '8.0.x')
+#     dotnet-version      string  .NET SDK version to install.    (default: '10.0.x')
+#                                 A newer SDK also builds older target
+#                                 frameworks (e.g. net8.0); it never retargets.
 #     run-tests           boolean Run test-projects after build. (default: false)
 #     test-projects       string  Glob of test .csproj files.    (default: '**/*Tests/*.csproj')
 #
@@ -49,6 +51,11 @@
 #     github-token        Token for git tagging; falls back to GITHUB_TOKEN.
 #                         Only needed when tags must trigger other workflows
 #                         (GITHUB_TOKEN-created events never do).
+#
+#   NuGet Trusted Publishing (OIDC instead of a long-lived API key) cannot be
+#   used here: nuget.org requires the token's job_workflow_ref to be in the same
+#   repository as the trusted-publishing policy, and this reusable workflow
+#   lives in simplify9/.github.  Upstream: https://github.com/NuGet/login/issues/24
 #
 # OUTPUTS:
 #   version       The version the packages were pushed with (see VERSIONING).
@@ -122,9 +129,9 @@ on:
         default: '0'
         type: string
       dotnet-version:
-        description: 'Dotnet version to use'
+        description: '.NET SDK version to install (builds older target frameworks too)'
         required: false
-        default: '8.0.x'
+        default: '10.0.x'
         type: string
       run-tests:
         description: 'Whether to run test-projects after building'
@@ -170,10 +177,11 @@ concurrency:
 
 jobs:
   version:
+    name: Version
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: read    # read git tags to compute the next version
     outputs:
       git-tag: ${{ steps.semver.outputs.git-tag }}
       is-release: ${{ steps.semver.outputs.is-release }}
@@ -219,8 +227,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
-      security-events: read
+      contents: read          # nothing is checked out; read is the floor
+      security-events: read   # the alerts query itself uses dependabot-alerts-token
     steps:
       - name: Check for open critical Dependabot alerts
         uses: simplify9/.github/.github/actions/check-critical-vulns@main
@@ -236,6 +244,7 @@ jobs:
           status: ${{ job.status }}
 
   nuget:
+    name: NuGet
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [version, critical-vuln-gate]
@@ -248,7 +257,7 @@ jobs:
           && (needs.critical-vuln-gate.result == 'success'
               || needs.critical-vuln-gate.result == 'skipped') }}
     permissions:
-      contents: read
+      contents: read    # checkout
       packages: write   # in case nuget-source targets a GitHub Packages feed
     steps:
       - name: Checkout code
@@ -289,6 +298,7 @@ jobs:
             | Branch | `${{ github.ref_name }}` |
 
   tag:
+    name: Tag
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [version, nuget]
@@ -300,7 +310,7 @@ jobs:
           && needs.version.result == 'success'
           && needs.nuget.result == 'success' }}
     permissions:
-      contents: write
+      contents: write   # create the git tag (when github-token falls back to GITHUB_TOKEN)
     steps:
       - name: Tag new version on GitHub origin
         uses: simplify9/.github/.github/actions/tag-github-origin@main

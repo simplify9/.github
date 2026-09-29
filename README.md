@@ -489,7 +489,7 @@ Use [`reusable-service-cicd.yml`](#reusable-service-cicdyml) instead when the re
 |---|---|---|---|
 | `nuget-projects` | Yes | — | `.csproj` path(s)/glob(s) to pack and push; space- or newline-separated (YAML `\|` / `>-` block). Every project is still built |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
-| `dotnet-version` | | `8.0.x` | .NET SDK |
+| `dotnet-version` | | `10.0.x` | .NET SDK (also builds older target frameworks such as `net8.0`) |
 | `run-tests` | | `false` | Boolean — run `test-projects` after the build |
 | `test-projects` | | `**/*Tests/*.csproj` | Test project glob |
 

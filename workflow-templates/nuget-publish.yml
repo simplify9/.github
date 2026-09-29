@@ -28,22 +28,22 @@ on:
     branches: [main]                         # REPLACE if your release branch differs
   workflow_dispatch:
 
-# The ceiling for the reusable workflow's jobs: tag (contents: write), nuget
-# (packages: write, for GitHub Packages feeds), and the critical-vuln gate
-# (security-events: read). The reusable's own per-job permissions narrow them.
-permissions:
-  contents: write
-  packages: write
-  security-events: read
+# No token scopes by default. The Publish job grants the ceiling the reusable
+# workflow's jobs run under; each of its jobs narrows it further.
+permissions: {}
 
 jobs:
   Publish:
+    permissions:
+      contents: write         # tag job: create the git tag
+      packages: write         # nuget job: only used when pushing to a GitHub Packages feed
+      security-events: read   # critical-vuln gate job
     uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@main
     with:
       nuget-projects: 'src/MyLib/MyLib.csproj' # REPLACE: path(s)/glob(s), space- or newline-separated
       major-version: '1'                     # REPLACE: SemVer major
       minor-version: '0'                     # REPLACE: SemVer minor
-      # dotnet-version: '8.0.x'
+      # dotnet-version: '10.0.x'
       # run-tests: true
       # test-projects: '**/*UnitTests/*.csproj'
     secrets:
