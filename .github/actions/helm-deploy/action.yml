@@ -148,13 +148,11 @@ inputs:
   helm-version:
     description: 'Helm version to install'
     required: false
-    # Pinned, like helm-generic: `latest` let an unattended run upgrade Helm under
-    # a pipeline that had not changed (callers may still override).
-    default: 'v4.2.2'
+    default: 'latest'
   kubectl-version:
     description: 'kubectl version to install'
     required: false
-    default: 'v1.35.0'
+    default: 'latest'
 
 outputs:
   chart-url:

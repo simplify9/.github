@@ -66,7 +66,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `actions/upload-artifact` | `@v7` | |
 | `actions/download-artifact` | `@v8` | Always download by `name:`, never by `artifact-ids:` |
 | `actions/cache` | `@v5` (and `@v4` in `next-cloudflare-worker.yaml`) | |
-| `azure/setup-helm` | `@v5` | Installs latest stable Helm unless a version is pinned. `helm-deploy` and `helm-generic` pin helm v4.2.2 / kubectl v1.35.0 (defaults; callers may override) |
+| `azure/setup-helm` | `@v5` | Installs latest stable Helm unless a version is pinned |
 | `azure/setup-kubectl` | `@v5` | |
 | `docker/setup-buildx-action` | `@v4` | |
 | `docker/setup-qemu-action` | `@v4` | Multi-platform builds |

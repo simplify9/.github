@@ -784,7 +784,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose | Key inputs |
 |---|---|---|
 | `helm-generic` | `helm upgrade --install` of `s9genericchart` (default) + optional pre-deploy migration Job. Helm 4. snake_case inputs | `app_name`, `namespace`, `kubeconfig_data`, `extra_set_values`, `secret_set_values`, `init_job_image` |
-| `helm-deploy` | Deploy from OCI **or** ChartMuseum (`chart-source-type`); helm v4.2.2 / kubectl v1.35.0 (defaults; callers may override) | `chart-name`, `repository`, `kubeconfig`, `chart-source-type`, `chart-repo-url` |
+| `helm-deploy` | Deploy from OCI **or** ChartMuseum (`chart-source-type`) | `chart-name`, `repository`, `kubeconfig`, `chart-source-type`, `chart-repo-url` |
 | `helm-deploy-s9generic` | Deploy from OCI **or** a local chart dir (`chart-path`) with failure diagnostics | `chart-name`, `chart-path`, `kubeconfig` |
 | `helm-package-push` | Package + publish to OCI or ChartMuseum | `chart-path`, `chart-name`, `version`, `publish-method` |
 
