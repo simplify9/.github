@@ -453,18 +453,19 @@ on:
         description: Generated NuGet package version
         value: ${{ jobs.nuget.outputs.version }}
 
-# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
   workflow_dispatch:
+
+# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-# Least-privilege default for every job (most just check out code). Jobs that
-# need more (build pushes images; tag writes tags) widen this explicitly below.
+# Workflow-level default. Every job below sets its own permissions, which
+# replace this block for that job.
 permissions:
   contents: write
-
   security-events: read
+
 env:
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.app-name || github.repository }}

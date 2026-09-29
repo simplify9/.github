@@ -256,8 +256,10 @@ on:
         description: 'Generated NuGet package version'
         value: ${{ jobs.nuget.outputs.version }}
 
-# Deny-all by default; every job opts into exactly the scopes it needs below.
   workflow_dispatch:
+
+# Workflow-level default. Every job below sets its own permissions, which
+# replace this block for that job.
 permissions:
   contents: write
   security-events: read
