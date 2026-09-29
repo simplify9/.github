@@ -44,6 +44,11 @@
 #     nuget-api-key       API key for the NuGet feed.
 #   Optional:
 #     nuget-source        NuGet feed URL.  Defaults to nuget.org v3.
+#     nuget-restore-token Token for restoring from a private feed, exposed to
+#                         the restore/build step as NUGET_AUTH_TOKEN.  The
+#                         repo's nuget.config must reference it, e.g.
+#                         <add key="ClearTextPassword" value="%NUGET_AUTH_TOKEN%" />
+#                         (with Username %GITHUB_ACTOR% for GitHub Packages).
 #     dependabot-alerts-token  PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot
 #                         alerts: read' for the release-time critical-vuln gate.
 #                         Pass secrets.DEPENDABOT_ALERTS_TOKEN.  Not used on
@@ -150,6 +155,11 @@ on:
         required: true
       nuget-source:
         description: 'NuGet source URL (defaults to nuget.org v3)'
+        required: false
+      nuget-restore-token:
+        description: "Token for restoring from a private feed; exposed to the
+          restore/build step as NUGET_AUTH_TOKEN for a nuget.config credential
+          written as %NUGET_AUTH_TOKEN%"
         required: false
       dependabot-alerts-token:
         description: "PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot alerts: read'
@@ -267,6 +277,10 @@ jobs:
 
       - name: Dotnet Restore, Build, and Test
         uses: simplify9/.github/.github/actions/dotnet-build@main
+        env:
+          # Read by a nuget.config credential written as %NUGET_AUTH_TOKEN%.
+          # Scoped to this step: pack runs with --no-build and never restores.
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
         with:
           projects: "**/*.csproj"
           test-projects: ${{ inputs.test-projects }}
