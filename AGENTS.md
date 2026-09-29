@@ -368,7 +368,9 @@ All 20 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ### .NET
 - `dotnet-build` — Resolves a build target (existing `*.sln` or an ephemeral generated one), then `restore` -> `build` -> optional `test`. Output: `build-target`.
-- `dotnet-pack-push` — `dotnet pack --no-build` -> `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. Outputs: `packages-pushed`, `package-paths`.
+- `dotnet-pack-push` — `dotnet pack --no-build` -> `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. A push whose CLI output says `already exists at feed` counts as skipped, never as pushed. Outputs: `packages-pushed`, `packages-skipped`, `package-paths` (newly pushed only).
+- **`dotnet-version` is a floor, not a selector** on GitHub-hosted runners: SDKs 8/9/10 are preinstalled in `/usr/share/dotnet` (where `setup-dotnet` also installs), so the newest SDK builds unless a `global.json` pins one. The org runners carry SDK 8 only, so there it selects. Every .NET default is `10.0.x`.
+- **NuGet jobs wait for `critical-vuln-gate`** (`needs: [version, critical-vuln-gate]`, run when it succeeded or was skipped) in every workflow that publishes packages — never let a package push race the gate.
 
 **Project-list inputs** (`projects` / `test-projects` on `dotnet-build`, `projects` on `dotnet-pack-push`, and the `nuget-projects` workflow input) accept one or more glob patterns as a **space- OR newline-separated** list. A YAML `|` block scalar (one project per line) is honoured in full. These are split with `read -rd '' -a` — plain `read -ra` stops at the first newline and silently drops every entry after the first, so never revert to it.
 
