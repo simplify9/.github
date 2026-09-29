@@ -148,13 +148,57 @@ runs:
           echo "DOCKER_CP2_STATUS=PENDING"
         } >> "$GITHUB_ENV"
 
+    # Some self-hosted runners of the organisation carry no Docker daemon;
+    # their image builds go to a shared BuildKit named by two variables in the
+    # RUNNER'S environment. GitHub-hosted runners have neither variable and
+    # keep the local builder exactly as before. This must be a shell step: the
+    # `env` expression context holds only variables the workflow defines, never
+    # the runner process's environment.
+    - name: Detect shared builder
+      id: builder
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -n "${S9_BUILDKIT_ENDPOINT:-}" && -n "${S9_BUILDKIT_TLS_DIR:-}" ]]; then
+          {
+            echo "remote=true"
+            echo "endpoint=${S9_BUILDKIT_ENDPOINT}"
+            echo "tls-dir=${S9_BUILDKIT_TLS_DIR}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Builder: shared BuildKit (remote driver)"
+        else
+          echo "remote=false" >> "$GITHUB_OUTPUT"
+          echo "Builder: local (docker-container driver)"
+        fi
+
+    - name: Refuse multi-platform builds on the shared builder
+      if: ${{ steps.builder.outputs.remote == 'true' && inputs.platforms != 'linux/amd64' }}
+      shell: bash
+      env:
+        PLATFORMS: ${{ inputs.platforms }}
+      run: |
+        echo "::error title=Multi-platform build on a self-hosted runner::platforms='${PLATFORMS}' needs QEMU, which this runner cannot provide. Build linux/amd64 here, or run this repository on GitHub-hosted runners."
+        exit 1
+
     - name: Set up QEMU
       # Only needed for non-native/multi-arch builds; skip for the single-arch linux/amd64 default to save setup time.
-      if: ${{ inputs.platforms != 'linux/amd64' }}
+      if: ${{ inputs.platforms != 'linux/amd64' && steps.builder.outputs.remote != 'true' }}
       uses: docker/setup-qemu-action@v4
 
     - name: Set up Docker Buildx
+      if: ${{ steps.builder.outputs.remote != 'true' }}
       uses: docker/setup-buildx-action@v4
+
+    - name: Set up Docker Buildx (shared BuildKit)
+      if: ${{ steps.builder.outputs.remote == 'true' }}
+      uses: docker/setup-buildx-action@v4
+      with:
+        driver: remote
+        endpoint: ${{ steps.builder.outputs.endpoint }}
+        driver-opts: |
+          cacert=${{ steps.builder.outputs.tls-dir }}/ca.crt
+          cert=${{ steps.builder.outputs.tls-dir }}/tls.crt
+          key=${{ steps.builder.outputs.tls-dir }}/tls.key
 
     - name: Log in to Container Registry
       uses: docker/login-action@v4
@@ -213,6 +257,12 @@ runs:
     - name: Build and push Docker image
       id: build
       uses: docker/build-push-action@v7
+      env:
+        # The shared builder keeps no build history (it would let one
+        # repository read another's build arguments), so there is no record to
+        # summarise; left on, the step ends with a "no record found" warning.
+        DOCKER_BUILD_SUMMARY: ${{ steps.builder.outputs.remote == 'true' && 'false' || 'true' }}
+        DOCKER_BUILD_RECORD_UPLOAD: ${{ steps.builder.outputs.remote == 'true' && 'false' || 'true' }}
       with:
         context: ${{ inputs.context }}
         file: ${{ inputs.dockerfile }}
@@ -222,8 +272,11 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         platforms: ${{ inputs.platforms }}
-        cache-from: ${{ inputs.cache == 'true' && 'type=gha' || '' }}
-        cache-to: ${{ inputs.cache == 'true' && 'type=gha,mode=max' || '' }}
+        # The shared builder keeps its cache on its own disk; exporting to the
+        # GitHub cache would only push layers over the runner's uplink and
+        # fill the 10 GB per-repository limit.
+        cache-from: ${{ inputs.cache == 'true' && steps.builder.outputs.remote != 'true' && 'type=gha' || '' }}
+        cache-to: ${{ inputs.cache == 'true' && steps.builder.outputs.remote != 'true' && 'type=gha,mode=max' || '' }}
         # provenance: false — deliberate DOCR compatibility choice. DOCR surfaces attestation manifests as
         # phantom unknown/unknown platform entries, interfering with the registry UI and GC.
         # Docker Hub and GHCR support attestations natively; re-enable if targeting those registries.
@@ -251,7 +304,9 @@ runs:
         VERSION: ${{ inputs.version }}
         REGISTRY: ${{ inputs.registry }}
       run: |
-        echo "::error title=Docker build failed for $IMAGE_NAME:$VERSION::Registry $REGISTRY - auth: ${DOCKER_CP1_STATUS:-NOT REACHED} | build/push: ${DOCKER_CP2_STATUS:-NOT REACHED}"
+        builder="local"
+        [[ -n "${S9_BUILDKIT_ENDPOINT:-}" ]] && builder="shared BuildKit at ${S9_BUILDKIT_ENDPOINT} - if it is unreachable, the organisation's CI runbook covers it"
+        echo "::error title=Docker build failed for $IMAGE_NAME:$VERSION::Registry $REGISTRY - auth: ${DOCKER_CP1_STATUS:-NOT REACHED} | build/push: ${DOCKER_CP2_STATUS:-NOT REACHED} | builder: ${builder}"
 
 branding:
   icon: 'package'
