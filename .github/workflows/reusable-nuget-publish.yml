@@ -178,7 +178,7 @@ concurrency:
 jobs:
   version:
     name: Version
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read    # read git tags to compute the next version
@@ -224,7 +224,7 @@ jobs:
     name: Dependabot Check
     needs: version
     if: ${{ needs.version.outputs.is-release == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read          # nothing is checked out; read is the floor
@@ -245,7 +245,7 @@ jobs:
 
   nuget:
     name: NuGet
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     needs: [version, critical-vuln-gate]
     # Explicit guard required: a custom `if` replaces GitHub's implicit
@@ -299,7 +299,7 @@ jobs:
 
   tag:
     name: Tag
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     needs: [version, nuget]
     # Tag only after a successful publish so tags never reference an
