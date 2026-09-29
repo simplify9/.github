@@ -763,7 +763,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 
 | Action | Purpose | Key inputs | Key outputs |
 |---|---|---|---|
-| `docker-build-push` | Build + push (multi-platform via Buildx/QEMU) up to three tags | `image-name`, `version`, `username`, `password`, `registry`, `platforms` | `image-tags`, `image-digest` |
+| `docker-build-push` | Build + push (multi-platform via Buildx/QEMU) up to three tags. On a self-hosted runner that provides a shared BuildKit (`S9_BUILDKIT_ENDPOINT`), builds there instead — no GitHub cache, linux/amd64 only | `image-name`, `version`, `username`, `password`, `registry`, `platforms` | `image-tags`, `image-digest` |
 
 ### Helm
 
