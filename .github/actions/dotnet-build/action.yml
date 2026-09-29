@@ -176,9 +176,13 @@ runs:
           fi
           echo "Resolved ${#BUILD_SET[@]} project(s):"
           printf '  - %s\n' "${BUILD_SET[@]}"
-          target="${RUNNER_TEMP:-/tmp}/__ci_build.sln"
-          rm -f "$target"
-          dotnet new sln --name "__ci_build" --output "${RUNNER_TEMP:-/tmp}" >/dev/null
+          sln_dir="${RUNNER_TEMP:-/tmp}"
+          rm -f "$sln_dir/__ci_build.sln" "$sln_dir/__ci_build.slnx"
+          dotnet new sln --name "__ci_build" --output "$sln_dir" >/dev/null
+          # SDK 10+ writes .slnx by default, older SDKs .sln (SDK 8 has no --format
+          # flag), so use whichever file was created.
+          target="$sln_dir/__ci_build.sln"
+          [[ -f "$target" ]] || target="$sln_dir/__ci_build.slnx"
           dotnet sln "$target" add "${BUILD_SET[@]}" >/dev/null
           echo "Generated ephemeral solution: $target"
         fi
