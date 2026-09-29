@@ -185,7 +185,7 @@ concurrency:
 jobs:
   version:
     name: Version Compute
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     outputs:
       version: ${{ steps.semver.outputs.version }}
@@ -243,7 +243,7 @@ jobs:
 
   validate-chart:
     name: Validate Chart
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     needs: [version]
     steps:
@@ -440,7 +440,7 @@ jobs:
 
   package-and-push:
     name: Package and push chart
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     needs: [version, validate-chart]
     outputs:
@@ -635,7 +635,7 @@ jobs:
 
   tag:
     name: Tag release
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     needs: [version, validate-chart, package-and-push]
     # Tag only after a fully successful publish, so tags never reference an

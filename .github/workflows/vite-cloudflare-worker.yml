@@ -143,7 +143,7 @@ jobs:
   critical-vuln-gate:
     name: Dependabot Check
     if: ${{ github.ref_name == github.event.repository.default_branch }}
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -167,7 +167,7 @@ jobs:
     if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || 
       needs.critical-vuln-gate.result == 'skipped') }}
     name: Deploy ${{ inputs.environment }}
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     # Prevent overlapping deploys to the same project/environment from racing.
     # Do not cancel an in-flight deploy mid-rollout.

@@ -151,13 +151,19 @@ google-play-service-account-json  # Google Play service account JSON
 ## Where Jobs Run
 
 Every Linux job in these workflows uses
-`runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}` (Android build jobs:
-`S9_RUNNER_ANDROID`). If your repository can see that organisation variable,
-its jobs run on Simplify9's self-hosted runners; otherwise on GitHub-hosted
-`ubuntu-latest`, exactly as before. Callers change nothing. Public
-repositories are never given the variable. macOS/iOS jobs always run on
-GitHub-hosted macOS. The Android workflows' `ubuntu-runner` input, if set to
-anything but `ubuntu-latest`, still wins.
+`runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}`
+(Android build jobs: `S9_RUNNER_ANDROID`). If your repository can see
+`S9_RUNNER`, its jobs run on Simplify9's self-hosted runners; otherwise on the
+GitHub-hosted label in the organisation variable `S9_HOSTED_RUNNER`
+(`ubuntu-24.04`). Callers change nothing. Public repositories are never given
+`S9_RUNNER`. macOS/iOS jobs always run on GitHub-hosted macOS. The Android
+workflows' `ubuntu-runner` input, if set to anything but `ubuntu-latest`,
+still wins.
+
+Why not `ubuntu-latest`: GitHub moves it to Ubuntu 26.04 between 2026-10-19
+and 2026-11-19 (actions/runner-images #14748). Keeping the label in one
+organisation variable means the move to 26.04 happens once, deliberately,
+for every repository.
 
 ---
 
