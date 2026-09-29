@@ -251,7 +251,7 @@ steps:
 
 ## Workflow Reference
 
-All thirteen workflows live in `.github/workflows/`. (When in doubt, `ls .github/workflows` is the source of truth — this table is maintained, not generated.)
+All fourteen workflows live in `.github/workflows/`. (When in doubt, `ls .github/workflows` is the source of truth — this table is maintained, not generated.)
 
 ### Frontend / Cloudflare
 
@@ -272,6 +272,14 @@ Both workflows' deploy jobs can install private `@simplify9/*` npm packages from
 | `generic-chart-helm.yml` | Full CI/CD deploying `s9genericchart` over **ingress-nginx**, with optional EF Core migration init Job; tags after a successful deploy | `app-name`, `namespace`, `ingress-hosts`, `init-job-image` |
 | `generic-gateway-helm-template.yml` | Gateway-first CI/CD deploying `s9genericchart-v2` behind the **Cilium Gateway API** (auto-onboards listeners + cert-manager Certificates); supports `gateway`/`ingress`/`dual` | `app-name`, `gateway-hostnames`, `routing-mode`, `gateway-section-names` |
 | `helm-deploy-values.yml` | Deploy-only: deploys an already-published chart from a ChartMuseum-style repo using a caller values file (no build/package/tag) | `release-name`, `chart-name`, `chart-repo`, `namespace`, `values-file` |
+
+### .NET Library (NuGet only)
+
+| Workflow | Purpose | Key inputs |
+|---|---|---|
+| `reusable-nuget-publish.yml` | Library repos with no Dockerfile/chart: semver -> critical-vuln gate (release only) -> build/optional test -> pack + push -> tag. The package is pushed with `determine-semver`'s `git-tag`, so non-default branches publish a prerelease, never a stable version | `nuget-projects` (required), `major-version`, `minor-version`, `run-tests` (boolean) |
+
+Never point a NuGet-only library at `reusable-service-cicd.yml`: its `ci` job (Docker + Helm) fails without a Dockerfile/chart, `tag` is skipped, and every later run recomputes the same version, which `dotnet-pack-push`'s `--skip-duplicate` silently no-ops, so nothing new ever ships.
 
 ### Helm Chart Development
 
@@ -296,7 +304,7 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 |---|---|---|
 | `critical-vuln-gate.yml` | Thin `workflow_call` wrapper around `check-critical-vulns` — fails if the calling repo has an open critical-severity Dependabot alert. Called from the `critical-vuln-check` and `dependabot-auto-merge` workflow-templates, and embedded as an early job in every deploy/build reusable workflow. | none (secret: `dependabot-alerts-token`, required — see note below) |
 
-> **`dependabot-alerts-token` — GITHUB_TOKEN does not work here.** Confirmed by live testing (2026-07-12): the Dependabot Alerts REST API rejects the ephemeral Actions `GITHUB_TOKEN` outright ("Resource not accessible by integration"), regardless of what `permissions:` are granted anywhere in the call chain. This gate requires a real Personal Access Token or GitHub App installation token with "Dependabot alerts: read", stored as the org secret `DEPENDABOT_ALERTS_TOKEN`. Every caller — including every one of the ten reusable workflows this gate is embedded in — must explicitly forward it (`dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}` at each nesting level, ultimately sourced from `secrets.DEPENDABOT_ALERTS_TOKEN`), since custom secrets are never automatically available inside a called reusable workflow.
+> **`dependabot-alerts-token` — GITHUB_TOKEN does not work here.** Confirmed by live testing (2026-07-12): the Dependabot Alerts REST API rejects the ephemeral Actions `GITHUB_TOKEN` outright ("Resource not accessible by integration"), regardless of what `permissions:` are granted anywhere in the call chain. This gate requires a real Personal Access Token or GitHub App installation token with "Dependabot alerts: read", stored as the org secret `DEPENDABOT_ALERTS_TOKEN`. Every caller — including every one of the eleven reusable workflows this gate is embedded in — must explicitly forward it (`dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}` at each nesting level, ultimately sourced from `secrets.DEPENDABOT_ALERTS_TOKEN`), since custom secrets are never automatically available inside a called reusable workflow.
 
 ### React Native PR gate
 
@@ -310,11 +318,12 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 
 ## Workflow Templates
 
-`workflow-templates/` holds the eleven starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
+`workflow-templates/` holds the twelve starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
 
 | Template | Calls reusable workflow | Trigger |
 |---|---|---|
 | `service-cicd` | `reusable-service-cicd.yml` | `push` on `main` + `workflow_dispatch` |
+| `nuget-publish` | `reusable-nuget-publish.yml` | `push` on `main` + `workflow_dispatch` |
 | `generic-chart-cicd` | `generic-chart-helm.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
 | `next-cloudflare` | `next-cloudflare-worker.yaml` | `push` on `develop`, `main` + `workflow_dispatch` |
 | `vite-cloudflare` | `vite-cloudflare-worker.yml` | `push` on `develop`, `main` + `workflow_dispatch` |
@@ -326,7 +335,7 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 | `dependabot-auto-merge` | `critical-vuln-gate.yml` (+ inline auto-merge job) | `pull_request_target` on `main`, `develop` |
 | `react-native-contract-check` | `react-native-contract-gate.yml` | `pull_request` on `main`, `develop` |
 
-**When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The deploy/build templates (both Cloudflare, `generic-chart-cicd`, and the four mobile ones) trigger on `push` to `develop`/`main` plus `workflow_dispatch`, and gate a dev job and a prod job per branch with `if:` on `github.ref` / `github.ref_name`; `service-cicd` triggers on `main` only. The two Security templates trigger on **`pull_request_target`** (never `push`): Dependabot's own PRs get no repository secrets and a read-only token under plain `pull_request`, so the gate could never read `DEPENDABOT_ALERTS_TOKEN`. That is safe only because they never check out or execute PR code. `react-native-contract-check` deliberately uses plain **`pull_request`**, because it must read the PR's own `package.json` and lockfile; it needs no secrets and must never install or run PR code.
+**When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The deploy/build templates (both Cloudflare, `generic-chart-cicd`, and the four mobile ones) trigger on `push` to `develop`/`main` plus `workflow_dispatch`, and gate a dev job and a prod job per branch with `if:` on `github.ref` / `github.ref_name`; `service-cicd` and `nuget-publish` trigger on `main` only. The two Security templates trigger on **`pull_request_target`** (never `push`): Dependabot's own PRs get no repository secrets and a read-only token under plain `pull_request`, so the gate could never read `DEPENDABOT_ALERTS_TOKEN`. That is safe only because they never check out or execute PR code. `react-native-contract-check` deliberately uses plain **`pull_request`**, because it must read the PR's own `package.json` and lockfile; it needs no secrets and must never install or run PR code.
 
 **A template's `permissions:` must cover every scope that any job in its reusable workflow requests** — including the `critical-vuln-gate` job. The template's block is the ceiling the called workflow runs under, so a missing scope makes every repo created from it fail on its first run, before any job starts ("The nested job … is requesting 'contents: write', but is only allowed 'contents: read'"). Five templates shipped broken this way after #135 bulk-added `contents: write` to the reusable workflows without updating them. Any change to a reusable workflow's or a template's `permissions:` must leave `scripts/fleet/audit_template_permissions.py` (offline, run from the repo root) reporting 0 failures.
 

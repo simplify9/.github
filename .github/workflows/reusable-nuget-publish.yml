@@ -1,0 +1,323 @@
+# =============================================================================
+# Reusable NuGet Library Publish Pipeline
+# =============================================================================
+#
+# PURPOSE:
+#   CI/CD for .NET library repositories that ship NuGet packages only — no
+#   Docker image, no Helm chart.  Computes a semantic version, blocks a release
+#   while the repo has an open critical Dependabot alert, restores and builds
+#   (optionally tests), packs and pushes the packages, and only then tags the
+#   Git origin.  Called by per-repo caller workflows via `workflow_call`.
+#
+#   A repo that also ships a service (Dockerfile + Helm chart) should use
+#   reusable-service-cicd.yml instead; its nuget-projects input covers the SDK.
+#
+# USAGE:
+#   jobs:
+#     publish:
+#       uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@main
+#       with:
+#         nuget-projects: 'src/MyLib/MyLib.csproj'
+#         major-version: '2'
+#         minor-version: '1'
+#       secrets:
+#         nuget-api-key: ${{ secrets.SWNUGETKEY }}
+#         dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+#
+# INPUTS:
+#   Required:
+#     nuget-projects      string  .csproj path(s)/glob(s) to pack and push; one
+#                                 or more, space- or newline-separated (YAML
+#                                 `|` block).  Every project in the repo is
+#                                 restored and built; only these are packed.
+#   Optional:
+#     major-version       string  SemVer major component.         (default: '1')
+#     minor-version       string  SemVer minor component.         (default: '0')
+#     dotnet-version      string  .NET SDK version to install.    (default: '8.0.x')
+#     run-tests           boolean Run test-projects after build. (default: false)
+#     test-projects       string  Glob of test .csproj files.    (default: '**/*Tests/*.csproj')
+#
+# SECRETS:
+#   Required:
+#     nuget-api-key       API key for the NuGet feed.
+#   Optional:
+#     nuget-source        NuGet feed URL.  Defaults to nuget.org v3.
+#     dependabot-alerts-token  PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot
+#                         alerts: read' for the release-time critical-vuln gate.
+#                         Pass secrets.DEPENDABOT_ALERTS_TOKEN.  Not used on
+#                         non-default branches, where the gate is skipped.
+#     github-token        Token for git tagging; falls back to GITHUB_TOKEN.
+#                         Only needed when tags must trigger other workflows
+#                         (GITHUB_TOKEN-created events never do).
+#
+# OUTPUTS:
+#   version       The version the packages were pushed with (see VERSIONING).
+#
+# VERSIONING:
+#   The package version is determine-semver's git-tag output, so the pushed
+#   package and the git tag always carry the same string.  On the default
+#   branch that is a clean release (e.g. 8.1.19).  On any other branch (e.g. a
+#   workflow_dispatch from a feature branch) it is a SemVer prerelease (e.g.
+#   8.1.19-my-branch.42), which consumers on stable version ranges never pick
+#   up, so a branch build can never ship as a stable release.
+#
+# PERMISSIONS:
+#   The workflow defaults to `contents: read` and grants each job only what it
+#   needs (least privilege):
+#     version             contents: read                   Reads git tags.
+#     critical-vuln-gate  contents: read, security-events: read
+#     nuget               contents: read, packages: write  Optional GitHub
+#                                                          Packages feed.
+#     tag                 contents: write                  Creates the git tag.
+#   Callers must grant contents: write, packages: write, security-events: read.
+#
+#   SECURITY: This template consumes publish secrets.  Only invoke it from
+#   trusted events (push to a protected branch, workflow_dispatch).  Never wire
+#   a caller to `pull_request_target` or fork `pull_request` triggers.
+#
+# CONCURRENCY:
+#   Runs are serialized per ref so concurrent pushes cannot compute the same
+#   patch version and collide when tagging.  In-flight publishes are never
+#   cancelled (cancel-in-progress: false) to avoid interrupting a feed push.
+#
+# JOBS:
+#   version             Computes semver via determine-semver from git tags.
+#   critical-vuln-gate  (default branch only) Fails on any open critical
+#                       Dependabot alert, so nothing is packed or pushed.
+#   nuget               Restores, builds, optionally tests, then packs and
+#                       pushes nuget-projects (--skip-duplicate).
+#   tag                 Creates the git tag — only after nuget succeeds, so a
+#                       tag never points at a version that was not published.
+#
+# DEPENDENCIES:
+#   Composite actions (simplify9/.github):
+#     determine-semver@main     Computes next SemVer from existing git tags.
+#     check-critical-vulns@main Fails on open critical Dependabot alerts.
+#     dotnet-build@main         Restores, builds, and optionally tests.
+#     dotnet-pack-push@main     Packs and pushes NuGet packages.
+#     tag-github-origin@main    Creates a git tag via the REST API.
+#     write-job-summary@main    Per-job run summary.
+#   External actions:
+#     actions/checkout@v7       Standard repository checkout.
+# =============================================================================
+
+name: Reusable NuGet Library Publish Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      nuget-projects:
+        description: 'NuGet projects to pack and push (path(s)/glob(s), space- or
+          newline-separated).'
+        required: true
+        type: string
+      major-version:
+        description: 'Major version number'
+        required: false
+        default: '1'
+        type: string
+      minor-version:
+        description: 'Minor version number'
+        required: false
+        default: '0'
+        type: string
+      dotnet-version:
+        description: 'Dotnet version to use'
+        required: false
+        default: '8.0.x'
+        type: string
+      run-tests:
+        description: 'Whether to run test-projects after building'
+        required: false
+        default: false
+        type: boolean
+      test-projects:
+        description: 'Test projects to run (glob pattern)'
+        required: false
+        default: '**/*Tests/*.csproj'
+        type: string
+
+    secrets:
+      nuget-api-key:
+        description: 'NuGet API key'
+        required: true
+      nuget-source:
+        description: 'NuGet source URL (defaults to nuget.org v3)'
+        required: false
+      dependabot-alerts-token:
+        description: "PAT/App token (NOT GITHUB_TOKEN) with 'Dependabot alerts: read'
+          for the release-time critical-vuln gate -- GITHUB_TOKEN cannot access this
+          API regardless of granted permissions."
+        required: false
+      github-token:
+        description: 'GitHub token for tagging (falls back to GITHUB_TOKEN)'
+        required: false
+
+    outputs:
+      version:
+        description: 'Version the NuGet packages were pushed with'
+        value: ${{ jobs.version.outputs.git-tag }}
+
+# Default to least privilege; each job escalates only what it needs.
+permissions:
+  contents: read
+
+# Serialize runs per ref so concurrent pushes cannot race the tag-based
+# semver computation.  Never cancel an in-flight publish mid-push.
+concurrency:
+  group: nuget-publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      git-tag: ${{ steps.semver.outputs.git-tag }}
+      is-release: ${{ steps.semver.outputs.is-release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # Full history + all tags so determine-semver reads them locally.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine semantic version
+        id: semver
+        uses: simplify9/.github/.github/actions/determine-semver@main
+        with:
+          major: ${{ inputs.major-version }}
+          minor: ${{ inputs.minor-version }}
+          # Only the default branch produces a clean release version; other
+          # branches get a prerelease (e.g. 8.1.19-my-branch.42).
+          release-branch: ${{ github.event.repository.default_branch }}
+          current-ref: ${{ github.ref_name }}
+          build-id: ${{ github.run_number }}
+
+      - name: Write version job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Version Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Package version | `${{ steps.semver.outputs.git-tag }}` |
+            | Release | `${{ steps.semver.outputs.is-release }}` |
+            | Branch | `${{ github.ref_name }}` |
+            | SHA | `${{ github.sha }}` |
+            | Triggered by | ${{ github.actor }} |
+
+  critical-vuln-gate:
+    name: Dependabot Check
+    needs: version
+    if: ${{ needs.version.outputs.is-release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      security-events: read
+    steps:
+      - name: Check for open critical Dependabot alerts
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
+          repository: ${{ github.repository }}
+
+      - name: Write job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Critical Dependabot Vulnerability Gate
+          status: ${{ job.status }}
+
+  nuget:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [version, critical-vuln-gate]
+    # Explicit guard required: a custom `if` replaces GitHub's implicit
+    # success()-over-all-needs check, and critical-vuln-gate is skipped on
+    # non-release runs, so 'skipped' must be allowed here.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success'
+              || needs.critical-vuln-gate.result == 'skipped') }}
+    permissions:
+      contents: read
+      packages: write   # in case nuget-source targets a GitHub Packages feed
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Dotnet Restore, Build, and Test
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        with:
+          projects: "**/*.csproj"
+          test-projects: ${{ inputs.test-projects }}
+          configuration: "Release"
+          dotnet-version: ${{ inputs.dotnet-version }}
+          run-tests: ${{ inputs.run-tests }}
+
+      - name: Pack and Push NuGet Package
+        uses: simplify9/.github/.github/actions/dotnet-pack-push@main
+        with:
+          projects: ${{ inputs.nuget-projects }}
+          configuration: "Release"
+          version: ${{ needs.version.outputs.git-tag }}
+          api-key: ${{ secrets.nuget-api-key }}
+          nuget-source: ${{ secrets.nuget-source ||
+            'https://api.nuget.org/v3/index.json' }}
+
+      - name: Write nuget job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: NuGet Publish Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Version | `${{ needs.version.outputs.git-tag }}` |
+            | Projects | `${{ inputs.nuget-projects }}` |
+            | Branch | `${{ github.ref_name }}` |
+
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [version, nuget]
+    # Tag only after a successful publish so tags never reference an
+    # unpublished version.  Explicit because success() would also look at the
+    # (legitimately skipped) critical-vuln-gate further up the chain.
+    if: >-
+      ${{ !cancelled()
+          && needs.version.result == 'success'
+          && needs.nuget.result == 'success' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Tag new version on GitHub origin
+        uses: simplify9/.github/.github/actions/tag-github-origin@main
+        with:
+          github-token: ${{ secrets.github-token || secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          tag: ${{ needs.version.outputs.git-tag }}
+          sha: ${{ github.sha }}
+
+      - name: Write tag job summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Tag Job
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Tag | `${{ needs.version.outputs.git-tag }}` |
+            | SHA | `${{ github.sha }}` |
