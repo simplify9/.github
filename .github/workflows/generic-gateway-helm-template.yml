@@ -547,7 +547,17 @@ jobs:
   nuget:
     name: NuGet
     runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
-    if: ${{ inputs.package-nuget }}
+    # Wait for the critical-vuln gate so an open critical alert blocks the
+    # package push too, not just the image build. The gate is skipped on
+    # non-release runs, so 'skipped' must be allowed (a custom `if` replaces
+    # the implicit success() check).
+    needs: [version, critical-vuln-gate]
+    if: >-
+      ${{ !cancelled()
+          && inputs.package-nuget
+          && needs.version.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success'
+              || needs.critical-vuln-gate.result == 'skipped') }}
     timeout-minutes: 30
     permissions:
       contents: write
