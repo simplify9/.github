@@ -472,7 +472,7 @@ env:
 jobs:
   version:
     name: Versioning
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: write
@@ -525,7 +525,7 @@ jobs:
     name: Dependabot Check
     needs: version
     if: ${{ needs.version.outputs.is-release == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -546,7 +546,7 @@ jobs:
 
   nuget:
     name: NuGet
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     if: ${{ inputs.package-nuget }}
     timeout-minutes: 30
     permissions:
@@ -575,6 +575,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # `dotnet nuget add source` below needs a dotnet on PATH. GitHub-hosted
+      # images have one preinstalled; self-hosted runner images need not.
+      - name: Set up .NET for the NuGet feed
+        if: ${{ env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 
+          'pkg.github.com') }}
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
       - name: Configure GitHub Packages feed
         if: ${{ env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 
           'pkg.github.com') }}
@@ -584,10 +593,9 @@ jobs:
           FEED_PASSWORD: ${{ secrets.nuget-api-key }}
         run: |
           # --store-password-in-clear-text writes the PAT into the repo-local
-          # nuget.config. This is a Linux limitation (no OS credential store) and is
-          # fine on ephemeral GitHub-hosted runners. On SELF-HOSTED / reused runners
-          # the file lingers in the workspace — scrub it (e.g. `dotnet nuget remove
-          # source github` in an always() post-step) if self-hosted runners are used.
+          # nuget.config (Linux has no credential store). Runners are ephemeral -
+          # GitHub-hosted VMs and the organisation's self-hosted pods alike serve
+          # one job - so the file dies with the job.
           dotnet nuget remove source github || true
           dotnet nuget add source "$FEED_URL" \
             --name github \
@@ -643,7 +651,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     needs: [version, nuget, critical-vuln-gate]
     # packages: write covers the registry-password fallback to GITHUB_TOKEN when
@@ -719,7 +727,7 @@ jobs:
 
   deploy:
     name: Deploy
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     needs: [version, build, critical-vuln-gate]
     # Cluster access is via the kubeconfig secret, not GITHUB_TOKEN — only
@@ -915,7 +923,7 @@ jobs:
 
   tag:
     name: Tag
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     needs: [version, nuget, build, deploy]
     # Tag only after a successful deploy so tags always reference a shipped version.
