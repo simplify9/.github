@@ -57,7 +57,7 @@ on:
   workflow_call:
     inputs:
       ubuntu-runner:
-        description: GitHub-hosted Ubuntu runner label
+        description: Runner label override. Leave at ubuntu-latest to let the organisation route the job (self-hosted if this repository is enrolled, else GitHub-hosted).
         required: false
         type: string
         default: ubuntu-latest
@@ -289,7 +289,7 @@ jobs:
       ${{ inputs.release-environment != ''
           && !inputs.disable-release
           && github.ref_name == github.event.repository.default_branch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -310,7 +310,11 @@ jobs:
 
   build:
     name: Build
-    runs-on: ${{ inputs.ubuntu-runner }}
+    # An explicit caller label wins. Otherwise: the organisation's self-hosted
+    # Android pool if this repository can see S9_RUNNER_ANDROID, else
+    # GitHub-hosted. Pool names never appear in this public repository.
+    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER_ANDROID || 'ubuntu-latest' }}
+    timeout-minutes: 90
     needs: critical-vuln-gate
     # critical-vuln-gate is conditionally skipped (build-only runs, or
     # release-environment unset), so 'skipped' must be allowed here or every
@@ -858,7 +862,8 @@ jobs:
 
   release_with_environment:
     name: Release
-    runs-on: ${{ inputs.ubuntu-runner }}
+    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
     needs: [build, critical-vuln-gate]
     # Release path with GitHub Environment protection/approvals.
     # FIX: the previous `if` only checked the input flags, never needs.*.result —

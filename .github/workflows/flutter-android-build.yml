@@ -40,7 +40,7 @@ on:
     inputs:
       # ── Runner & toolchain ──────────────────────────────────────────────────
       ubuntu-runner:
-        description: GitHub-hosted Ubuntu runner label
+        description: Runner label override. Leave at ubuntu-latest to let the organisation route the job (self-hosted if this repository is enrolled, else GitHub-hosted).
         required: false
         type: string
         default: ubuntu-latest
@@ -248,7 +248,7 @@ jobs:
       ${{ inputs.release-environment != ''
           && !inputs.disable-release
           && github.ref_name == github.event.repository.default_branch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -269,7 +269,10 @@ jobs:
 
   build:
     name: Android Build
-    runs-on: ${{ inputs.ubuntu-runner }}
+    # An explicit caller label wins. Otherwise: the organisation's self-hosted
+    # Android pool if this repository can see S9_RUNNER_ANDROID, else
+    # GitHub-hosted. Pool names never appear in this public repository.
+    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER_ANDROID || 'ubuntu-latest' }}
     timeout-minutes: 60
     needs: critical-vuln-gate
     # critical-vuln-gate is conditionally skipped (build-only runs, or
@@ -387,7 +390,9 @@ jobs:
         with:
           flutter-version: ${{ inputs.flutter-version }}
           channel: ${{ inputs.flutter-channel }}
-          cache: true
+          # Self-hosted runner images carry the Flutter SDK already; restoring a
+          # multi-GB cache over the network there only costs time and quota.
+          cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Install dependencies${{ inputs.run-analyze && ' & analyze' || '' 
           }}
@@ -734,7 +739,7 @@ jobs:
           && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
       == 'skipped')
       }}
-    runs-on: ${{ inputs.ubuntu-runner }}
+    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     environment: ${{ inputs.release-environment }}
     # Serialize uploads on the same ref but never cancel one in flight — a
