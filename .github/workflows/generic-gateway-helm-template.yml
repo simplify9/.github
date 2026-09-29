@@ -88,9 +88,9 @@ on:
         default: '**/*.csproj'
         type: string
       dotnet-version:
-        description: Dotnet SDK version for nuget packaging
+        description: '.NET SDK for NuGet packaging (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
         required: false
-        default: 8.0.x
+        default: '10.0.x'
         type: string
       test-projects:
         description: Test projects glob
@@ -453,18 +453,19 @@ on:
         description: Generated NuGet package version
         value: ${{ jobs.nuget.outputs.version }}
 
-# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
   workflow_dispatch:
+
+# Serialize runs per ref so concurrent pushes cannot race the semver tag computation.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-# Least-privilege default for every job (most just check out code). Jobs that
-# need more (build pushes images; tag writes tags) widen this explicitly below.
+# Workflow-level default. Every job below sets its own permissions, which
+# replace this block for that job.
 permissions:
   contents: write
-
   security-events: read
+
 env:
   CONTAINER_REGISTRY: ${{ inputs.container-registry }}
   IMAGE_NAME: ${{ inputs.app-name || github.repository }}
@@ -547,7 +548,17 @@ jobs:
   nuget:
     name: NuGet
     runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
-    if: ${{ inputs.package-nuget }}
+    # Wait for the critical-vuln gate so an open critical alert blocks the
+    # package push too, not just the image build. The gate is skipped on
+    # non-release runs, so 'skipped' must be allowed (a custom `if` replaces
+    # the implicit success() check).
+    needs: [version, critical-vuln-gate]
+    if: >-
+      ${{ !cancelled()
+          && inputs.package-nuget
+          && needs.version.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success'
+              || needs.critical-vuln-gate.result == 'skipped') }}
     timeout-minutes: 30
     permissions:
       contents: write

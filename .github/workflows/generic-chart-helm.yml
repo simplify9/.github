@@ -35,9 +35,9 @@ on:
         default: '**/*.csproj'
         type: string
       dotnet-version:
-        description: '.NET SDK version to use for NuGet packaging and the test-before-build job'
+        description: '.NET SDK for NuGet packaging and the test-before-build job (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
         required: false
-        default: '8.0.x'
+        default: '10.0.x'
         type: string
       test-projects:
         description: 'Test projects to run before packing, and before the image build when test-before-build is true (glob pattern)'
@@ -256,8 +256,10 @@ on:
         description: 'Generated NuGet package version'
         value: ${{ jobs.nuget.outputs.version }}
 
-# Deny-all by default; every job opts into exactly the scopes it needs below.
   workflow_dispatch:
+
+# Workflow-level default. Every job below sets its own permissions, which
+# replace this block for that job.
 permissions:
   contents: write
   security-events: read
@@ -355,7 +357,17 @@ jobs:
   nuget:
     name: NuGet
     runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
-    if: ${{ inputs.package-nuget }}
+    # Wait for the critical-vuln gate so an open critical alert blocks the
+    # package push too, not just the image build. The gate is skipped on
+    # non-release runs, so 'skipped' must be allowed (a custom `if` replaces
+    # the implicit success() check).
+    needs: [version, critical-vuln-gate]
+    if: >-
+      ${{ !cancelled()
+          && inputs.package-nuget
+          && needs.version.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success'
+              || needs.critical-vuln-gate.result == 'skipped') }}
     timeout-minutes: 30
     permissions:
       contents: write

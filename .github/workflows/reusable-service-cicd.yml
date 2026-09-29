@@ -47,7 +47,7 @@
 #     minor-version       string  SemVer minor component.         (default: '0')
 #
 #   Optional — .NET / NuGet:
-#     dotnet-version      string  .NET SDK version to install.    (default: '8.0.x')
+#     dotnet-version      string  .NET SDK version to install.    (default: '10.0.x')
 #     nuget-projects      string  Glob of .csproj files to pack
 #                                 and push.  Leave empty to skip
 #                                 NuGet publishing entirely.      (default: '')
@@ -153,15 +153,13 @@
 #                 <chart-repo-url>/charts/<chart-name>-<version>.tgz.
 #
 # PERMISSIONS:
-#   The workflow defaults to `contents: read` and grants each job only what it
-#   needs (least privilege):
-#     version  contents: read                   Reads git tags to compute semver.
-#     nuget    contents: read, packages: write  Optional GitHub Packages feed.
-#     ci       contents: read, packages: write  Pushes image + chart to GHCR.
-#     deploy   contents: read, packages: read   Pulls the chart (GHCR for the
-#                                               github-oci source) and deploys it.
-#     tag      contents: write                  Creates the git tag, only after
-#                                               a successful build.
+#   Every job sets its own permissions. All of them include `contents: write`
+#   and `security-events: read` (the gate needs security-events; tag needs
+#   contents: write); on top of that:
+#     nuget    packages: write   Optional GitHub Packages feed.
+#     ci       packages: write   Pushes image + chart to GHCR.
+#     deploy   packages: read    Pulls the chart (GHCR for the github-oci source).
+#   Callers must grant contents: write, packages: write, security-events: read.
 #
 #   SECURITY: This template holds `packages: write` and consumes secrets.
 #   Only invoke it from trusted events (push to a protected branch or tag).
@@ -175,8 +173,11 @@
 #
 # JOBS:
 #   version           Computes semver via determine-semver from existing git tags.
-#   nuget             (skipped when nuget-projects is empty) Restores, builds,
-#                     and packs .NET projects; pushes to the NuGet feed.
+#   critical-vuln-gate  (release builds only) Fails on any open critical
+#                     Dependabot alert; nuget and ci both wait for it.
+#   nuget             (skipped when nuget-projects is empty, or when the gate
+#                     failed) Restores, builds, and packs .NET projects; pushes
+#                     to the NuGet feed.
 #   ci                Validates chart config, builds and pushes the Docker
 #   │                 image, packages the Helm chart, and publishes it to the
 #   │                 target chosen by chart-publish-method.  Four inline
@@ -241,9 +242,9 @@ on:
 
       # .NET Build configuration
       dotnet-version:
-        description: 'Dotnet version to use'
+        description: '.NET SDK to install (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
         required: false
-        default: '8.0.x'
+        default: '10.0.x'
         type: string
       nuget-projects:
         description: 'NuGet projects to pack and push (glob pattern). Leave empty
@@ -496,14 +497,16 @@ on:
         description: 'Published Helm chart URL'
         value: ${{ jobs.ci.outputs.helm-chart }}
 
-# Default to least privilege; each job escalates only what it needs.
   workflow_dispatch:
+
+# Workflow-level default. Every job below sets its own permissions, which
+# replace this block for that job.
 permissions:
   contents: write
+  security-events: read
 
 # Serialize runs per ref so concurrent pushes cannot race the tag-based
 # semver computation.  Never cancel an in-flight publish mid-push.
-  security-events: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -588,8 +591,17 @@ jobs:
   nuget:
     runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
-    needs: version
-    if: ${{ inputs.nuget-projects != '' }}
+    # Wait for the critical-vuln gate so an open critical alert blocks the
+    # package push too, not just the image build. The gate is skipped on
+    # non-release runs, so 'skipped' must be allowed (a custom `if` replaces
+    # the implicit success() check).
+    needs: [version, critical-vuln-gate]
+    if: >-
+      ${{ !cancelled()
+          && inputs.nuget-projects != ''
+          && needs.version.result == 'success'
+          && (needs.critical-vuln-gate.result == 'success'
+              || needs.critical-vuln-gate.result == 'skipped') }}
     permissions:
       contents: write
       packages: write   # in case nuget-source targets a GitHub Packages feed

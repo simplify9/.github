@@ -65,7 +65,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `actions/setup-java` | `@v6.0.1` | Exact patch pin (Android + Flutter Android); Dependabot's minor/patch group bumps it |
 | `actions/upload-artifact` | `@v7` | |
 | `actions/download-artifact` | `@v8` | Always download by `name:`, never by `artifact-ids:` |
-| `actions/cache` | `@v6` in `dotnet-build`; `@v5` in the iOS/Flutter iOS/gateway-chart workflows; `@v4` in `next-cloudflare-worker.yaml` | v6 (2026-06) is a dependency/ESM migration with identical inputs; bump the rest after their own verification |
+| `actions/cache` | `@v6` | Inputs identical to v4/v5; node24, needs runner >= 2.327.1 (hosted runners and the org runners qualify) |
 | `azure/setup-helm` | `@v5` | Installs latest stable Helm unless a version is pinned |
 | `azure/setup-kubectl` | `@v5` | |
 | `docker/setup-buildx-action` | `@v4` | |
@@ -368,7 +368,9 @@ All 20 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ### .NET
 - `dotnet-build` — Resolves a build target (existing `*.sln` or an ephemeral generated one), then `restore` -> `build` -> optional `test`. Output: `build-target`.
-- `dotnet-pack-push` — `dotnet pack --no-build` -> `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. Outputs: `packages-pushed`, `package-paths`.
+- `dotnet-pack-push` — `dotnet pack --no-build` -> `dotnet nuget push --skip-duplicate`; empty `projects` is a graceful skip. A push whose CLI output says `already exists at feed` counts as skipped, never as pushed. Outputs: `packages-pushed`, `packages-skipped`, `package-paths` (newly pushed only).
+- **`dotnet-version` is a floor, not a selector** on GitHub-hosted runners: SDKs 8/9/10 are preinstalled in `/usr/share/dotnet` (where `setup-dotnet` also installs), so the newest SDK builds unless a `global.json` pins one. The org runners carry SDK 8 only, so there the newest of SDK 8 and the requested SDKs builds. Every .NET default is `10.0.x`.
+- **NuGet jobs wait for `critical-vuln-gate`** (`needs: [version, critical-vuln-gate]`, run when it succeeded or was skipped) in every workflow that publishes packages — never let a package push race the gate.
 
 **Project-list inputs** (`projects` / `test-projects` on `dotnet-build`, `projects` on `dotnet-pack-push`, and the `nuget-projects` workflow input) accept one or more glob patterns as a **space- OR newline-separated** list. A YAML `|` block scalar (one project per line) is honoured in full. These are split with `read -rd '' -a` — plain `read -ra` stops at the first newline and silently drops every entry after the first, so never revert to it.
 
@@ -400,7 +402,7 @@ All 20 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - The build job runs on a macOS runner (`macos-runner`, default `macos-latest`); the **release job runs on `ubuntu-latest`** and uploads to TestFlight via `apple-actions/upload-testflight-build@v5` (App Store Connect API) — no macOS tooling needed for the upload.
 - `xcode-version` accepts a major (`26`) or major.minor (`16.4`) selector (resolved by `maxim-lobanov/setup-xcode@v1`).
 - Flutter iOS `marketing-prefix` accepts major.minor only (`X.Y`, default `1.0`). Its patch remains the `pubspec.yaml` patch plus `github.run_number`; the build number remains pubspec `+N` plus `github.run_number`.
-- **CocoaPods caching:** two independent `actions/cache@v5` steps key on `Podfile.lock` — `~/.cocoapods/repos` (global spec repo, always restored) and `ios/Pods` (project Pods dir, skipped when `clean-reinstall-pods: true`).
+- **CocoaPods caching:** two independent `actions/cache@v6` steps key on `Podfile.lock` — `~/.cocoapods/repos` (global spec repo, always restored) and `ios/Pods` (project Pods dir, skipped when `clean-reinstall-pods: true`).
 - **ccache (`enable-ccache`, default `true`):** caches ObjC/C++ pod compilation under `~/Library/Caches/ccache`. No benefit for Swift targets. The workflow patches the Podfile to set `:ccache_enabled => true` when enabled.
 - **Ruby/Bundler:** set `ruby-version` + `use-bundler: true` to manage CocoaPods via Bundler (`ruby/setup-ruby@v1` with `bundler-cache`).
 - **Disk is logged, not reclaimed.** The Archive step prints free space before and after `xcodebuild`, and the failure report prints `df` plus an explicit low-disk error under 2 GB. There is deliberately **no** reclamation step here (unlike `android-build.yml`): macOS runners have ample headroom and this pipeline has never run short. The logging exists because a full filesystem truncates writes rather than refusing them, so it would surface as a corrupt archive, a bogus codesign result or a `PhaseScriptExecution` failure — never as "out of disk". Android lost two weeks to exactly that. If iOS ever does run short, the log will say so on the first run. Do not add a cleanup step here without evidence that one is needed.

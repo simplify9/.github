@@ -31,7 +31,8 @@
 #                   (glob allowed). Ignored when a *.sln is found.
 #   test-projects   (optional) Test project(s) to run (glob allowed).
 #   configuration   (optional) Build configuration (default: Release).
-#   dotnet-version  (optional) .NET SDK version (default: 8.0.x).
+#   dotnet-version  (optional) .NET SDK version (default: 10.0.x). A floor, not a
+#                   selector: the newest installed SDK builds unless global.json pins one.
 #   run-tests       (optional) Whether to run tests after building (default: true).
 #
 # Outputs:
@@ -68,9 +69,9 @@ inputs:
     required: false
     default: 'Release'
   dotnet-version:
-    description: 'Version of .NET SDK to use'
+    description: '.NET SDK to install (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
     required: false
-    default: '8.0.x'
+    default: '10.0.x'
   run-tests:
     description: 'Whether to run tests after building'
     required: false
@@ -175,9 +176,13 @@ runs:
           fi
           echo "Resolved ${#BUILD_SET[@]} project(s):"
           printf '  - %s\n' "${BUILD_SET[@]}"
-          target="${RUNNER_TEMP:-/tmp}/__ci_build.sln"
-          rm -f "$target"
-          dotnet new sln --name "__ci_build" --output "${RUNNER_TEMP:-/tmp}" >/dev/null
+          sln_dir="${RUNNER_TEMP:-/tmp}"
+          rm -f "$sln_dir/__ci_build.sln" "$sln_dir/__ci_build.slnx"
+          dotnet new sln --name "__ci_build" --output "$sln_dir" >/dev/null
+          # SDK 10+ writes .slnx by default, older SDKs .sln (SDK 8 has no --format
+          # flag), so use whichever file was created.
+          target="$sln_dir/__ci_build.sln"
+          [[ -f "$target" ]] || target="$sln_dir/__ci_build.slnx"
           dotnet sln "$target" add "${BUILD_SET[@]}" >/dev/null
           echo "Generated ephemeral solution: $target"
         fi

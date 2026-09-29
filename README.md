@@ -119,6 +119,7 @@ nuget-api-key            # NuGet API key (only if publishing packages)
 ```text
 nuget-api-key            # NuGet API key (required; org key: secrets.SWNUGETKEY)
 nuget-source             # NuGet feed URL (optional, defaults to nuget.org v3)
+nuget-restore-token      # Private-feed restore token (optional), exposed as NUGET_AUTH_TOKEN for a nuget.config credential %NUGET_AUTH_TOKEN%
 dependabot-alerts-token  # PAT/App token with "Dependabot alerts: read", for the release-time critical-vuln gate (pass secrets.DEPENDABOT_ALERTS_TOKEN)
 github-token             # Tags the origin (optional, falls back to built-in GITHUB_TOKEN)
 ```
@@ -310,7 +311,7 @@ The consolidated service pipeline: compute semver -> optionally publish NuGet ->
 | `chart-path` | | `./chart` | Helm chart directory |
 | `container-registry` | | `ghcr.io` | Container registry |
 | `image-name` | | (repo name) | Docker image name |
-| `dotnet-version` | | `8.0.x` | .NET SDK (for NuGet/tests) |
+| `dotnet-version` | | `10.0.x` | .NET SDK (for NuGet/tests) — see [.NET SDK selection](#net) |
 | `nuget-projects` | | `''` | NuGet project glob(s); one or more, space- or newline-separated (YAML `\|` block). Empty = skip NuGet |
 | `deploy` | | `false` | Deploy the published chart after publishing |
 | `routing-mode` | | `ingress-nginx` | `ingress-nginx` or `gateway-api` |
@@ -369,7 +370,7 @@ Full CI/CD that builds a Docker image and deploys the shared **`s9genericchart`*
 | `package-nuget` | | `false` | Build & publish NuGet packages |
 | `test-before-build` | | `false` | Run `test-projects` in their own job before the image build; if they fail, nothing is built or deployed |
 | `test-projects` | | `**/*Tests/*.csproj` | Test projects for `test-before-build` and for NuGet packing (glob) |
-| `dotnet-version` | | `8.0.x` | .NET SDK for `test-before-build` and NuGet packing |
+| `dotnet-version` | | `10.0.x` | .NET SDK for `test-before-build` and NuGet packing — see [.NET SDK selection](#net) |
 | `init-job-image` | | `''` | If set, runs a K8s migration Job before deploy |
 | `init-job-secret-name` | | `''` | Secret holding the migration connection string |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
@@ -509,7 +510,7 @@ Use [`reusable-service-cicd.yml`](#reusable-service-cicdyml) instead when the re
 
 **Versioning:** the package is pushed with `determine-semver`'s `git-tag` output, so package and tag always match. On the default branch that is a clean release (`8.1.19`); from any other branch (e.g. `workflow_dispatch`) it is a SemVer prerelease (`8.1.19-my-branch.42`), so a branch build never ships as a stable version.
 
-**Secrets:** `nuget-api-key` (required), `nuget-source` (defaults to nuget.org v3), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the release-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API), `github-token` (tags the origin; falls back to `GITHUB_TOKEN` — pass a PAT only if tags must trigger other workflows).
+**Secrets:** `nuget-api-key` (required), `nuget-source` (defaults to nuget.org v3), `nuget-restore-token` (optional; restores from a private feed such as GitHub Packages — exposed to the restore/build step as `NUGET_AUTH_TOKEN`, which the repo's `nuget.config` must reference as `%NUGET_AUTH_TOKEN%`), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the release-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API), `github-token` (tags the origin; falls back to `GITHUB_TOKEN` — pass a PAT only if tags must trigger other workflows).
 
 **Required caller permissions:** `contents: write` (tag), `packages: write` (GitHub Packages feeds), `security-events: read` (critical-vuln gate).
 
@@ -863,7 +864,9 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose | Key outputs |
 |---|---|---|
 | `dotnet-build` | Resolve `.sln`/glob, then restore -> build -> optional test | `build-target` |
-| `dotnet-pack-push` | `dotnet pack --no-build` -> `nuget push --skip-duplicate` (empty = skip) | `packages-pushed`, `package-paths` |
+| `dotnet-pack-push` | `dotnet pack --no-build` -> `nuget push --skip-duplicate` (empty = skip); versions already on the feed are counted as skipped, not pushed | `packages-pushed`, `packages-skipped`, `package-paths` |
+
+**.NET SDK selection — `dotnet-version` is a floor, not a selector.** GitHub-hosted Ubuntu images (24.04 and 26.04) preinstall SDKs 8, 9 and 10 in `/usr/share/dotnet`, and `actions/setup-dotnet` installs into the same directory, so the **newest installed SDK builds** regardless of `dotnet-version` (measured: `8.0.x`, `10.0.x` and both all select 10.0.401). The org runners (`vars.S9_RUNNER`) carry only SDK 8, so there the newest of SDK 8 and the SDKs you request builds (e.g. `10.0.x` → 10, `8.0.x` → 8, `6.0.x` → still 8). To pin an SDK anywhere, commit a `global.json`. The SDK never changes a project's target framework or the runtime in its Docker image — those come from the `.csproj` and `Dockerfile`. `net8.0` projects still build and test with the 10.0.x default: runtime 8 is present on both runner types.
 
 ### Cloudflare
 
@@ -1545,7 +1548,7 @@ with:
 | `actions/setup-java` | `@v5` |
 | `actions/upload-artifact` | `@v7` |
 | `actions/download-artifact` | `@v8` |
-| `actions/cache` | `@v6` in `dotnet-build`; `@v5` in iOS/Flutter iOS/gateway-chart workflows; `@v4` in `next-cloudflare-worker.yaml` |
+| `actions/cache` | `@v6` |
 | `azure/setup-helm` | `@v5` |
 | `azure/setup-kubectl` | `@v5` |
 | `docker/setup-buildx-action` | `@v4` |
