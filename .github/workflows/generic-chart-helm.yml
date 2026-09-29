@@ -277,7 +277,7 @@ env:
 jobs:
   version:
     name: Versioning
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: write
@@ -335,7 +335,7 @@ jobs:
     name: Dependabot Check
     needs: version
     if: ${{ needs.version.outputs.is-release == 'true' }}
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -356,7 +356,7 @@ jobs:
 
   nuget:
     name: NuGet
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     # Wait for the critical-vuln gate so an open critical alert blocks the
     # package push too, not just the image build. The gate is skipped on
     # non-release runs, so 'skipped' must be allowed (a custom `if` replaces
@@ -472,7 +472,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     if: ${{ inputs.test-before-build }}
     timeout-minutes: 30
     permissions:
@@ -514,7 +514,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     needs: [version, nuget, test, critical-vuln-gate]
     permissions:
@@ -596,7 +596,7 @@ jobs:
 
   deploy:
     name: Deploy
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     needs: [version, build, critical-vuln-gate]
     # Explicit guard required: without an `if`, the implicit success() evaluates the
@@ -792,7 +792,7 @@ jobs:
 
   tag:
     name: Tag
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     needs: [version, nuget, build, deploy]
     # Tag only after a successful deploy so tags always reference a shipped version.

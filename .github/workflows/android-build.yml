@@ -289,7 +289,7 @@ jobs:
       ${{ inputs.release-environment != ''
           && !inputs.disable-release
           && github.ref_name == github.event.repository.default_branch }}
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -313,7 +313,7 @@ jobs:
     # An explicit caller label wins. Otherwise: the organisation's self-hosted
     # Android pool if this repository can see S9_RUNNER_ANDROID, else
     # GitHub-hosted. Pool names never appear in this public repository.
-    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER_ANDROID || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 90
     needs: critical-vuln-gate
     # critical-vuln-gate is conditionally skipped (build-only runs, or
@@ -862,7 +862,7 @@ jobs:
 
   release_with_environment:
     name: Release
-    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.ubuntu-runner != 'ubuntu-latest' && inputs.ubuntu-runner || vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     needs: [build, critical-vuln-gate]
     # Release path with GitHub Environment protection/approvals.

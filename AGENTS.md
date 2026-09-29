@@ -103,7 +103,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 - Must have `on: workflow_call:` as the primary trigger
 - All inputs must have `description:`, `type:`, and `required:` set explicitly
 - Secrets are declared under `on.workflow_call.secrets:` — never passed as inputs
-- **Every Linux job uses runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}** (Android build jobs: S9_RUNNER_ANDROID, after an explicit ubuntu-runner input). This is how the organisation routes enrolled repositories to self-hosted runners. Never name a runner pool, cluster or address in this public repository.
+- **Every Linux job uses runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}** (Android build jobs: S9_RUNNER_ANDROID, after an explicit ubuntu-runner input). This is how the organisation routes enrolled repositories to self-hosted runners. Never name a runner pool, cluster or address in this public repository.
 - Branch-to-environment mapping is **not** done with `if:` checks on `github.ref` inside these workflows. Instead it is delegated to `determine-semver` via `release-branch: ${{ github.event.repository.default_branch }}`: a build on the default branch produces a clean release version + git tag; any other branch produces a qualified prerelease tag (`x.y.z-<branch>.<run>`) and is not treated as a release. Caller workflows / templates do the per-branch gating with `if: github.ref_name == '...'` and choose the GitHub Environment.
 - **Widening a job's `permissions:` is a breaking change for callers.** A called workflow can only downgrade the caller's token; if any nested job requests a scope above the caller's grant, GitHub rejects the whole run before any job starts. Every current caller pins an explicit workflow-level `permissions:` block, so unlisted scopes are `none` for them. Before merging a scope increase, run `scripts/fleet/audit_caller_permissions.py .github/workflows/<name>.yml` (it reads the requests from the file, scans every org caller on `main`/`develop`/`staging`, and exits 1 if any caller would fail to start), roll the new grant out to callers first, re-run until it reports 0, then merge. Narrowing permissions is always safe
 - Deploy jobs bind to a GitHub Environment via a `deploy-environment` / `release-environment` / `gh-environment` input (use environment protection rules for approvals), and where a deploy is optional it is gated by a boolean (`deploy: false` in `reusable-service-cicd.yml`) or by leaving the environment input empty
@@ -451,7 +451,7 @@ All 20 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ## What NOT To Do
 
-- **Do not hardcode runs-on: ubuntu-latest** in a Linux job — use the vars expression above.
+- **Do not hardcode runs-on: ubuntu-latest (or any hosted label)** in a Linux job — use the vars expression above; the hosted label lives in the organisation variable S9_HOSTED_RUNNER.
 - **Do not hardcode CLI versions** (Helm, kubectl, Node) inside action `run:` scripts — use action inputs with defaults so callers can override
 - **Do not add `on: push:` or `on: pull_request:` triggers** to files in `.github/workflows/` — all triggers come from caller repos (templates in `workflow-templates/` are the place for `push`/`workflow_dispatch`)
 - **Do not use `gradle/gradle-build-action`** — it is archived; use `gradle/actions/setup-gradle@v5`

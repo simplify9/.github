@@ -375,7 +375,7 @@ jobs:
   critical-vuln-gate:
     name: Dependabot Check
     if: ${{ github.ref_name == github.event.repository.default_branch }}
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       security-events: read
@@ -398,7 +398,7 @@ jobs:
     needs: critical-vuln-gate
     if: ${{ !cancelled() && (needs.critical-vuln-gate.result == 'success' || 
       needs.critical-vuln-gate.result == 'skipped') }}
-    runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: ${{ inputs.job-timeout-minutes }}
     # Optional GitHub Environment. Empty string => no environment binding, so
     # existing callers that don't pass gh-environment are unaffected.
