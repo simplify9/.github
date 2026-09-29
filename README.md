@@ -1531,7 +1531,7 @@ with:
 | `actions/setup-java` | `@v5` |
 | `actions/upload-artifact` | `@v7` |
 | `actions/download-artifact` | `@v8` |
-| `actions/cache` | `@v5` (some CF workflows `@v4`) |
+| `actions/cache` | `@v6` in `dotnet-build`; `@v5` in iOS/Flutter iOS/gateway-chart workflows; `@v4` in `next-cloudflare-worker.yaml` |
 | `azure/setup-helm` | `@v5` |
 | `azure/setup-kubectl` | `@v5` |
 | `docker/setup-buildx-action` | `@v4` |

@@ -65,7 +65,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `actions/setup-java` | `@v6.0.1` | Exact patch pin (Android + Flutter Android); Dependabot's minor/patch group bumps it |
 | `actions/upload-artifact` | `@v7` | |
 | `actions/download-artifact` | `@v8` | Always download by `name:`, never by `artifact-ids:` |
-| `actions/cache` | `@v5` (and `@v4` in `next-cloudflare-worker.yaml`) | |
+| `actions/cache` | `@v6` in `dotnet-build`; `@v5` in the iOS/Flutter iOS/gateway-chart workflows; `@v4` in `next-cloudflare-worker.yaml` | v6 (2026-06) is a dependency/ESM migration with identical inputs; bump the rest after their own verification |
 | `azure/setup-helm` | `@v5` | Installs latest stable Helm unless a version is pinned |
 | `azure/setup-kubectl` | `@v5` | |
 | `docker/setup-buildx-action` | `@v4` | |
