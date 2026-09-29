@@ -1,0 +1,53 @@
+# =============================================================================
+# NuGet Library Publish — Caller template for .NET library repositories
+# =============================================================================
+#
+# USAGE:
+#   Copy this file to your repo at .github/workflows/nuget-publish.yml
+#   Replace all values marked with # REPLACE with your library's values.
+#
+# WHAT IT DOES:
+#   On every push to main: computes the next version from git tags, blocks the
+#   release while the repo has an open critical Dependabot alert, restores and
+#   builds every project, packs and pushes the listed projects to NuGet, then
+#   tags the commit — all via the Simplify9 reusable workflow.
+#   A manual run from any other branch publishes a prerelease
+#   (x.y.z-<branch>.<run>), never a stable version.
+#
+#   Library that also ships a Docker image + Helm chart? Use service-cicd.
+#
+# INPUTS (only the commonly-overridden values are declared here — see the
+#   reusable workflow for the full, documented input reference):
+#   https://github.com/simplify9/.github/blob/main/.github/workflows/reusable-nuget-publish.yml
+# =============================================================================
+name: NuGet Publish                          # REPLACE: e.g. "My Library NuGet Publish"
+run-name: publish-${{ github.ref_name }}-${{ github.run_number }}
+
+on:
+  push:
+    branches: [main]                         # REPLACE if your release branch differs
+  workflow_dispatch:
+
+# No token scopes by default. The Publish job grants the ceiling the reusable
+# workflow's jobs run under; each of its jobs narrows it further.
+permissions: {}
+
+jobs:
+  Publish:
+    permissions:
+      contents: write         # tag job: create the git tag
+      packages: write         # nuget job: only used when pushing to a GitHub Packages feed
+      security-events: read   # critical-vuln gate job
+    uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@main
+    with:
+      nuget-projects: 'src/MyLib/MyLib.csproj' # REPLACE: path(s)/glob(s), space- or newline-separated
+      major-version: '1'                     # REPLACE: SemVer major
+      minor-version: '0'                     # REPLACE: SemVer minor
+      # dotnet-version: '10.0.x'
+      # run-tests: true
+      # test-projects: '**/*UnitTests/*.csproj'
+    secrets:
+      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+      # nuget-source: ${{ secrets.NUGET_SOURCE }}   # defaults to nuget.org v3
+      # github-token: ${{ secrets.MY_PAT }}         # tagging falls back to GITHUB_TOKEN

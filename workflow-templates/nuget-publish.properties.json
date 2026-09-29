@@ -1,0 +1,8 @@
+{
+    "name": "NuGet Library Publish",
+    "description": "CI/CD for a .NET library that ships NuGet packages only — versions from git tags, builds, packs and pushes the packages, then tags the release (no Docker or Helm) — via the Simplify9 reusable workflow.",
+    "iconName": "octicon-package",
+    "categories": [
+        ".NET"
+    ]
+}

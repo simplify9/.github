@@ -27,6 +27,7 @@
 - [Workflow Reference](#workflow-reference)
   - [Frontend · Cloudflare Workers](#frontend--cloudflare-workers)
   - [Service & Backend · Kubernetes](#service--backend--kubernetes)
+  - [.NET Library · NuGet](#net-library--nuget)
   - [Helm Chart CI/CD](#helm-chart-cicd)
   - [Mobile · iOS & Android](#mobile--ios--android)
   - [Security](#security)
@@ -46,6 +47,7 @@
 | Next.js (SSR, OpenNext adapter) | Cloudflare Workers | [`next-cloudflare-worker.yaml`](#next-cloudflare-workeryaml) |
 | Vite single-page app | Cloudflare Workers (static assets) | [`vite-cloudflare-worker.yml`](#vite-cloudflare-workeryml) |
 | Containerized service (any stack, .NET-friendly) | Docker + Helm (GHCR OCI / ChartMuseum), optional K8s deploy | [`reusable-service-cicd.yml`](#reusable-service-cicdyml) |
+| .NET library (NuGet packages only, no Docker/Helm) | NuGet feed (nuget.org by default) | [`reusable-nuget-publish.yml`](#reusable-nuget-publishyml) |
 | Service deployed over ingress-nginx | Docker + `s9genericchart` -> Kubernetes | [`generic-chart-helm.yml`](#generic-chart-helmyml) |
 | Service deployed behind the Cilium Gateway API | Docker + `s9genericchart-v2` -> Kubernetes | [`generic-gateway-helm-template.yml`](#generic-gateway-helm-templateyml) |
 | Deploy an already-published chart from a values file | Kubernetes via Helm | [`helm-deploy-values.yml`](#helm-deploy-valuesyml) |
@@ -70,6 +72,7 @@ This repo also ships **org workflow templates** (`workflow-templates/`) that app
 | Template (in "New workflow") | Wraps | Default triggers |
 |---|---|---|
 | Service CI/CD Pipeline | `reusable-service-cicd.yml` | `push` -> `main`, `workflow_dispatch` |
+| NuGet Library Publish | `reusable-nuget-publish.yml` | `push` -> `main`, `workflow_dispatch` |
 | Generic Chart Helm CI/CD | `generic-chart-helm.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
 | Next.js + Cloudflare Workers | `next-cloudflare-worker.yaml` | `push` -> `develop`/`main`, `workflow_dispatch` |
 | Vite + Cloudflare Workers | `vite-cloudflare-worker.yml` | `push` -> `develop`/`main`, `workflow_dispatch` |
@@ -110,6 +113,15 @@ dependabot-alerts-token  # PAT/App token with "Dependabot alerts: read", for the
 nuget-api-key            # NuGet API key (only if publishing packages)
 ```
 
+### .NET Library (NuGet)
+
+```text
+nuget-api-key            # NuGet API key (required; org key: secrets.SWNUGETKEY)
+nuget-source             # NuGet feed URL (optional, defaults to nuget.org v3)
+dependabot-alerts-token  # PAT/App token with "Dependabot alerts: read", for the release-time critical-vuln gate (pass secrets.DEPENDABOT_ALERTS_TOKEN)
+github-token             # Tags the origin (optional, falls back to built-in GITHUB_TOKEN)
+```
+
 ### Mobile — iOS
 
 ```text
@@ -143,6 +155,7 @@ google-play-service-account-json  # Google Play service account JSON
 │   │   ├── next-cloudflare-worker.yaml
 │   │   ├── vite-cloudflare-worker.yml
 │   │   ├── reusable-service-cicd.yml
+│   │   ├── reusable-nuget-publish.yml
 │   │   ├── generic-chart-helm.yml
 │   │   ├── generic-gateway-helm-template.yml
 │   │   ├── helm-deploy-values.yml
@@ -462,6 +475,54 @@ Deploy-only: deploys an already-published chart from a ChartMuseum-style repo us
 
 ---
 
+### .NET Library · NuGet
+
+---
+
+#### `reusable-nuget-publish.yml`
+
+For .NET library repos that ship **NuGet packages only** (no Dockerfile, no Helm chart): compute semver -> critical-vuln gate (default branch only) -> restore, build, optionally test -> pack and push -> tag the git origin. The tag is created only after the push succeeds, so the next run always increments from a published version.
+
+Use [`reusable-service-cicd.yml`](#reusable-service-cicdyml) instead when the repo also ships a service; its `nuget-projects` input covers an SDK package. Don't point a library at `reusable-service-cicd.yml` with `nuget-projects` alone: its Docker/Helm `ci` job fails without a Dockerfile and chart, the `tag` job is then skipped, and every later run recomputes the same version, which `--skip-duplicate` silently no-ops.
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `nuget-projects` | Yes | — | `.csproj` path(s)/glob(s) to pack and push; space- or newline-separated (YAML `\|` / `>-` block). Every project is still built |
+| `major-version` / `minor-version` | | `1` / `0` | Semver components |
+| `dotnet-version` | | `10.0.x` | .NET SDK (also builds older target frameworks such as `net8.0`) |
+| `run-tests` | | `false` | Boolean — run `test-projects` after the build |
+| `test-projects` | | `**/*Tests/*.csproj` | Test project glob |
+
+**Versioning:** the package is pushed with `determine-semver`'s `git-tag` output, so package and tag always match. On the default branch that is a clean release (`8.1.19`); from any other branch (e.g. `workflow_dispatch`) it is a SemVer prerelease (`8.1.19-my-branch.42`), so a branch build never ships as a stable version.
+
+**Secrets:** `nuget-api-key` (required), `nuget-source` (defaults to nuget.org v3), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the release-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API), `github-token` (tags the origin; falls back to `GITHUB_TOKEN` — pass a PAT only if tags must trigger other workflows).
+
+**Required caller permissions:** `contents: write` (tag), `packages: write` (GitHub Packages feeds), `security-events: read` (critical-vuln gate).
+
+**Outputs:** `version` (the pushed package version).
+
+```yaml
+permissions:
+  contents: write
+  packages: write
+  security-events: read
+
+jobs:
+  Publish:
+    uses: simplify9/.github/.github/workflows/reusable-nuget-publish.yml@main
+    with:
+      nuget-projects: >-
+        src/MyLib/MyLib.csproj
+        src/MyLib.Abstractions/MyLib.Abstractions.csproj
+      major-version: '2'
+      minor-version: '1'
+    secrets:
+      nuget-api-key: ${{ secrets.SWNUGETKEY }}
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+```
+
+---
+
 ### Helm Chart CI/CD
 
 ---
@@ -724,7 +785,7 @@ jobs:
 
 #### `critical-vuln-gate.yml`
 
-Thin `workflow_call` wrapper around the `check-critical-vulns` composite action: fails if the calling repository has any open **critical-severity** Dependabot alert. Has no `inputs:` — only a required secret. Called by the `critical-vuln-check` and `dependabot-auto-merge` starter templates, and the same underlying check is embedded as an early gating job inside 10 of the 11 other reusable workflows in this repo (both Cloudflare workflows, all four Service & Backend workflows, and all four mobile workflows) — everything except the chart-lint-only `gateway-chart-cicd.yml`.
+Thin `workflow_call` wrapper around the `check-critical-vulns` composite action: fails if the calling repository has any open **critical-severity** Dependabot alert. Has no `inputs:` — only a required secret. Called by the `critical-vuln-check` and `dependabot-auto-merge` starter templates, and the same underlying check is embedded as an early gating job inside 11 of the 13 other reusable workflows in this repo (both Cloudflare workflows, all four Service & Backend workflows, the NuGet library workflow, and all four mobile workflows) — everything except the chart-lint-only `gateway-chart-cicd.yml` and the PR-time `react-native-contract-gate.yml`.
 
 **Required secrets:** `dependabot-alerts-token` (a PAT/App token with "Dependabot alerts: read" on the calling repo — pass `secrets.DEPENDABOT_ALERTS_TOKEN`; `GITHUB_TOKEN` cannot access the Dependabot Alerts API regardless of granted permissions, confirmed by live testing).
 
@@ -738,7 +799,7 @@ jobs:
       dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
 ```
 
-**Notes:** this is the same check embedded as a build-time gate in 10 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed). Also forwards `github-token: secrets.GITHUB_TOKEN` to `check-critical-vulns` so it can verify npm alerts against the PR's own branch — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock) below.
+**Notes:** this is the same check embedded as a build-time gate in 11 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed). Also forwards `github-token: secrets.GITHUB_TOKEN` to `check-critical-vulns` so it can verify npm alerts against the PR's own branch — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock) below.
 
 ---
 
@@ -854,7 +915,7 @@ Every onboarded repo gets the same three files:
 Both workflow files are thin callers of this repo's [`critical-vuln-gate.yml`](#critical-vuln-gateyml)
 reusable workflow, which wraps the [`check-critical-vulns`](#composite-action-reference)
 composite action — one source of truth reused at three call sites: the PR-time gate, the
-build-time gate embedded in 10 of the 11 other reusable workflows in this repo, and as a
+build-time gate embedded in 11 of the 13 other reusable workflows in this repo, and as a
 dependency of auto-merge.
 
 ### `dependabot.yml` templates (`dependabot-templates/`)
@@ -1079,7 +1140,7 @@ explicit branch-aware logic so it isn't skipped when `vuln-gate` itself was skip
 ### Enforcement is two layers, deliberately redundant
 
 - **PR-time** (`critical-vuln-check.yml` + branch protection): on `main`, mark the check **required** in branch protection — merge is physically blocked while any critical alert is open. On `develop`, leave it present but **not required** — a visible red check, no block.
-- **Build-time** (embedded directly as an early job in 10 of the 11 other reusable workflows in this repo — everything except the chart-lint-only `gateway-chart-cicd.yml` — triggered on `push`, not `pull_request`): re-checks at actual deploy time. This is **not** subject to the Dependabot secrets restriction below (that restriction is specific to `pull_request`-family events; `push` never carries it), and it's the real safety net on any repo where branch protection can't enforce anything at all — e.g. private repos on a plan tier below GitHub Team/Enterprise, where classic branch protection is unavailable outright (`403: Upgrade to GitHub Pro`). The build-time gate still blocks an actual release even with zero branch protection configured.
+- **Build-time** (embedded directly as an early job in 11 of the 13 other reusable workflows in this repo — everything except the chart-lint-only `gateway-chart-cicd.yml` and the PR-time `react-native-contract-gate.yml` — triggered on `push`, not `pull_request`): re-checks at actual deploy time. This is **not** subject to the Dependabot secrets restriction below (that restriction is specific to `pull_request`-family events; `push` never carries it), and it's the real safety net on any repo where branch protection can't enforce anything at all — e.g. private repos on a plan tier below GitHub Team/Enterprise, where classic branch protection is unavailable outright (`403: Upgrade to GitHub Pro`). The build-time gate still blocks an actual release even with zero branch protection configured.
 
 ### PR-branch verification (npm only) — breaking the fix-your-own-block deadlock
 
@@ -1470,7 +1531,7 @@ with:
 | `actions/setup-java` | `@v5` |
 | `actions/upload-artifact` | `@v7` |
 | `actions/download-artifact` | `@v8` |
-| `actions/cache` | `@v5` (some CF workflows `@v4`) |
+| `actions/cache` | `@v6` in `dotnet-build`; `@v5` in iOS/Flutter iOS/gateway-chart workflows; `@v4` in `next-cloudflare-worker.yaml` |
 | `azure/setup-helm` | `@v5` |
 | `azure/setup-kubectl` | `@v5` |
 | `docker/setup-buildx-action` | `@v4` |
