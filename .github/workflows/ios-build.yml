@@ -411,7 +411,7 @@ jobs:
 
       - name: Cache ccache
         if: ${{ inputs.enable-ccache }}
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/Library/Caches/ccache
           key: ccache-ios-${{ runner.os }}-${{ 
@@ -626,7 +626,7 @@ jobs:
       #   clean-reinstall-pods=true.
       - name: Cache pod specs
         id: cache-pods-specs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cocoapods/repos
           key: cocoapods-specs-${{ runner.os }}-${{ 
@@ -639,7 +639,7 @@ jobs:
       - name: Cache pods
         id: cache-pods-dir
         if: ${{ !inputs.clean-reinstall-pods }}
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ inputs.ios-dir }}/Pods
           key: pods-dir-${{ runner.os }}-${{ 
