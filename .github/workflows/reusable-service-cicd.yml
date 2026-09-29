@@ -47,7 +47,7 @@
 #     minor-version       string  SemVer minor component.         (default: '0')
 #
 #   Optional — .NET / NuGet:
-#     dotnet-version      string  .NET SDK version to install.    (default: '8.0.x')
+#     dotnet-version      string  .NET SDK version to install.    (default: '10.0.x')
 #     nuget-projects      string  Glob of .csproj files to pack
 #                                 and push.  Leave empty to skip
 #                                 NuGet publishing entirely.      (default: '')
@@ -241,9 +241,9 @@ on:
 
       # .NET Build configuration
       dotnet-version:
-        description: 'Dotnet version to use'
+        description: '.NET SDK to install (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
         required: false
-        default: '8.0.x'
+        default: '10.0.x'
         type: string
       nuget-projects:
         description: 'NuGet projects to pack and push (glob pattern). Leave empty

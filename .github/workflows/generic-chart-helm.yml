@@ -35,9 +35,9 @@ on:
         default: '**/*.csproj'
         type: string
       dotnet-version:
-        description: '.NET SDK version to use for NuGet packaging and the test-before-build job'
+        description: '.NET SDK for NuGet packaging and the test-before-build job (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
         required: false
-        default: '8.0.x'
+        default: '10.0.x'
         type: string
       test-projects:
         description: 'Test projects to run before packing, and before the image build when test-before-build is true (glob pattern)'

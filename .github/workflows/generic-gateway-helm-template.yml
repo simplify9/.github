@@ -88,9 +88,9 @@ on:
         default: '**/*.csproj'
         type: string
       dotnet-version:
-        description: Dotnet SDK version for nuget packaging
+        description: '.NET SDK for NuGet packaging (installs this SDK (or a newline-separated list); the newest installed SDK builds unless global.json pins one)'
         required: false
-        default: 8.0.x
+        default: '10.0.x'
         type: string
       test-projects:
         description: Test projects glob
