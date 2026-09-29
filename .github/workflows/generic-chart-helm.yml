@@ -385,6 +385,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # `dotnet nuget add source` below needs a dotnet on PATH. GitHub-hosted
+      # images have one preinstalled; self-hosted runner images need not.
+      - name: Set up .NET for the NuGet feed
+        if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && 
+          contains(env.NUGET_SOURCE, 'pkg.github.com') }}
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
       - name: Configure GitHub Packages feed
         if: ${{ inputs.package-nuget && env.NUGET_SOURCE != '' && 
           contains(env.NUGET_SOURCE, 'pkg.github.com') }}

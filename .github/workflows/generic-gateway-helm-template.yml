@@ -575,6 +575,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # `dotnet nuget add source` below needs a dotnet on PATH. GitHub-hosted
+      # images have one preinstalled; self-hosted runner images need not.
+      - name: Set up .NET for the NuGet feed
+        if: ${{ env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 
+          'pkg.github.com') }}
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
       - name: Configure GitHub Packages feed
         if: ${{ env.NUGET_SOURCE != '' && contains(env.NUGET_SOURCE, 
           'pkg.github.com') }}
@@ -584,10 +593,9 @@ jobs:
           FEED_PASSWORD: ${{ secrets.nuget-api-key }}
         run: |
           # --store-password-in-clear-text writes the PAT into the repo-local
-          # nuget.config. This is a Linux limitation (no OS credential store) and is
-          # fine on ephemeral GitHub-hosted runners. On SELF-HOSTED / reused runners
-          # the file lingers in the workspace — scrub it (e.g. `dotnet nuget remove
-          # source github` in an always() post-step) if self-hosted runners are used.
+          # nuget.config (Linux has no credential store). Runners are ephemeral -
+          # GitHub-hosted VMs and the organisation's self-hosted pods alike serve
+          # one job - so the file dies with the job.
           dotnet nuget remove source github || true
           dotnet nuget add source "$FEED_URL" \
             --name github \
