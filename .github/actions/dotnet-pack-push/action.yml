@@ -36,8 +36,9 @@
 #   nuget-source   (required) NuGet feed/source URL.
 #
 # Outputs:
-#   packages-pushed  Number of packages newly pushed (0 when packing was skipped).
-#   packages-skipped Number already on the feed (--skip-duplicate no-ops).
+#   packages-pushed  Number of packages newly pushed (empty when packing is skipped).
+#   packages-skipped Number already on the feed (--skip-duplicate no-ops; empty when
+#                    packing is skipped).
 #   package-paths    Newline-separated paths of the newly pushed .nupkg files.
 #
 # Usage:
@@ -80,10 +81,10 @@ inputs:
 
 outputs:
   packages-pushed:
-    description: 'Number of NuGet packages newly pushed (0 when packing was skipped).'
+    description: 'Number of NuGet packages newly pushed (empty when packing is skipped).'
     value: ${{ steps.push.outputs.packages-pushed }}
   packages-skipped:
-    description: 'Number of NuGet packages whose version was already on the feed (not re-pushed).'
+    description: 'Number of NuGet packages whose version was already on the feed (not re-pushed; empty when packing is skipped).'
     value: ${{ steps.push.outputs.packages-skipped }}
   package-paths:
     description: 'Newline-separated paths of the .nupkg files that were pushed.'

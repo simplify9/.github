@@ -107,7 +107,7 @@ jobs:
       #   auto-onboarded (dedicated listener + cert-manager Certificate).
 
       # ── NuGet (omit/leave commented to skip NuGet publishing entirely) ───────
-      # dotnet-version: '8.0.x'
+      # dotnet-version: '10.0.x'
       # nuget-projects: 'src/**/*.csproj'    # glob of projects to pack and push
       # run-tests: 'true'
       # test-projects: '**/*UnitTests/*.csproj'

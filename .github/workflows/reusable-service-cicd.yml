@@ -153,15 +153,13 @@
 #                 <chart-repo-url>/charts/<chart-name>-<version>.tgz.
 #
 # PERMISSIONS:
-#   The workflow defaults to `contents: read` and grants each job only what it
-#   needs (least privilege):
-#     version  contents: read                   Reads git tags to compute semver.
-#     nuget    contents: read, packages: write  Optional GitHub Packages feed.
-#     ci       contents: read, packages: write  Pushes image + chart to GHCR.
-#     deploy   contents: read, packages: read   Pulls the chart (GHCR for the
-#                                               github-oci source) and deploys it.
-#     tag      contents: write                  Creates the git tag, only after
-#                                               a successful build.
+#   Every job sets its own permissions. All of them include `contents: write`
+#   and `security-events: read` (the gate needs security-events; tag needs
+#   contents: write); on top of that:
+#     nuget    packages: write   Optional GitHub Packages feed.
+#     ci       packages: write   Pushes image + chart to GHCR.
+#     deploy   packages: read    Pulls the chart (GHCR for the github-oci source).
+#   Callers must grant contents: write, packages: write, security-events: read.
 #
 #   SECURITY: This template holds `packages: write` and consumes secrets.
 #   Only invoke it from trusted events (push to a protected branch or tag).
@@ -175,8 +173,11 @@
 #
 # JOBS:
 #   version           Computes semver via determine-semver from existing git tags.
-#   nuget             (skipped when nuget-projects is empty) Restores, builds,
-#                     and packs .NET projects; pushes to the NuGet feed.
+#   critical-vuln-gate  (release builds only) Fails on any open critical
+#                     Dependabot alert; nuget and ci both wait for it.
+#   nuget             (skipped when nuget-projects is empty, or when the gate
+#                     failed) Restores, builds, and packs .NET projects; pushes
+#                     to the NuGet feed.
 #   ci                Validates chart config, builds and pushes the Docker
 #   │                 image, packages the Helm chart, and publishes it to the
 #   │                 target chosen by chart-publish-method.  Four inline
