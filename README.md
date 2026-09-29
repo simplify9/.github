@@ -23,6 +23,7 @@
 - [Which Workflow Should I Use?](#which-workflow-should-i-use)
 - [Starter Templates](#starter-templates)
 - [Prerequisites — Secrets](#prerequisites--secrets)
+- [Where Jobs Run](#where-jobs-run)
 - [Repository Structure](#repository-structure)
 - [Workflow Reference](#workflow-reference)
   - [Frontend · Cloudflare Workers](#frontend--cloudflare-workers)
@@ -131,6 +132,19 @@ android-key-alias                 # Key alias
 android-key-password              # Key password
 google-play-service-account-json  # Google Play service account JSON
 ```
+
+---
+
+## Where Jobs Run
+
+Every Linux job in these workflows uses
+`runs-on: ${{ vars.S9_RUNNER || 'ubuntu-latest' }}` (Android build jobs:
+`S9_RUNNER_ANDROID`). If your repository can see that organisation variable,
+its jobs run on Simplify9's self-hosted runners; otherwise on GitHub-hosted
+`ubuntu-latest`, exactly as before. Callers change nothing. Public
+repositories are never given the variable. macOS/iOS jobs always run on
+GitHub-hosted macOS. The Android workflows' `ubuntu-runner` input, if set to
+anything but `ubuntu-latest`, still wins.
 
 ---
 
