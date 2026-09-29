@@ -36,8 +36,9 @@
 #   nuget-source   (required) NuGet feed/source URL.
 #
 # Outputs:
-#   packages-pushed  Number of packages successfully pushed (0 when skipped).
-#   package-paths    Newline-separated paths of the pushed .nupkg files.
+#   packages-pushed  Number of packages newly pushed (0 when packing was skipped).
+#   packages-skipped Number already on the feed (--skip-duplicate no-ops).
+#   package-paths    Newline-separated paths of the newly pushed .nupkg files.
 #
 # Usage:
 #   jobs:
@@ -79,8 +80,11 @@ inputs:
 
 outputs:
   packages-pushed:
-    description: 'Number of NuGet packages successfully pushed (0 when packing was skipped).'
+    description: 'Number of NuGet packages newly pushed (0 when packing was skipped).'
     value: ${{ steps.push.outputs.packages-pushed }}
+  packages-skipped:
+    description: 'Number of NuGet packages whose version was already on the feed (not re-pushed).'
+    value: ${{ steps.push.outputs.packages-skipped }}
   package-paths:
     description: 'Newline-separated paths of the .nupkg files that were pushed.'
     value: ${{ steps.push.outputs.package-paths }}
@@ -190,15 +194,24 @@ runs:
         fi
 
         echo "Pushing ${#PACKAGES[@]} package(s) -> $NUGET_SOURCE"
-        pushed=0 failed=0
+        pushed=0 skipped=0 failed=0
         declare -a pushed_paths=()
         for nupkg in "${PACKAGES[@]}"; do
           echo "$(basename "$nupkg")"
-          # --skip-duplicate keeps re-runs idempotent (existing versions are a no-op).
-          if dotnet nuget push "$nupkg" --api-key "$API_KEY" --source "$NUGET_SOURCE" --skip-duplicate; then
-            pushed=$((pushed + 1))
-            pushed_paths+=("$nupkg")
+          # --skip-duplicate keeps re-runs idempotent: a version already on the
+          # feed exits 0 and the CLI prints "already exists at feed". Count those
+          # apart so a no-op is never reported as a push. (A localized CLI would
+          # not match and falls back to counting it as pushed, as before.)
+          if out=$(dotnet nuget push "$nupkg" --api-key "$API_KEY" --source "$NUGET_SOURCE" --skip-duplicate 2>&1); then
+            echo "$out"
+            if grep -q "already exists at feed" <<< "$out"; then
+              skipped=$((skipped + 1))
+            else
+              pushed=$((pushed + 1))
+              pushed_paths+=("$nupkg")
+            fi
           else
+            echo "$out"
             echo "::warning title=NuGet push failed::$(basename "$nupkg")"
             failed=$((failed + 1))
           fi
@@ -208,18 +221,22 @@ runs:
         # notes, asset upload, notifications) so they need not re-glob. Written
         # before the failure check below so a partial push still reports counts.
         echo "packages-pushed=$pushed" >> "$GITHUB_OUTPUT"
+        echo "packages-skipped=$skipped" >> "$GITHUB_OUTPUT"
         {
           echo "package-paths<<__NUPKG_PATHS_EOF__"
           ((pushed > 0)) && printf '%s\n' "${pushed_paths[@]}"
           echo "__NUPKG_PATHS_EOF__"
         } >> "$GITHUB_OUTPUT"
 
-        echo "Push summary: $pushed succeeded, $failed failed"
+        echo "Push summary: $pushed pushed, $skipped already on feed, $failed failed"
+        if [[ $skipped -gt 0 ]]; then
+          echo "::notice title=[DOTNET] Already on feed::$skipped package version(s) already existed on $NUGET_SOURCE and were not re-pushed."
+        fi
         if [[ $failed -gt 0 ]]; then
           echo "::error title=[DOTNET] Push failed::$failed package(s) failed to push to $NUGET_SOURCE."
           exit 1
         fi
-        echo "[2/2] Pushed $pushed package(s) -> $NUGET_SOURCE"
+        echo "[2/2] Pushed $pushed new package(s), $skipped already on feed -> $NUGET_SOURCE"
         echo "::endgroup::"
 
     - name: Report failure
