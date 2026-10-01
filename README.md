@@ -160,6 +160,13 @@ GitHub-hosted label in the organisation variable `S9_HOSTED_RUNNER`
 workflows' `ubuntu-runner` input, if set to anything but `ubuntu-latest`,
 still wins.
 
+On the self-hosted runners, the Node workflows (`vite-cloudflare-worker`,
+`next-cloudflare-worker`) do not use `setup-node`'s GitHub cache: downloading
+it from GitHub there is slower than a fresh install (measured 46-105 s against
+21-26 s for a ~700 MB yarn cache). Image builds likewise use the runners'
+shared builder instead of the GitHub cache. On GitHub-hosted runners both
+behave as before.
+
 Why not `ubuntu-latest`: GitHub moves it to Ubuntu 26.04 between 2026-10-19
 and 2026-11-19 (actions/runner-images #14748). Keeping the label in one
 organisation variable means the move to 26.04 happens once, deliberately,
