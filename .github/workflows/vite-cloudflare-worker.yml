@@ -231,11 +231,17 @@ jobs:
         if: ${{ inputs.package_manager == 'pnpm' }}
         run: corepack enable
 
+      # On a self-hosted runner, skip setup-node's GitHub cache: restoring it
+      # crosses that runner's own internet link. Measured on the org runners
+      # (2026-10-01, a Vite app's ~700 MB yarn cache): restore 46-105 s, a
+      # changed lockfile's save 154-241 s, a fresh install 21-26 s.
+      # GitHub-hosted runners keep the cache, as before.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node_version }}
-          cache: ${{ inputs.package_manager }}
+          cache: ${{ runner.environment == 'github-hosted' && inputs.package_manager || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
 
       # Resolve package-manager-specific commands once and export them so the
       # install/lint/build steps stay DRY and never interpolate untrusted
