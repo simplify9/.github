@@ -491,10 +491,11 @@ Deploy-only: deploys an already-published chart from a ChartMuseum-style repo us
 | `chart-repo` | Yes | — | Classic (ChartMuseum-style) Helm repo URL |
 | `namespace` | Yes | — | Kubernetes namespace |
 | `values-file` | | `values.yaml` | Values file in the caller repo (applied if present) |
-| `chart-version` | | `''` | Empty = latest published; set to pin |
+| `chart-version` | | `''` | Empty = latest published; an exact version pins it; a SemVer range (e.g. `10.x`) takes the newest release in it. The job summary shows the version Helm resolved |
 | `environment` | | `''` | Helm `environment=` value (not the GitHub Environment) |
 | `gh-environment` | | `''` | Optional GitHub Environment for protection/secrets |
-| `ingress-hosts` / `ingress-paths` / `ingress-tls-secrets` | | `''` | Ingress config (hosts zipped with TLS secrets by index) |
+| `ingress-hosts` / `ingress-paths` / `ingress-tls-secrets` | | `''` | Ingress config (hosts zipped with TLS secrets by index). Emits the s9generic keys `ingress.hosts[i].host` / `.tlsSecret` and `ingress.paths[i]`; a chart whose `ingress.hosts` is a plain list sets `ingress.hosts={a,b}` in `helm-set-values` instead |
+| `helm-set-values` | | `''` | Non-secret `--set` values, one per line. A line is never split on commas: each is its own `--set`, so `{a,b}` lists and `\,` escapes work as on the Helm command line |
 | `image-tag` | | `''` | Image tag |
 | `helm-version` | | `v4.2.0` | Helm CLI version |
 | `kubectl-version` | | `v1.33.0` | kubectl CLI version |

@@ -28,6 +28,8 @@
 #   chart-source-type                     'oci' (default) or 'chartmuseum'.
 #   atomic                                Roll back automatically on failure.
 #   secret-set-string-values              Secret --set-string pairs (preferred).
+#   set-values-lines                      --set values, one per line; commas in a
+#                                         line are left to Helm ({a,b} lists, \, escapes).
 #
 # Secret --set-string values can be supplied three ways, in precedence order:
 #   1. `secret-set-string-values` input          (preferred, explicit)
@@ -110,6 +112,10 @@ inputs:
   set-values:
     description: 'Additional --set values (comma-separated: key1=value1,key2=value2)'
     required: false
+  set-values-lines:
+    description: 'Additional --set values, one key=value per line. Each line is passed as its own --set and is not split on commas, so Helm parses it: {a,b} is a list and \, is a literal comma.'
+    required: false
+    default: ''
   set-string-values:
     description: 'Additional --set-string values (comma-separated: key1=value1,key2=value2). Fallback source for secret string values.'
     required: false
@@ -330,6 +336,7 @@ runs:
         VALUES_FILE: ${{ inputs.values-file }}
         VALUES: ${{ inputs.values }}
         SET_VALUES: ${{ inputs.set-values }}
+        SET_VALUES_LINES: ${{ inputs.set-values-lines }}
         SET_STRING_VALUES: ${{ inputs.set-string-values }}
         # New explicit input for secret --set-string values. NOTE: the legacy
         # SECRET_VALUES env var is intentionally NOT declared here so that a
@@ -437,6 +444,12 @@ runs:
 
         # Add custom --set values (non-secret)
         append_set_args "--set" "$SET_VALUES"
+        # One --set per line, commas left to Helm. Blank lines are skipped.
+        while IFS= read -r line; do
+          line="${line%$'\r'}"
+          line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+          [ -n "$line" ] && HELM_ARGS+=("--set" "$line")
+        done <<< "$SET_VALUES_LINES"
 
         # Add secret --set-string values. Precedence (first non-empty wins):
         #   1) secret-set-string-values input  2) legacy SECRET_VALUES env
@@ -456,6 +469,10 @@ runs:
 
         # Output is set only after a successful deploy (empty on failure).
         echo "chart-url=${CHART_URL}" >> "$GITHUB_OUTPUT"
+        # The chart Helm actually installed: chart-version may be empty (latest) or a range (10.x).
+        DEPLOYED_CHART="$(helm history "$RELEASE_NAME" --namespace "$NAMESPACE" --max 1 -o yaml 2>/dev/null | sed -n 's/^[- ]*chart: //p' | head -n 1)" || DEPLOYED_CHART=""
+        echo "deployed-chart=${DEPLOYED_CHART}" >> "$GITHUB_OUTPUT"
+        echo "Deployed chart: ${DEPLOYED_CHART}"
 
         echo "HELM_DEPLOY_CP2_STATUS=PASSED" >> "$GITHUB_ENV"
         echo "Chart deployed - release: $RELEASE_NAME, namespace: $NAMESPACE"
@@ -493,6 +510,7 @@ runs:
         CHART_VERSION: ${{ inputs.chart-version }}
         CHART_SOURCE_TYPE: ${{ inputs.chart-source-type }}
         CHART_URL: ${{ steps.deploy.outputs.chart-url }}
+        DEPLOYED_CHART: ${{ steps.deploy.outputs.deployed-chart }}
         DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
       run: |
         set -euo pipefail
@@ -510,6 +528,7 @@ runs:
           echo "| Release | \`${RELEASE_NAME}\` |"
           echo "| Namespace | \`${NAMESPACE}\` |"
           echo "| Chart | \`${CHART_NAME}:${CHART_VERSION}\` |"
+          echo "| Deployed chart | \`${DEPLOYED_CHART:-n/a}\` |"
           echo "| Source type | ${CHART_SOURCE_TYPE} |"
           echo "| Chart URL | \`${CHART_URL:-n/a}\` |"
           echo "| K8s context | ${HELM_DEPLOY_CP1_STATUS:-NOT REACHED} |"

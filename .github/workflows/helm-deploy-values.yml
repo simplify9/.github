@@ -15,6 +15,12 @@
 #   ingress.hosts[i].host / ingress.hosts[i].tlsSecret   (zipped by index)
 #   ingress.paths[i]
 #   service.targetPort=<port>
+# Charts with a different shape (e.g. a plain `ingress.hosts` list of strings)
+# leave those inputs empty and set their own keys through `helm-set-values`.
+#
+# `helm-set-values` is one key=value per line and is never split on commas:
+# each line reaches Helm as its own --set, so Helm's own rules apply inside it
+# ({a,b} is a list, \, is a literal comma).
 #
 # ROUTING MODES (routing-mode input):
 #   ingress  DEFAULT. Legacy nginx Ingress via the ingress-* inputs. Behaviour
@@ -88,8 +94,10 @@ on:
 
       chart-version:
         description: >-
-          Chart version to deploy. Leave empty to deploy the latest version published
-          in the repo; set it to pin a specific chart version.
+          Chart version to deploy, passed to `helm --version`. Leave empty to deploy the
+          latest version published in the repo, set an exact version to pin it, or set a
+          SemVer range (e.g. `10.x`) to take the latest release within it. The job summary
+          shows the version Helm resolved.
         type: string
         required: false
         default: ""
@@ -121,14 +129,16 @@ on:
       ingress-hosts:
         description: >-
           Ingress hosts, one per line or comma-separated. Zipped with ingress-tls-secrets
-          by index: host[i] <-> tls-secret[i].
+          by index: host[i] <-> tls-secret[i]. Emits the s9generic keys
+          `ingress.hosts[i].host` / `ingress.hosts[i].tlsSecret`; for a chart whose
+          `ingress.hosts` is a plain list, set `ingress.hosts={a,b}` in helm-set-values.
         type: string
         required: false
         default: ""
 
       ingress-paths:
         description: Ingress paths, one per line or comma-separated (empty = 
-          chart default).
+          chart default). Emits `ingress.paths[i]`, replacing the chart's list.
         type: string
         required: false
         default: ""
@@ -287,7 +297,10 @@ on:
         default: ""
 
       helm-set-values:
-        description: Non-secret helm --set values, one key=value per line.
+        description: >-
+          Non-secret helm --set values, one key=value per line. Lines are not split
+          on commas: each line is its own --set, so `{a,b}` is a list and `\,` is a
+          literal comma, exactly as on the Helm command line.
         type: string
         required: false
         default: ""
@@ -435,10 +448,10 @@ jobs:
           # workflow token persisted in .git/config for later steps.
           persist-credentials: false
 
-      # Translate the friendly inputs into the s9generic chart value keys, as a
-      # comma-separated --set string for the helm-deploy action. Mirrors the
-      # ingress mapping used by generic-chart-helm.yml. Secret values go straight
-      # through to secret-set-string-values via the helm-set-secret-values secret.
+      # Translate the friendly inputs into the s9generic chart value keys, as one
+      # --set per line for the helm-deploy action. Mirrors the ingress mapping
+      # used by generic-chart-helm.yml. Secret values go straight through to
+      # secret-set-string-values via the helm-set-secret-values secret.
       - name: Build Helm --set values
         id: prep
         env:
@@ -452,8 +465,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          CSV=""
-          add() { [ -z "$1" ] && return 0; if [ -z "$CSV" ]; then CSV="$1"; else CSV="${CSV},$1"; fi; }
+          SETS=()
+          add() { [ -z "$1" ] && return 0; SETS+=("$1"); }
           # Trim leading/trailing whitespace using bash parameter expansion only
           # (no subprocess per item); result returned in $REPLY.
           trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; REPLY="$s"; }
@@ -490,16 +503,24 @@ jobs:
             pidx=$((pidx + 1))
           done
 
-          # Caller's extra non-secret --set values, one key=value per line.
-          split EXTRA "$HELM_SET_VALUES"
+          # Caller's extra non-secret --set values, one key=value per line. Split
+          # on newlines only: a comma inside a line is Helm's to parse.
+          mapfile -t EXTRA < <(printf '%s' "$HELM_SET_VALUES" | sed 's/\r//g')
           for raw in "${EXTRA[@]}"; do
             trim "$raw"; kv="$REPLY"
             [ -z "$kv" ] && continue
             add "$kv"
           done
 
-          echo "set-values=${CSV}" >> "$GITHUB_OUTPUT"
-          echo "Computed --set values: ${CSV:-<none>}"
+          # Random heredoc delimiter (repo convention) so a value can never end the block early.
+          DELIM="EOF_$(dd if=/dev/urandom bs=15 count=1 status=none | base64 | tr -dc 'a-zA-Z0-9')"
+          {
+            echo "set-values-lines<<${DELIM}"
+            if [ "${#SETS[@]}" -gt 0 ]; then printf '%s\n' "${SETS[@]}"; fi
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Computed --set values (one per line):"
+          if [ "${#SETS[@]}" -gt 0 ]; then printf '  %s\n' "${SETS[@]}"; else echo "  <none>"; fi
 
           # Resolve the values file: apply it only if present. A missing DEFAULT
           # (values.yaml) is skipped; an explicitly-specified missing file fails.
@@ -603,7 +624,7 @@ jobs:
           values-file: ${{ steps.prep.outputs.values-file }}
           # Empty in ingress mode, so the Helm invocation is unchanged there.
           values: ${{ steps.gwvalues.outputs.yaml }}
-          set-values: ${{ steps.prep.outputs.set-values }}
+          set-values-lines: ${{ steps.prep.outputs.set-values-lines }}
           secret-set-string-values: ${{ secrets.helm-set-secret-values }}
           image-tag: ${{ inputs.image-tag }}
           create-namespace: ${{ inputs.create-namespace }}
