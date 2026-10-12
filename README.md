@@ -318,7 +318,8 @@ The consolidated service pipeline: compute semver -> optionally publish NuGet ->
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `chart-name` | Yes | — | Helm chart name (must match `Chart.yaml` `name:`) |
+| `chart-name` | Yes | — | Helm chart name (must match `Chart.yaml` `name:`, unless `rename-chart`) |
+| `rename-chart` | | `false` | Boolean — publish the chart as `chart-name`, setting `Chart.yaml` `name:` before packaging, so one chart directory can also ship under a second name (e.g. `<name>-develop` from a develop branch) |
 | `chart-publish-method` | | `both` | `github-oci`, `chartmuseum`, or `both` (empty/unknown hard-fails) |
 | `chart-repo-url` | | — | ChartMuseum base URL (required for `chartmuseum`/`both`) |
 | `chart-path` | | `./chart` | Helm chart directory |
@@ -326,6 +327,7 @@ The consolidated service pipeline: compute semver -> optionally publish NuGet ->
 | `image-name` | | (repo name) | Docker image name |
 | `dotnet-version` | | `10.0.x` | .NET SDK (for NuGet/tests) — see [.NET SDK selection](#net) |
 | `nuget-projects` | | `''` | NuGet project glob(s); one or more, space- or newline-separated (YAML `\|` block). Empty = skip NuGet |
+| `run-tests` / `test-projects` | | `'false'` / `**/*Tests/*.csproj` | Run the test projects after the build. They run in the `nuget` job, which runs for them even when `nuget-projects` is empty (build and test, no pack/push) |
 | `deploy` | | `false` | Deploy the published chart after publishing |
 | `routing-mode` | | `ingress-nginx` | `ingress-nginx` or `gateway-api` |
 | `deploy-namespace` | | `playground` | Kubernetes namespace |
