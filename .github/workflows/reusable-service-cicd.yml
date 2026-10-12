@@ -41,7 +41,7 @@
 #     chart-name          string  Helm chart name.  Must exactly match the
 #                                 name: field in Chart.yaml — Helm derives
 #                                 the package filename from Chart.yaml, not
-#                                 this input.
+#                                 this input — unless rename-chart is true.
 #   Optional — versioning:
 #     major-version       string  SemVer major component.         (default: '1')
 #     minor-version       string  SemVer minor component.         (default: '0')
@@ -52,7 +52,10 @@
 #                                 and push.  Leave empty to skip
 #                                 NuGet publishing entirely.      (default: '')
 #     test-projects       string  Glob of test .csproj files.    (default: '**/*Tests/*.csproj')
-#     run-tests           string  Set to 'true' to run tests.    (default: 'false')
+#     run-tests           string  Set to 'true' to run tests.  They run in the
+#                                 nuget job, which then runs even when
+#                                 nuget-projects is empty (build + test, no
+#                                 pack/push).                     (default: 'false')
 #
 #   Optional — Docker:
 #     dockerfile-path     string  Path to the Dockerfile.         (default: './Dockerfile')
@@ -72,6 +75,10 @@
 #                                 chart-publish-method is 'chartmuseum' or 'both'
 #                                 (e.g. https://charts.sf9.io).  Ignored for
 #                                 github-oci.
+#     rename-chart        boolean Publish the chart as chart-name, setting
+#                                 Chart.yaml name: before packaging, so one
+#                                 chart directory can also ship under a second
+#                                 name (e.g. <name>-develop).  (default: false)
 #
 #   Optional — Deploy (the deploy job runs only when deploy is true):
 #     deploy              boolean Deploy the published chart to a cluster.
@@ -175,9 +182,10 @@
 #   version           Computes semver via determine-semver from existing git tags.
 #   critical-vuln-gate  (release builds only) Fails on any open critical
 #                     Dependabot alert; nuget and ci both wait for it.
-#   nuget             (skipped when nuget-projects is empty, or when the gate
-#                     failed) Restores, builds, and packs .NET projects; pushes
-#                     to the NuGet feed.
+#   nuget             (skipped when nuget-projects is empty and run-tests is
+#                     not 'true', or when the gate failed) Restores, builds,
+#                     and tests .NET projects; packs and pushes to the NuGet
+#                     feed only when nuget-projects is set.
 #   ci                Validates chart config, builds and pushes the Docker
 #   │                 image, packages the Helm chart, and publishes it to the
 #   │                 target chosen by chart-publish-method.  Four inline
@@ -258,7 +266,8 @@ on:
         default: '**/*Tests/*.csproj'
         type: string
       run-tests:
-        description: 'Whether to run tests'
+        description: "Whether to run tests ('true'/'false'). They run in the nuget job,
+          which runs for them even when nuget-projects is empty (build and test, no pack/push)."
         required: false
         default: 'false'
         type: string
@@ -290,6 +299,14 @@ on:
         description: 'Helm chart name'
         required: true
         type: string
+      rename-chart:
+        description: "Publish the chart as chart-name even when Chart.yaml's name differs:
+          Chart.yaml name is set to chart-name before packaging, so one chart directory can
+          also ship under a second name (e.g. <name>-develop from a develop branch). False
+          (default): a mismatch fails the run."
+        required: false
+        default: false
+        type: boolean
       chart-publish-method:
         description: "Where to publish the Helm chart. Valid values: 'github-oci'
           (GHCR OCI), 'chartmuseum', or 'both' (publishes to GHCR OCI and ChartMuseum).
@@ -598,7 +615,7 @@ jobs:
     needs: [version, critical-vuln-gate]
     if: >-
       ${{ !cancelled()
-          && inputs.nuget-projects != ''
+          && (inputs.nuget-projects != '' || inputs.run-tests == 'true')
           && needs.version.result == 'success'
           && (needs.critical-vuln-gate.result == 'success'
               || needs.critical-vuln-gate.result == 'skipped') }}
@@ -622,6 +639,7 @@ jobs:
           run-tests: ${{ inputs.run-tests }}
 
       - name: Pack and Push NuGet Package
+        if: ${{ inputs.nuget-projects != '' }}
         uses: simplify9/.github/.github/actions/dotnet-pack-push@main
         with:
           projects: ${{ inputs.nuget-projects }}
@@ -703,6 +721,7 @@ jobs:
         env:
           CHART_PATH: ${{ inputs.chart-path }}
           CHART_NAME: ${{ inputs.chart-name }}
+          RENAME_CHART: ${{ inputs.rename-chart }}
           PUBLISH_METHOD: ${{ inputs.chart-publish-method }}
           CHART_REPO_URL: ${{ inputs.chart-repo-url }}
           DEPLOY: ${{ inputs.deploy }}
@@ -757,9 +776,13 @@ jobs:
           fi
 
           if [ "${CHART_YAML_NAME}" != "${CHART_NAME}" ]; then
-            echo "Error: chart-name input '${CHART_NAME}' does not match Chart.yaml name '${CHART_YAML_NAME}'."
-            echo "Helm package filenames are derived from Chart.yaml name, so these must match."
-            exit 1
+            if [ "${RENAME_CHART}" = "true" ]; then
+              echo "::notice title=Chart renamed::Chart.yaml name '${CHART_YAML_NAME}' is published as '${CHART_NAME}' (rename-chart)."
+            else
+              echo "Error: chart-name input '${CHART_NAME}' does not match Chart.yaml name '${CHART_YAML_NAME}'."
+              echo "Helm package filenames are derived from Chart.yaml name, so these must match (or set rename-chart: true)."
+              exit 1
+            fi
           fi
 
           if [ ! -f "${CHART_PATH}/values.yaml" ]; then
@@ -905,6 +928,8 @@ jobs:
         env:
           CHART_PATH: ${{ inputs.chart-path }}
           VERSION: ${{ needs.version.outputs.version }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          RENAME_CHART: ${{ inputs.rename-chart }}
           CONTAINER_REGISTRY: ${{ env.CONTAINER_REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
@@ -921,6 +946,13 @@ jobs:
           yq -i '.version = strenv(VERSION) | .appVersion = strenv(VERSION)' "${CHART_PATH}/Chart.yaml"
           printf '%-18s%s\n' 'Chart version' "${VERSION}"
           printf '%-18s%s\n' 'appVersion'    "${VERSION}"
+
+          # rename-chart: package and publish under chart-name (validated above).
+          if [ "${RENAME_CHART}" = "true" ]; then
+            export CHART_NAME
+            yq -i '.name = strenv(CHART_NAME)' "${CHART_PATH}/Chart.yaml"
+            printf '%-18s%s\n' 'Chart name'    "${CHART_NAME}"
+          fi
 
           VALUES_FILE="${CHART_PATH}/values.yaml"
           if [ -f "$VALUES_FILE" ]; then
