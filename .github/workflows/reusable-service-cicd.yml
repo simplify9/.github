@@ -107,8 +107,10 @@
 #     gateway-backend-service-name string Backend service override. (default: '')
 #     gateway-parent-name string  Parent Gateway name.            (default: 'public-gateway')
 #     gateway-parent-namespace string Parent Gateway namespace.   (default: 's9-dev-edge')
-#     gateway-section-name string  Wildcard listener sectionName; applied only for
-#                                 *.sf9.io hosts.   (default: 'https-wildcard-sf9-io')
+#     gateway-section-name string  Shared listener every host attaches to (e.g.
+#                                 'https-wildcard-bitween-io'); no host is onboarded.
+#                                 Empty: *.sf9.io hosts use 'https-wildcard-sf9-io',
+#                                 others are onboarded.            (default: '')
 #     gateway-auto-onboarding boolean  For non-*.sf9.io hosts, ensure the parent
 #                                 Gateway/listeners/Certificate exist. (default: true)
 #     gateway-class-name  string  GatewayClass for a new Gateway.  (default: 'cilium')
@@ -207,8 +209,9 @@
 #                     selects ingress-nginx (Ingress) or gateway-api (HTTPRoute)
 #                     and the matching kubeconfig. In gateway-api mode, non-*.sf9.io
 #                     hosts are auto-onboarded (Gateway/listeners/Certificate via
-#                     kubectl) before deploy; *.sf9.io hosts attach to the shared
-#                     wildcard listener. Independent of the tag job — a deploy
+#                     kubectl) before deploy; *.sf9.io hosts, and every host when
+#                     gateway-section-name is set, attach to a shared wildcard
+#                     listener instead. Independent of the tag job — a deploy
 #                     failure does not block tagging.
 #   tag               Creates and pushes the git tag — only after version, ci,
 #                     and (when present) nuget succeed, so tags never point at
@@ -418,10 +421,12 @@ on:
         default: 's9-dev-edge'
         type: string
       gateway-section-name:
-        description: 'Gateway listener sectionName. Applied only for *.sf9.io hosts
-          (attach to the shared wildcard listener; avoids creating per-host listeners).'
+        description: 'Shared Gateway listener (sectionName) that every host attaches to,
+          e.g. https-wildcard-bitween-io. No listener or Certificate is created for any host,
+          and the deploy fails if the Gateway has no listener of this name. Empty: *.sf9.io
+          hosts attach to https-wildcard-sf9-io and other hosts get a dedicated listener.'
         required: false
-        default: 'https-wildcard-sf9-io'
+        default: ''
         type: string
       gateway-auto-onboarding:
         description: 'For non-*.sf9.io hosts, ensure the parent Gateway, listeners,
@@ -1317,16 +1322,20 @@ jobs:
             append "gateway.parentRefs[0].name=${GATEWAY_PARENT_NAME}"
             append "gateway.parentRefs[0].namespace=${GATEWAY_PARENT_NAMESPACE}"
 
-            # *.sf9.io hosts attach to the shared wildcard listener via sectionName
-            # (no per-host listener created — preserves the 64-listener budget).
+            # Shared wildcard listeners (no per-host listener created — preserves the
+            # 64-listener budget). gateway-section-name puts every host on the named
+            # listener, as in generic-gateway-helm-template.yml; without it, *.sf9.io
+            # hosts attach to https-wildcard-sf9-io and the rest are onboarded below.
+            SECTION_NAME="${GATEWAY_SECTION_NAME}"
             FIRST_HOST="$(printf '%s' "${GATEWAY_HOSTNAMES}" | tr ',' '\n' | sed 's/\r//g; /^[[:space:]]*$/d' | head -n1 | xargs || true)"
-            case "${FIRST_HOST}" in
-              *.sf9.io)
-                if [ -n "${GATEWAY_SECTION_NAME}" ]; then
-                  append "gateway.parentRefs[0].sectionName=${GATEWAY_SECTION_NAME}"
-                fi
-                ;;
-            esac
+            if [ -z "${SECTION_NAME}" ]; then
+              case "${FIRST_HOST}" in
+                *.sf9.io) SECTION_NAME="https-wildcard-sf9-io" ;;
+              esac
+            fi
+            if [ -n "${SECTION_NAME}" ]; then
+              append "gateway.parentRefs[0].sectionName=${SECTION_NAME}"
+            fi
 
             hidx=0
             while IFS= read -r host; do
@@ -1334,11 +1343,14 @@ jobs:
               [ -z "$host" ] && continue
               append "gateway.hostnames[$hidx]=$host"
               hidx=$((hidx + 1))
-              # Non-*.sf9.io hosts need a dedicated listener + cert (onboarding).
-              case "$host" in
-                *.sf9.io) ;;
-                *) ONBOARD_HOSTS="${ONBOARD_HOSTS}${host}"$'\n' ;;
-              esac
+              # Non-*.sf9.io hosts need a dedicated listener + cert (onboarding),
+              # unless they all share the gateway-section-name listener.
+              if [ -z "${GATEWAY_SECTION_NAME}" ]; then
+                case "$host" in
+                  *.sf9.io) ;;
+                  *) ONBOARD_HOSTS="${ONBOARD_HOSTS}${host}"$'\n' ;;
+                esac
+              fi
             done < <(printf '%s\n' "${GATEWAY_HOSTNAMES}" | tr ',' '\n' | sed 's/\r//g')
 
             pidx=0
@@ -1405,10 +1417,11 @@ jobs:
           set -euo pipefail
           echo "::group::Onboard gateway hostnames"
 
-          # *.sf9.io hosts are served by the shared wildcard listener and were
-          # excluded from the onboarding list — nothing to do if that's all of them.
+          # Hosts on a shared wildcard listener (*.sf9.io, or all of them when
+          # gateway-section-name is set) were excluded from the onboarding list —
+          # nothing to do if that's all of them.
           if [ -z "$(printf '%s' "${HOST_LIST}" | tr -d '[:space:]')" ]; then
-            echo "No non-*.sf9.io hosts to onboard (wildcard listener covers the rest)."
+            echo "No hosts to onboard (a shared wildcard listener covers them)."
             echo "::endgroup::"
             exit 0
           fi
@@ -1534,6 +1547,41 @@ jobs:
 
           echo "Gateway hostnames onboarded"
           echo "::endgroup::"
+
+      # A sectionName the Gateway doesn't have leaves the HTTPRoute unattached: helm
+      # succeeds and every host goes dark. Fail before the release changes instead.
+      - name: Verify shared gateway listener
+        if: ${{ inputs.routing-mode == 'gateway-api' && inputs.gateway-section-name != '' }}
+        shell: bash
+        env:
+          KUBECONFIG_DATA: ${{ secrets.kubeconfig-gateway }}
+          GATEWAY_NAME: ${{ inputs.gateway-parent-name }}
+          GATEWAY_NAMESPACE: ${{ inputs.gateway-parent-namespace }}
+          GATEWAY_SECTION_NAME: ${{ inputs.gateway-section-name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KUBECONFIG_DATA}" ]; then
+            echo "Error: kubeconfig-gateway is required to verify gateway-section-name."
+            exit 1
+          fi
+          KCFG_PATH="$RUNNER_TEMP/kubeconfig-gw-check"
+          trap 'rm -f "$KCFG_PATH"' EXIT
+          if printf '%s' "${KUBECONFIG_DATA}" | grep -q 'apiVersion:'; then
+            printf '%s' "${KUBECONFIG_DATA}" > "$KCFG_PATH"
+          else
+            printf '%s' "${KUBECONFIG_DATA}" | base64 -d > "$KCFG_PATH" 2>/dev/null \
+              || printf '%s' "${KUBECONFIG_DATA}" > "$KCFG_PATH"
+          fi
+          chmod 600 "$KCFG_PATH"
+          export KUBECONFIG="$KCFG_PATH"
+
+          LISTENERS="$(kubectl -n "$GATEWAY_NAMESPACE" get gateway "$GATEWAY_NAME" \
+            -o jsonpath='{range .spec.listeners[*]}{.name}{"\n"}{end}')"
+          if ! printf '%s\n' "$LISTENERS" | grep -qxF "$GATEWAY_SECTION_NAME"; then
+            echo "::error title=[GATEWAY] Listener not found::Gateway ${GATEWAY_NAMESPACE}/${GATEWAY_NAME} has no listener '${GATEWAY_SECTION_NAME}' (gateway-section-name)."
+            exit 1
+          fi
+          echo "Shared listener '${GATEWAY_SECTION_NAME}' found on ${GATEWAY_NAMESPACE}/${GATEWAY_NAME}."
 
       - name: Deploy Helm chart to cluster
         uses: simplify9/.github/.github/actions/helm-deploy@main
