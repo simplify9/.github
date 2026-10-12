@@ -334,6 +334,7 @@ The consolidated service pipeline: compute semver -> optionally publish NuGet ->
 | `deploy-environment` | | `Development` | GitHub Environment for the deploy job |
 | `helm-set-values` | | `''` | Non-secret `--set` values |
 | `gateway-hostnames` | | `''` | Hostnames for the HTTPRoute (gateway-api) |
+| `gateway-section-name` | | `''` | Shared listener every host attaches to (e.g. `https-wildcard-bitween-io`): no listener or Certificate is created, and the deploy fails before Helm runs if the Gateway lacks it. Empty: `*.sf9.io` hosts attach to `https-wildcard-sf9-io`, other hosts get a dedicated listener + Certificate (`gateway-auto-onboarding`) |
 | `major-version` / `minor-version` | | `1` / `0` | Semver components |
 
 **Secrets** (conditionally required): `registry-username`, `registry-password`, `chartmuseum-username` + `chartmuseum-password` (for `chartmuseum`/`both`), `kubeconfig` (deploy + ingress-nginx) or `kubeconfig-gateway` (deploy + gateway-api), `helm-set-secret-values`, `nuget-api-key`, `github-token` (tags the origin after deploy), `dependabot-alerts-token` (PAT/App token with "Dependabot alerts: read", for the build-time critical-vuln gate — `GITHUB_TOKEN` cannot access this API).
