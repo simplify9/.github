@@ -60,6 +60,9 @@
 #   Optional — Docker:
 #     dockerfile-path     string  Path to the Dockerfile.         (default: './Dockerfile')
 #     docker-context      string  Docker build context directory. (default: '.')
+#     docker-version-build-arg string Build arg that receives the computed version, e.g.
+#                                     APP_VERSION, so the image can stamp it. (default: none)
+#     docker-build-args   string  Extra newline-separated KEY=VALUE build args. (default: none)
 #     docker-platforms    string  Comma-separated target platform(s).
 #                                                                 (default: 'linux/amd64')
 #
@@ -290,6 +293,16 @@ on:
         description: 'Target platforms for Docker build'
         required: false
         default: 'linux/amd64'
+        type: string
+      docker-version-build-arg:
+        description: 'Name of a Docker build argument to receive the computed version (e.g. APP_VERSION); none when empty'
+        required: false
+        default: ''
+        type: string
+      docker-build-args:
+        description: 'Newline-separated extra Docker build arguments (KEY=VALUE), e.g. a commit from github.sha'
+        required: false
+        default: ''
         type: string
 
       # Helm configuration
@@ -915,6 +928,11 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
+          # Opt-in: the version computed above, under the name the caller gives, and any extra
+          # arguments. Both empty by default, so an image is built exactly as before.
+          build-args: |
+            ${{ inputs.docker-version-build-arg != '' && format('{0}={1}', inputs.docker-version-build-arg, needs.version.outputs.version) || '' }}
+            ${{ inputs.docker-build-args }}
           # Org requirement: EVERY pushed image carries the 'latest' tag, on any branch.
           tag-latest: 'true'
 
