@@ -80,15 +80,17 @@ on:
         type: string
 
       namespace:
-        description: 'Kubernetes namespace for development'
+        description: 'Kubernetes namespace to deploy into'
         required: false
         default: 'development'
         type: string
       deploy-environment:
         description: 'GitHub Environment name for the deploy job (controls protection
-          rules and scoped secrets)'
+          rules and scoped secrets). Empty binds ''development''.'
         required: false
-        default: 'development'
+        # Empty, not 'development': the deploy job falls back to 'development' itself, so
+        # its labels can tell an unset value apart and show `environment` instead.
+        default: ''
         type: string
       helm-timeout-minutes:
         description: 'Optional Helm timeout in minutes (e.g., 15). If empty, defaults
@@ -103,7 +105,7 @@ on:
         default: true
         type: boolean
       helm-set-values:
-        description: 'Development Helm set values (comma-separated: key1=value1,key2=value2)'
+        description: 'Helm set values (comma-separated: key1=value1,key2=value2)'
         required: false
         type: string
       image-pull-secret:
@@ -615,7 +617,7 @@ jobs:
           && needs.build.result == 'success'
           && (needs.critical-vuln-gate.result == 'success' || needs.critical-vuln-gate.result
       == 'skipped') }}
-    environment: ${{ inputs.deploy-environment }}
+    environment: ${{ inputs.deploy-environment || 'development' }}
     # Deny-all: this job only runs helm-generic against the cluster (kubeconfig
     # secret) — it never checks out code or calls the GitHub API, so it needs no
     # GITHUB_TOKEN scopes.
@@ -625,7 +627,10 @@ jobs:
     steps:
       - name: Announce deploy job
         env:
-          DEPLOY_ENV: ${{ inputs.deploy-environment }}
+          # An unset deploy-environment labels the deploy with `environment` (the Helm value),
+          # not the 'development' fallback: a caller that sets only namespace/environment
+          # would otherwise announce a production deploy as "development".
+          DEPLOY_ENV: ${{ inputs.deploy-environment || inputs.environment || 'development' }}
           APP_NAME: ${{ inputs.app-name }}
           VERSION: ${{ needs.version.outputs.version }}
           NAMESPACE: ${{ inputs.namespace }}
@@ -699,8 +704,8 @@ jobs:
           echo "CHECKPOINT_1_STATUS=PASSED" >> "$GITHUB_ENV"
           echo "[CHECKPOINT 1/2] Ingress values generated - PASSED"
 
-      - name: Deploy to ${{ inputs.deploy-environment }} (via local composite 
-          action)
+      - name: Deploy to ${{ inputs.deploy-environment || inputs.environment || 'development' }}
+          (via local composite action)
         uses: simplify9/.github/.github/actions/helm-generic@main
         with:
           # Required basics
