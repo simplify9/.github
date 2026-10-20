@@ -117,6 +117,16 @@ on:
         required: false
         default: ''
         type: string
+      docker-build-github-token:
+        description: >-
+          Mount the job's GITHUB_TOKEN into the image build as the BuildKit secret GITHUB_TOKEN
+          (RUN --mount=type=secret,id=GITHUB_TOKEN), for dependencies installed from GitHub
+          Packages. Unlike a build arg it is absent from the image and its history. The token can
+          write this repository's contents and packages, so install with --ignore-scripts while
+          it is mounted.
+        required: false
+        default: false
+        type: boolean
       docker-context:
         description: Docker build context
         required: false
@@ -739,6 +749,7 @@ jobs:
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
           build-args: ${{ steps.build-args.outputs.value }}
+          build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', secrets.GITHUB_TOKEN) || '' }}
           # Org requirement: EVERY pushed image carries the 'latest' tag, on any branch.
           tag-latest: 'true'
 
