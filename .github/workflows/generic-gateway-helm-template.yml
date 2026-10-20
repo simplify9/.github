@@ -108,6 +108,25 @@ on:
         required: false
         default: ./Dockerfile
         type: string
+      docker-build-args:
+        description: >-
+          Optional Docker build args, one KEY=VALUE per line, passed to the image build in
+          addition to NUGET_PACKAGE_PAT. For build-time configuration such as VITE_* or
+          NEXT_PUBLIC_* URLs that differ per environment. NOT for secrets: build args are
+          readable from the image history.
+        required: false
+        default: ''
+        type: string
+      docker-build-github-token:
+        description: >-
+          Mount the job's GITHUB_TOKEN into the image build as the BuildKit secret GITHUB_TOKEN
+          (RUN --mount=type=secret,id=GITHUB_TOKEN), for dependencies installed from GitHub
+          Packages. Unlike a build arg it is absent from the image and its history. The token can
+          write this repository's contents and packages, so install with --ignore-scripts while
+          it is mounted.
+        required: false
+        default: false
+        type: boolean
       docker-context:
         description: Docker build context
         required: false
@@ -701,6 +720,22 @@ jobs:
           # instead of real .mp4s). No-op for repos that don't use LFS at all.
           lfs: true
 
+      # NUGET_PACKAGE_PAT (when the secret is set) plus the caller's docker-build-args, one per
+      # line. With no docker-build-args this yields exactly what the build received before.
+      - name: Assemble Docker build args
+        id: build-args
+        env:
+          NUGET_PACKAGE_PAT: ${{ secrets.NUGET_PACKAGE_PAT }}
+          EXTRA_BUILD_ARGS: ${{ inputs.docker-build-args }}
+        run: |
+          {
+            echo 'value<<BUILD_ARGS_EOF'
+            if [ -n "$NUGET_PACKAGE_PAT" ]; then echo "NUGET_PACKAGE_PAT=$NUGET_PACKAGE_PAT"; fi
+            printf '%s\n' "$EXTRA_BUILD_ARGS" | sed '/^[[:space:]]*$/d'
+            echo 'BUILD_ARGS_EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "build args: $(printf '%s\n' "$EXTRA_BUILD_ARGS" | sed '/^[[:space:]]*$/d' | cut -d= -f1 | tr '\n' ' ')"
+
       - name: Build and push Docker image
         id: docker
         uses: simplify9/.github/.github/actions/docker-build-push@main
@@ -713,8 +748,8 @@ jobs:
           dockerfile: ${{ inputs.dockerfile-path }}
           context: ${{ inputs.docker-context }}
           platforms: ${{ inputs.docker-platforms }}
-          build-args: ${{ (secrets.NUGET_PACKAGE_PAT != '') && 
-            format('NUGET_PACKAGE_PAT={0}', secrets.NUGET_PACKAGE_PAT) || '' }}
+          build-args: ${{ steps.build-args.outputs.value }}
+          build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', secrets.GITHUB_TOKEN) || '' }}
           # Org requirement: EVERY pushed image carries the 'latest' tag, on any branch.
           tag-latest: 'true'
 
