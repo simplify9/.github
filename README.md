@@ -34,6 +34,7 @@
   - [Security](#security)
 - [Composite Action Reference](#composite-action-reference)
 - [Dependabot](#dependabot)
+- [Dependency automation (Renovate)](#dependency-automation-renovate)
 - [Core Architecture & Conventions](#core-architecture--conventions)
 - [Repository Metadata Standard](#repository-metadata-standard)
 - [Troubleshooting](#troubleshooting)
@@ -1492,6 +1493,51 @@ matching react-native release exists. Exact-pinning is not the fix either — De
 exact pins (it did so twice in this repo). **The gate is the fix**, and it only blocks anything
 once `rn-contract / check` is marked **required** on the branch Dependabot targets — GitHub's
 auto-merge waits on *required* checks only.
+
+---
+
+## Dependency automation (Renovate)
+
+The org ships Renovate presets in `renovate/`. They are inert until a self-hosted Renovate runner points at them; nothing in this repo runs Renovate itself.
+
+| Preset | Schedule (Asia/Amman) | Extra rules |
+|---|---|---|
+| `default` | (none) | Base policy for every stack (see below) |
+| `dotnet` | Mon 00:00-08:59 | none |
+| `web` | Tue 00:00-08:59 | none |
+| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core` |
+| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval |
+| `strapi` | Thu 00:00-08:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
+| `infra` | Thu 00:00-08:59 | none |
+
+Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack preset extends `default`.
+
+`default` policy:
+- Non-breaking updates (minor, patch, pin, digest) form one weekly group and automerge. This includes 0.x patch updates.
+- npm releases wait 7 days; everything else waits 3 days.
+- 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
+- Security fixes open immediately with no release-age wait. Non-major security fixes automerge; major or 0.x minor security fixes are left for a human to merge.
+- Lock files are maintained monthly.
+
+Rule order matters: a later `packageRules` entry overrides an earlier one. Stack presets extend `default`, so their own rules come after it.
+
+To override a repo's policy, add its own `renovate.json` that extends the preset and then sets its own keys or `packageRules`. Keep the override narrow; the org presets are the default for every enrolled repo.
+
+### Strapi major upgrades
+
+Strapi major upgrades change the database schema and the API response shape, so they are never merged on a dependency PR alone. The `strapi` preset attaches this runbook to every major PR.
+
+1. Back up the production database and media.
+2. Restore a production snapshot into a throwaway Postgres.
+3. On a branch, run `npx @strapi/upgrade major` and resolve every `__TODO__` it leaves.
+4. Replace or remove plugins that are incompatible with the new major.
+5. Boot the new major against the restored copy. Migrations run there, not in production.
+6. Compare per-table row counts and spot-check content against the snapshot.
+7. Test every frontend against the new response format. Use the `Strapi-Response-Format: v4` header as a temporary bridge if needed.
+8. Run the verify workflow's Strapi rehearsal on the branch (requires the `verify` workflow with `stack: strapi`, documented in the "Verification (verify)" section once that PR lands).
+9. Take a production backup right before the maintenance-window deploy.
+
+Validate the presets with `bash renovate/validate.sh` (needs network for `npx`). It runs `renovate-config-validator --strict` on every file in `renovate/`, pinned to `renovate@44.181.5`.
 
 ---
 
