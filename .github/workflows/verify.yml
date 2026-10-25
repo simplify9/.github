@@ -17,7 +17,9 @@
 #   contract  per-stack verification contract (verify-contract action)
 #   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke
 #             (strapi: install and consistency only)
-#   dotnet, docker-smoke, react-native, android, maestro, flutter, strapi
+#   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test, docker build
+#   docker-smoke  opt-in (smoke-path): run the image and probe an HTTP path
+#   react-native, android, maestro, flutter, strapi
 #             ladder stubs (`if: false`), replaced by later tasks; ids are fixed
 #             so `result.needs` never changes
 #   result    always runs; fails on any failed/cancelled needed job, or when the
@@ -361,18 +363,195 @@ jobs:
             | Package manager | `${{ steps.install.outputs.package-manager }}` |
             | Failed | `${{ steps.collect.outputs.failed }}` |
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+  # .NET ladder. Runs from the repo root: the dotnet-build action has no
+  # working-directory input, so a sub-directory is scoped through its `projects`
+  # glob and the resolved build-target stays relative to the root.
   dotnet:
+    name: dotnet
     needs: plan
-    if: inputs.stack == ''
+    if: startsWith(inputs.stack, 'dotnet-')
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - run: echo "stub"
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Anchor step (R12): restore + build, tests off so `test` has its own id.
+      - name: Restore and build
+        id: build
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        env:
+          # Read by a nuget.config credential written as %NUGET_AUTH_TOKEN%.
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
+        with:
+          projects: ${{ inputs.working-directory }}/**/*.csproj
+          run-tests: 'false'
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      # Catches the multi-project drift class: one csproj bumps a package, a
+      # sibling does not -> NU1605 downgrade / NU1608 / NU1107 / NU1603.
+      - name: Consistency (NuGet version conflicts)
+        id: consistency
+        if: ${{ !cancelled() && steps.build.outputs.build-target != '' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' consistency ') }}
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ steps.build.outputs.build-target }}
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
+        run: |
+          set -euo pipefail
+          dotnet restore "$BUILD_TARGET" --force-evaluate -p:WarningsAsErrors=NU1605%3BNU1608%3BNU1107%3BNU1603
+
+      - name: Test
+        id: test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.build.outputs.build-target != '' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ steps.build.outputs.build-target }}
+        run: |
+          set -euo pipefail
+          dotnet test "$BUILD_TARGET" --no-build -c Release
+
+      - name: Detect Dockerfile
+        id: dockerfile
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        shell: bash
+        env:
+          WORKDIR: ${{ inputs.working-directory }}
+        run: |
+          if [ -f "$WORKDIR/Dockerfile" ]; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] docker::no Dockerfile in $WORKDIR, skipped"
+          fi
+
+      - name: Docker build (no push)
+        id: docker
+        if: ${{ !cancelled() && steps.dockerfile.outputs.has == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' docker ') }}
+        uses: simplify9/.github/.github/actions/docker-build-push@main
+        with:
+          push: 'false'
+          image-name: verify-${{ github.event.repository.name }}
+          version: pr-${{ github.run_id }}
+          dockerfile: ${{ inputs.working-directory }}/Dockerfile
+          context: ${{ inputs.working-directory }}
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["build", "consistency", "test", "docker"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(i)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify dotnet
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Build target | `${{ steps.build.outputs.build-target }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  # Opt-in (smoke-path set): needs a local Docker daemon, so GitHub-hosted only.
   docker-smoke:
+    name: docker-smoke
     needs: plan
-    if: inputs.stack == ''
+    if: inputs.smoke-path != '' && startsWith(inputs.stack, 'dotnet-')
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
-      - run: echo "stub"
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Docker smoke
+        id: smoke
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' smoke ') }}
+        shell: bash
+        env:
+          SMOKE_PATH: ${{ inputs.smoke-path }}
+        run: |
+          set -euo pipefail
+          docker build -t verify .
+          docker run -d --name verify-smoke -p 8080:8080 -e ASPNETCORE_URLS=http://+:8080 verify
+          curl --fail --retry 30 --retry-connrefused --retry-delay 2 "http://localhost:8080${SMOKE_PATH}"
+
+      - name: Container logs
+        if: ${{ failure() || steps.smoke.outcome == 'failure' }}
+        shell: bash
+        run: docker logs verify-smoke || true
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.smoke.outcome }}
+          CONCLUSION: ${{ steps.smoke.conclusion }}
+        run: |
+          failed="" warned=""
+          if [ "$OUTCOME" = "failure" ]; then
+            if [ "$CONCLUSION" = "success" ]; then warned="smoke"; else failed="smoke"; fi
+          fi
+          {
+            echo "failed=$failed"
+            echo "warned=$warned"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify docker smoke
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Probe | `${{ inputs.smoke-path }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
   react-native:
     needs: plan
     if: inputs.stack == ''
