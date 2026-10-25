@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", ":maintainLockFilesMonthly"],
+  "timezone": "Asia/Amman",
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "automergeStrategy": "squash",
+  "platformAutomerge": true,
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "dependencyDashboard": true,
+  "lockFileMaintenance": { "enabled": true, "automerge": true },
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "security"],
+    "automerge": true,
+    "minimumReleaseAge": null,
+    "prConcurrentLimit": 5
+  },
+  "packageRules": [
+    { "description": "Weekly routine group: everything non-breaking moves together, so lockstep sets cannot split",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "non-major dependencies", "groupSlug": "non-major", "automerge": true },
+    { "description": "npm soak against compromised fresh releases",
+      "matchDatasources": ["npm"], "minimumReleaseAge": "7 days" },
+    { "description": "Breaking updates (major, or 0.x minor) need a human: dashboard approval, never automerged",
+      "matchIsBreaking": true, "dependencyDashboardApproval": true, "automerge": false },
+    { "description": "Security fixes that are breaking open immediately but a human merges",
+      "matchIsBreaking": true, "matchJsonata": ["isVulnerabilityAlert = true"],
+      "dependencyDashboardApproval": false, "automerge": false }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>simplify9/.github//renovate/default"],
+  "schedule": ["* 0-8 * * 4"],
+  "packageRules": [
+    { "description": "Strapi packages move as one group, pinned rather than ranged",
+      "matchPackageNames": ["@strapi/**"], "groupName": "strapi", "groupSlug": "strapi", "rangeStrategy": "pin" },
+    { "description": "Strapi major upgrades follow the CMS migration runbook",
+      "matchUpdateTypes": ["major"],
+      "prBodyNotes": ["Strapi major upgrade: follow the CMS migration runbook (spec 5.7). Never merge without a restored-snapshot rehearsal."] }
+  ]
+}

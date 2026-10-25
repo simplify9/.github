@@ -1,0 +1,5 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>simplify9/.github//renovate/default"],
+  "schedule": ["* 0-8 * * 4"]
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>simplify9/.github//renovate/default"],
+  "schedule": ["* 0-8 * * 3"],
+  "packageRules": [
+    { "description": "Flutter SDK constraint changes need a human: dashboard approval, never automerged",
+      "matchDepNames": ["flutter"], "dependencyDashboardApproval": true, "automerge": false }
+  ]
+}

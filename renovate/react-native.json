@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>simplify9/.github//renovate/default"],
+  "schedule": ["* 0-8 * * 3"],
+  "packageRules": [
+    { "description": "React Native core moves as one lockstep set; placed after default rules so it wins",
+      "matchPackageNames": ["react", "react-dom", "react-native", "@react-native/**", "@react-native-community/cli**", "metro**", "react-test-renderer", "@types/react"],
+      "groupName": "react-native core", "groupSlug": "rn-core" }
+  ]
+}

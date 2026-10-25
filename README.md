@@ -34,6 +34,7 @@
   - [Security](#security)
 - [Composite Action Reference](#composite-action-reference)
 - [Dependabot](#dependabot)
+- [Dependency automation (Renovate)](#dependency-automation-renovate)
 - [Core Architecture & Conventions](#core-architecture--conventions)
 - [Repository Metadata Standard](#repository-metadata-standard)
 - [Troubleshooting](#troubleshooting)
@@ -1468,6 +1469,38 @@ matching react-native release exists. Exact-pinning is not the fix either — De
 exact pins (it did so twice in this repo). **The gate is the fix**, and it only blocks anything
 once `rn-contract / check` is marked **required** on the branch Dependabot targets — GitHub's
 auto-merge waits on *required* checks only.
+
+---
+
+## Dependency automation (Renovate)
+
+The org ships Renovate presets in `renovate/`. They are inert until a self-hosted Renovate runner points at them; nothing in this repo runs Renovate itself.
+
+| Preset | Schedule (Asia/Amman) | Extra rules |
+|---|---|---|
+| `default` | (none) | Base policy for every stack (see below) |
+| `dotnet` | Mon 00:00-08:59 | none |
+| `web` | Tue 00:00-08:59 | none |
+| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core` |
+| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval |
+| `strapi` | Thu 00:00-08:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
+| `infra` | Thu 00:00-08:59 | none |
+
+Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack preset extends `default`.
+
+`default` policy:
+- Non-breaking updates (minor, patch, pin, digest) form one group and automerge.
+- npm releases wait 7 days; everything else waits 3 days.
+- Breaking updates (major, or 0.x minor) need dashboard approval and never automerge.
+- Breaking security fixes open immediately but a human merges them.
+- Vulnerability alerts automerge with no release-age wait.
+- Lock files are maintained monthly.
+
+Rule order matters: a later `packageRules` entry overrides an earlier one. Stack presets extend `default`, so their own rules come after it.
+
+To override a repo's policy, add its own `renovate.json` that extends the preset and then sets its own keys or `packageRules`. Keep the override narrow; the org presets are the default for every enrolled repo.
+
+Validate the presets with `bash renovate/validate.sh` (needs network for `npx`). It runs `renovate-config-validator --strict` on every file in `renovate/`, pinned to `renovate@44.181.5`.
 
 ---
 
