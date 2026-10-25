@@ -39,11 +39,12 @@ test_compare_counts_dropped_bookkeeping_ignored() {
 }
 test_compare_counts_empty_count_fails() {
   cmp_run 'articles \n' 'articles 10\n'
-  if [ "${rc}" -ne 0 ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+  if [ "${rc}" -ne 0 ] && [[ "${out}" == *"malformed count line"* ]]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
 }
-hct() { printf '%b' "$1" > "${tmp}/h"; has_content_tables "${tmp}/h" 2>/dev/null; }
-test_has_content_tables_empty_fails() { if hct ''; then bad "$1" "passed"; else ok "$1"; fi; }
-test_has_content_tables_only_bookkeeping_fails() { if hct 'strapi_x 1\nadmin_users 2\n'; then bad "$1" "passed"; else ok "$1"; fi; }
-test_has_content_tables_ok() { if hct 'strapi_x 1\narticles 0\n'; then ok "$1"; else bad "$1" "failed"; fi; }
+hct() { printf '%b' "$1" > "${tmp}/h"; hout="$(has_content_tables "${tmp}/h" 2>&1)"; hrc=$?; }
+hct_fails() { hct "$2"; if [ "${hrc}" -ne 0 ] && [[ "${hout}" == *"fixture produced no content tables"* ]]; then ok "$1"; else bad "$1" "rc=${hrc} out=${hout}"; fi; }
+test_has_content_tables_empty_fails() { hct_fails "$1" ''; }
+test_has_content_tables_only_bookkeeping_fails() { hct_fails "$1" 'strapi_x 1\nadmin_users 2\n'; }
+test_has_content_tables_ok() { hct 'strapi_x 1\narticles 0\n'; if [ "${hrc}" -eq 0 ]; then ok "$1"; else bad "$1" "failed"; fi; }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t" "$t"; done
 if [ "${fails}" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
