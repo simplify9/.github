@@ -133,6 +133,17 @@
 #                             fail closed exactly as before this feature
 #                             existed.
 #
+# SLA CHECK (added 2026-10-25): a second, independent step flags open HIGH
+# alerts older than 30 days and open MEDIUM alerts older than 90 days (inputs
+# high-max-age-days / medium-max-age-days; "older" means strictly more days).
+# Critical is handled by the main step, low is never checked. `sla-mode: warn`
+# (default) only emits [VULN-SLA] annotations and a summary table; `enforce`
+# fails the step on any overdue alert AND on any alerts-API error or missing
+# token (fails closed). In warn mode an API error is a warning. The step runs
+# even if the critical step failed, and never alters critical-count, the CSV
+# report or the critical verdict. Age math lives in sla_overdue.jq, the exit
+# decision in sla_decide.sh; both are covered by test_sla_overdue.sh.
+#
 # Outputs (set on both pass and fail — unlike this repo's version/tag actions,
 # the count is useful even when it causes a failure, e.g. for the caller's
 # job summary):
@@ -143,10 +154,12 @@
 #                   critical-vulns-my-repo-123456789.csv. Empty unless the
 #                   gate failed on real alerts AND the CSV was built.
 #   report-path     Absolute runner path of that CSV. Empty in the same cases.
+#   sla-overdue-count  Open high/medium alerts past their SLA (see SLA CHECK).
+#                   Empty if the alerts API could not be read.
 # =============================================================================
 name: 'Check Critical Dependabot Vulnerabilities'
 author: 'Simplify9'
-description: 'Fails if the repository has any open critical-severity Dependabot alert.'
+description: 'Fails if the repository has any open critical-severity Dependabot alert, and (when sla-mode is enforce; warn-only by default) on high/medium alerts past their 30/90-day deadline.'
 
 inputs:
   dependabot-alerts-token:
@@ -158,6 +171,18 @@ inputs:
   github-token:
     description: 'Token with contents:read on the target repo, used only to verify npm alerts against the PR head branch. Omit to skip verification.'
     required: false
+  sla-mode:
+    description: 'warn (default): annotate and summarize high/medium alerts past their SLA without failing. enforce: fail the step on any overdue alert or API error.'
+    required: false
+    default: 'warn'
+  high-max-age-days:
+    description: 'An open high-severity alert older than this many days is overdue.'
+    required: false
+    default: '30'
+  medium-max-age-days:
+    description: 'An open medium-severity alert older than this many days is overdue.'
+    required: false
+    default: '90'
 
 outputs:
   critical-count:
@@ -169,6 +194,9 @@ outputs:
   report-path:
     description: 'Absolute runner path of the blocking-alerts CSV. Empty in the same cases as report-name.'
     value: ${{ steps.check.outputs.report-path }}
+  sla-overdue-count:
+    description: 'Number of open high/medium alerts past their SLA. Empty if the alerts API could not be read.'
+    value: ${{ steps.sla.outputs.sla-overdue-count }}
 
 runs:
   using: "composite"
@@ -560,6 +588,116 @@ runs:
 
         echo "VULN_GATE_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
+    # Independent second check: open HIGH/MEDIUM alerts past their SLA. See SLA
+    # CHECK in the header. Runs even when the critical step failed so one run
+    # reports both; never touches critical-count or the CSV report.
+    - name: Evaluate vulnerability SLA (high/medium)
+      id: sla
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        DEPENDABOT_TOKEN: ${{ inputs.dependabot-alerts-token }}
+        REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
+        SLA_MODE: ${{ inputs.sla-mode }}
+        HIGH_DAYS: ${{ inputs.high-max-age-days }}
+        MEDIUM_DAYS: ${{ inputs.medium-max-age-days }}
+      run: |
+        set -uo pipefail
+        # shellcheck source=sla_decide.sh
+        source "$GITHUB_ACTION_PATH/sla_decide.sh"
+        if [[ -n "$DEPENDABOT_TOKEN" ]]; then echo "::add-mask::$DEPENDABOT_TOKEN"; fi
+        echo "::group::[SLA] Evaluate Open High/Medium Dependabot Alerts"
+
+        if [[ "$SLA_MODE" != "warn" && "$SLA_MODE" != "enforce" ]]; then
+          echo "::error title=[VULN-SLA] Invalid sla-mode::'${SLA_MODE}' is not valid - use 'warn' or 'enforce'."
+          echo "::endgroup::"
+          exit 1
+        fi
+        if [[ ! "$HIGH_DAYS" =~ ^[0-9]+$ || ! "$MEDIUM_DAYS" =~ ^[0-9]+$ ]]; then
+          echo "::error title=[VULN-SLA] Invalid max-age input::high-max-age-days and medium-max-age-days must be whole numbers (got '${HIGH_DAYS}' / '${MEDIUM_DAYS}')."
+          echo "::endgroup::"
+          exit 1
+        fi
+
+        # API trouble is an error in enforce mode and a warning in warn mode;
+        # either way it is never a silent pass.
+        api_fail() {
+          if [[ "$SLA_MODE" == "enforce" ]]; then
+            echo "::error title=[VULN-SLA] Alerts API error::$1 Enforce mode fails closed."
+          else
+            echo "::warning title=[VULN-SLA] Alerts API error::$1 Warn mode - not failing the build."
+          fi
+          echo "::endgroup::"
+          exit "$(sla_decide "$SLA_MODE" 1 0)"
+        }
+
+        if [[ -z "$DEPENDABOT_TOKEN" ]]; then
+          api_fail "${REPOSITORY}: no dependabot-alerts-token was forwarded."
+        fi
+
+        # Same Link-header cursor pagination as the critical step (no page=N).
+        url="https://api.github.com/repos/${REPOSITORY}/dependabot/alerts?state=open&severity=high,medium&per_page=100"
+        alerts_file="$(mktemp)"
+        echo "[]" > "$alerts_file"
+        page_num=1
+        while [[ -n "$url" ]]; do
+          response_file="$(mktemp)"
+          headers_file="$(mktemp)"
+          curl_exit=0
+          http_code="$(curl -sS --max-time 30 --retry 3 --retry-connrefused \
+            -D "$headers_file" -o "$response_file" -w '%{http_code}' \
+            -H "Authorization: Bearer $DEPENDABOT_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url")" || curl_exit=$?
+          if [[ $curl_exit -ne 0 ]]; then
+            api_fail "Transport error (curl exit ${curl_exit}) querying ${REPOSITORY} page ${page_num}."
+          fi
+          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            api_fail "HTTP ${http_code} querying ${REPOSITORY} page ${page_num}."
+          fi
+          merged="$(mktemp)"
+          if ! jq -s '.[0] + .[1]' "$alerts_file" "$response_file" > "$merged" 2>/dev/null; then
+            api_fail "Unparseable response from ${REPOSITORY} page ${page_num}."
+          fi
+          mv "$merged" "$alerts_file"
+          next_url="$(grep -i '^link:' "$headers_file" | grep -o '<[^>]*>; *rel="next"' | sed -E 's/^<(.*)>; *rel="next"$/\1/')" || true
+          rm -f "$response_file" "$headers_file"
+          if [[ -z "$next_url" ]]; then break; fi
+          url="$next_url"
+          page_num=$((page_num + 1))
+          if [[ "$page_num" -gt 10 ]]; then
+            echo "::warning title=[VULN-SLA] Pagination cap reached::Stopped after 10 pages for ${REPOSITORY} - true count may be higher."
+            break
+          fi
+        done
+
+        overdue_file="$(mktemp)"
+        if ! jq --argjson now "$(date -u +%s)" --argjson high "$HIGH_DAYS" --argjson medium "$MEDIUM_DAYS" \
+          -f "$GITHUB_ACTION_PATH/sla_overdue.jq" "$alerts_file" > "$overdue_file"; then
+          api_fail "Could not evaluate alert ages for ${REPOSITORY}."
+        fi
+        count="$(jq 'length' "$overdue_file")"
+        echo "sla-overdue-count=${count}" >> "$GITHUB_OUTPUT"
+        echo "Overdue high/medium alerts: ${count}"
+
+        if [[ "$count" -gt 0 ]]; then
+          level="warning"
+          if [[ "$SLA_MODE" == "enforce" ]]; then level="error"; fi
+          jq -r --arg level "$level" '.[] | "::\($level) title=[VULN-SLA] Overdue \(.severity) alert::\(.package) (\(.ecosystem)) open \(.age_days) days, deadline \(.deadline_days): \(.html_url)"' "$overdue_file"
+          {
+            echo "## Vulnerability SLA: overdue alerts"
+            echo ""
+            echo "| Package | Severity | Age (days) | Deadline (days) | URL |"
+            echo "|---------|----------|------------|-----------------|-----|"
+            jq -r '.[] | "| \(.package) | \(.severity) | \(.age_days) | \(.deadline_days) | \(.html_url) |"' "$overdue_file"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        echo "::endgroup::"
+        rm -f "$alerts_file" "$overdue_file"
+        exit "$(sla_decide "$SLA_MODE" 0 "$count")"
+
     # See CSV REPORT in the header -- in particular why `name:` must equal the
     # file name for `overwrite` to work alongside `archive: false`.
     - name: Upload blocking-alerts CSV report
@@ -573,8 +711,10 @@ runs:
         retention-days: 5
         if-no-files-found: warn
 
+    # Skipped when the critical step succeeded: then only the SLA step can have
+    # failed, and it emits its own [VULN-SLA] error.
     - name: Report failure
-      if: failure()
+      if: failure() && steps.check.outcome != 'success'
       shell: bash
       env:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
@@ -593,6 +733,8 @@ runs:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
         CRITICAL_COUNT: ${{ steps.check.outputs.critical-count }}
         REPORT_NAME: ${{ steps.check.outputs.report-name }}
+        SLA_COUNT: ${{ steps.sla.outputs.sla-overdue-count }}
+        SLA_MODE: ${{ inputs.sla-mode }}
       run: |
         {
           echo "## Critical Dependabot Vulnerability Check"
@@ -601,6 +743,8 @@ runs:
           echo "|-------|-------|"
           echo "| Repository | ${REPOSITORY} |"
           echo "| Open critical alerts found | ${CRITICAL_COUNT:-unknown} |"
+          echo "| SLA mode | ${SLA_MODE} |"
+          echo "| Open high/medium alerts past SLA | ${SLA_COUNT:-unknown} |"
           if [[ -n "$REPORT_NAME" ]]; then
             echo "| Fix list (CSV) | \`${REPORT_NAME}\` in this run's Artifacts, kept 5 days - hand it to your coding agent |"
           fi
