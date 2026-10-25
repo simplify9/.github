@@ -906,7 +906,7 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | Action | Purpose |
 |---|---|
 | `write-job-summary` | Append a standardized, status-aware section to `$GITHUB_STEP_SUMMARY` (`title`, `status`, `icon`, `details`) |
-| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; outputs `critical-count`, `report-name`, `report-path`). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When it fails on real alerts, uploads every still-blocking alert as an unzipped `critical-vulns-<repo>-<run_id>.csv` run artifact (`alerts_to_csv.jq` sibling filter) — see [Blocking-alerts CSV report](#blocking-alerts-csv-report--a-fix-list-to-hand-to-an-agent). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR's own HEAD branch lockfile (`parse_yarn_lock.py` sibling script for `yarn.lock`; `package-lock.json` handled inline via `jq`) — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
+| `check-critical-vulns` | Fail if the repository has any open critical-severity Dependabot alert (`dependabot-alerts-token` — a PAT/App token with "Dependabot alerts: read"; `GITHUB_TOKEN` cannot access this API regardless of granted permissions — `repository`; optional `github-token`; `sla-mode`, `high-max-age-days`, `medium-max-age-days`; outputs `critical-count`, `report-name`, `report-path`, `sla-overdue-count`). Also runs an independent SLA step for open high/medium alerts, see [SLA deadlines](#sla-deadlines). Uses `Link`-header cursor pagination (this endpoint rejects `page=N`). When it fails on real alerts, uploads every still-blocking alert as an unzipped `critical-vulns-<repo>-<run_id>.csv` run artifact (`alerts_to_csv.jq` sibling filter) — see [Blocking-alerts CSV report](#blocking-alerts-csv-report--a-fix-list-to-hand-to-an-agent). When run under `pull_request_target` with a `github-token` forwarded, also verifies open npm alerts against the PR's own HEAD branch lockfile (`parse_yarn_lock.py` sibling script for `yarn.lock`; `package-lock.json` handled inline via `jq`) — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock). Used by `critical-vuln-gate.yml` and embedded as a build-time gate in 10 of the other reusable workflows (all but `gateway-chart-cicd.yml`) |
 
 ---
 
@@ -1251,6 +1251,25 @@ reintroduce the code-injection risk `pull_request_target` is normally dangerous 
 already grants `contents: write`) is used only to read the lockfile — composite actions
 can't read the `secrets` context directly, so it must be passed in explicitly even though
 it's just the workflow's own ambient token.
+
+### SLA deadlines
+
+Besides the immediate critical block, `check-critical-vulns` runs a second, independent step
+that flags open alerts older than their deadline. It never changes the critical verdict,
+`critical-count` or the CSV report.
+
+| Severity | Overdue when open for more than | Input |
+|---|---|---|
+| critical | n/a, blocks immediately (main step) | n/a |
+| high | 30 days | `high-max-age-days` |
+| medium | 90 days | `medium-max-age-days` |
+| low | never checked | n/a |
+
+`sla-mode: warn` (default) emits `[VULN-SLA] Overdue <severity> alert` warnings and a summary
+table only. `sla-mode: enforce` turns those into errors and fails the step; it also fails
+closed on an alerts-API error or missing token (warn mode only warns). Rollout plan: ship in
+`warn`, let repos burn down their backlog, then flip to `enforce`. The `sla-overdue-count`
+output carries the count. Logic is tested by `test_sla_overdue.sh` next to the action.
 
 ### Blocking-alerts CSV report — a fix list to hand to an agent
 
