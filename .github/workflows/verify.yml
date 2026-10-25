@@ -739,6 +739,7 @@ jobs:
     outputs:
       failed: ${{ steps.collect.outputs.failed }}
       warned: ${{ steps.collect.outputs.warned }}
+      apk: ${{ steps.collect.outputs.apk }}
     permissions:
       contents: read
       packages: read
@@ -783,6 +784,7 @@ jobs:
         run: cd android && ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
+        id: upload
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
@@ -797,6 +799,7 @@ jobs:
         shell: bash
         env:
           STEPS: ${{ toJSON(steps) }}
+          APK_OUTCOME: ${{ steps.upload.outcome }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -813,6 +816,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write("failed=" + " ".join(failed) + "\n")
               f.write("warned=" + " ".join(warned) + "\n")
+              f.write("apk=" + ("true" if os.environ["APK_OUTCOME"] == "success" else "false") + "\n")
           PY
 
       - name: Write summary
@@ -831,7 +835,7 @@ jobs:
   maestro:
     name: maestro
     needs: [plan, android]
-    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.android.result != 'cancelled' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.android.result != 'cancelled' && needs.android.outputs.apk == 'true' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     outputs:
