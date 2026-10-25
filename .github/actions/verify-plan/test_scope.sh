@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Truth table for the scope rules in verify-scope.sh. verify.yml's `plan` job `if:`
-# duplicates verify_full; keep them in sync. Run: bash .github/workflows/test_verify_scope.sh
+# Truth table for the scope rules in scope.sh, plus a drift guard for the full-scope
+# expression copied in verify.yml. Run: bash .github/actions/verify-plan/test_scope.sh
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=verify-scope.sh
-source "${here}/verify-scope.sh"
+# shellcheck source=scope.sh
+source "${here}/scope.sh"
 fails=0
 eq() { # name expected actual
   if [ "$2" = "$3" ]; then echo "PASS $1"; else echo "FAIL $1: expected '$2' got '$3'"; fails=$((fails + 1)); fi
@@ -23,6 +23,25 @@ test_contract_mode() {
   eq "${FUNCNAME[0]}_warn" warn "$(contract_mode 2026-12-20 2026-12-19)"
   eq "${FUNCNAME[0]}_enforce" enforce "$(contract_mode 2026-12-20 2026-12-20)"
   eq "${FUNCNAME[0]}_none" warn "$(contract_mode '' 2027-01-01)"
+}
+test_deps_changed_manifest() { eq "${FUNCNAME[0]}" true "$(deps_changed_from_list $'src/a.cs\nweb/package.json')"; }
+test_deps_changed_none() { eq "${FUNCNAME[0]}" false "$(deps_changed_from_list $'src/a.cs\nREADME.md')"; }
+test_deps_changed_empty() { eq "${FUNCNAME[0]}" false "$(deps_changed_from_list '')"; }
+test_deps_changed_large_list() {
+  # >100KB list with the match first: a pipe into `grep -q` would SIGPIPE under pipefail.
+  big="$(printf 'package.json\n'; yes 'some/long/path/to/an/unrelated/source/file.txt' | head -n 4000)"
+  [ "${#big}" -gt 100000 ] || echo "FAIL list too small"
+  set -o pipefail
+  eq "${FUNCNAME[0]}" true "$(deps_changed_from_list "$big")"
+  set +o pipefail
+}
+test_scope_expression_copies_identical() {
+  canon="github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login"
+  yml="${here}/../../workflows/verify.yml"
+  plan="$(awk '/^  plan:/{f=1} f && /^    if: /{sub(/^    if: /,""); print; exit}' "$yml")"
+  res="$(awk '/^  result:/{f=1} f && /FULL: /{sub(/.*FULL: \$\{\{ /,""); sub(/ \}\}$/,""); print; exit}' "$yml")"
+  eq "${FUNCNAME[0]}_plan" "$canon" "$plan"
+  eq "${FUNCNAME[0]}_result" "$canon" "$res"
 }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

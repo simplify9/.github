@@ -1,0 +1,95 @@
+# =============================================================================
+# Verify Plan
+# =============================================================================
+# Computes the planning outputs of the verify workflow: the effective
+# known-failing list, whether dependency files changed, and the contract mode.
+# Logic lives in scope.sh (tested by test_scope.sh).
+#
+# Inputs:
+#   event-name         (optional)  github.event_name; workflow_dispatch means deps_changed=true.
+#   repository         (optional)  owner/repo for the PR files API.
+#   pr-number          (optional)  Pull request number (ignored on workflow_dispatch).
+#   known-failing      (optional)  Space-separated step ids tolerated until the deadline.
+#   deadline           (optional)  YYYY-MM-DD; empty means warn mode, known-failing never expires.
+#   github-token       (optional)  Token with pull-requests: read.
+# Outputs: known_failing, deps_changed, contract_mode.
+# =============================================================================
+name: 'Verify Plan'
+author: 'Simplify9'
+description: 'Compute the verify plan: effective known-failing list, deps_changed and contract_mode.'
+
+inputs:
+  event-name:
+    description: 'The github.event_name of the run.'
+    required: false
+    default: ''
+  repository:
+    description: 'owner/repo whose PR files are listed.'
+    required: false
+    default: ''
+  pr-number:
+    description: 'Pull request number (unused on workflow_dispatch).'
+    required: false
+    default: ''
+  known-failing:
+    description: 'Space-separated step ids tolerated until the deadline.'
+    required: false
+    default: ''
+  deadline:
+    description: 'Contract deadline (YYYY-MM-DD). Empty means warn mode and known-failing never expires.'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token with pull-requests: read, used to list PR files.'
+    required: false
+    default: ''
+
+outputs:
+  known_failing:
+    description: 'The known-failing list before the deadline, else empty.'
+    value: ${{ steps.plan.outputs.known_failing }}
+  deps_changed:
+    description: 'true when dependency files changed (always true on workflow_dispatch).'
+    value: ${{ steps.plan.outputs.deps_changed }}
+  contract_mode:
+    description: 'warn or enforce.'
+    value: ${{ steps.plan.outputs.contract_mode }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plan
+      id: plan
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        EVENT: ${{ inputs.event-name }}
+        REPO: ${{ inputs.repository }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        KNOWN_FAILING: ${{ inputs.known-failing }}
+        DEADLINE: ${{ inputs.deadline }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        echo "VERIFY_PLAN_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
+        # shellcheck source=scope.sh
+        source "${ACTION_PATH}/scope.sh"
+        today="$(date -u +%F)"
+        known="$(known_failing_effective "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
+        mode="$(contract_mode "${DEADLINE}" "${today}")"
+        deps=true
+        if [ "${EVENT}" != "workflow_dispatch" ]; then
+          files="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
+          deps="$(deps_changed_from_list "${files}")"
+        fi
+        {
+          echo "known_failing=${known}"
+          echo "deps_changed=${deps}"
+          echo "contract_mode=${mode}"
+        } >> "${GITHUB_OUTPUT}"
+        echo "::notice title=[VERIFY] Plan::event=${EVENT} deps_changed=${deps} contract_mode=${mode} known_failing=${known:-none}"
+        echo "VERIFY_PLAN_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+
+branding:
+  icon: 'check-square'
+  color: 'blue'

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scope helpers for verify.yml. Sourced by the `plan` job and by test_verify_scope.sh.
+# Scope helpers for verify.yml. Sourced by the verify-plan action and by test_scope.sh.
 # All dates are ISO YYYY-MM-DD, compared as strings.
 
 # verify_full <event> <base> <default-branch> <author> <bot-login> -> true|false
@@ -19,4 +19,11 @@ known_failing_effective() {
 # contract_mode <deadline> <today> -> warn|enforce (mirrors verify-contract)
 contract_mode() {
   if [ -z "$1" ] || [[ "$2" < "$1" ]]; then echo warn; else echo enforce; fi
+}
+
+# deps_changed_from_list <newline-separated file paths> -> true|false
+# Here-string, not a pipe: `printf | grep -q` gets SIGPIPE under pipefail on big lists.
+deps_changed_from_list() {
+  local pattern='(^|/)(package\.json|yarn\.lock|package-lock\.json|pnpm-lock\.yaml|Directory\.Packages\.props|pubspec\..*|Gemfile.*)$|\.csproj$|(^|/)(android|ios)/'
+  if grep -Eq "${pattern}" <<< "$1"; then echo true; else echo false; fi
 }
