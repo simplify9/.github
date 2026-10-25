@@ -1,0 +1,47 @@
+# =============================================================================
+# Verify -- Caller template
+# =============================================================================
+# USAGE:
+#   Copy this file to your repo at .github/workflows/verify.yml and replace
+#   `stack: REPLACE` with one of: dotnet-service, dotnet-library, web,
+#   react-native, flutter, strapi, infra.
+#
+#   Then mark `verify / result` as the REQUIRED status check in the org ruleset.
+#   `result` always reports: a human PR into develop/development/staging passes
+#   immediately; PRs into the default branch, bot PRs and manual runs get the
+#   full verification ladder.
+#
+#   Add your repo's default branch and Renovate target branch to `branches`
+#   below if they are not already listed.
+#
+# SECRETS: DEPENDABOT_ALERTS_TOKEN (optional), NUGET_PACKAGE_PAT (optional).
+# =============================================================================
+name: Verify
+run-name: verify-${{ github.event.pull_request.number || github.ref_name }}
+
+on:
+  pull_request:
+    branches: [main, develop, development, staging, gigstaging]
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+# One billed run per PR. Safe to cancel: verification is read-only and deploys nothing.
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    uses: simplify9/.github/.github/workflows/verify.yml@main
+    with:
+      stack: REPLACE
+      known-failing: ''
+      contract-deadline: ''
+    secrets:
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+      nuget-restore-token: ${{ secrets.NUGET_PACKAGE_PAT }}

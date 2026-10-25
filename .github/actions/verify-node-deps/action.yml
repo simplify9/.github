@@ -1,0 +1,74 @@
+# =============================================================================
+# Verify Node Deps
+# =============================================================================
+# Fails when two versions of a singleton package (react, react-dom,
+# react-native, next by default) are installed, which crashes apps at runtime
+# ("Invalid hook call"). For npm it also fails on invalid or missing peers.
+# Run after the install step. Yarn Berry PnP repos (no node_modules) report
+# "skipped (PnP)".
+#
+# Inputs:
+#   working-directory  (optional)  Directory holding node_modules. Default ".".
+#   names              (optional)  Comma-separated package names to check.
+#   package-manager    (required)  npm | yarn | yarn-berry | pnpm
+#
+# Usage:
+#   - uses: simplify9/.github/.github/actions/verify-node-deps@main
+#     with:
+#       package-manager: npm
+# =============================================================================
+name: 'Verify Node Deps'
+author: 'Simplify9'
+description: 'Fail on duplicate singleton packages (react, next, ...) in node_modules and, for npm, on invalid peer dependencies.'
+
+inputs:
+  working-directory:
+    description: 'Directory containing node_modules.'
+    required: false
+    default: '.'
+  names:
+    description: 'Comma-separated package names that must resolve to a single version.'
+    required: false
+    default: 'react,react-dom,react-native,next'
+  package-manager:
+    description: 'Package manager used for install: npm, yarn, yarn-berry or pnpm.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check singleton packages
+      shell: bash
+      env:
+        WORKDIR: ${{ inputs.working-directory }}
+        NAMES: ${{ inputs.names }}
+        PM: ${{ inputs.package-manager }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -uo pipefail
+        echo "VERIFY_NODE_DEPS_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
+        echo "::notice title=[VERIFY] Node deps::pm=${PM} dir=${WORKDIR} names=${NAMES}"
+        case "${PM}" in
+          npm|yarn|yarn-berry|pnpm) ;;
+          *)
+            echo "::error title=[VERIFY] Node deps::unknown package-manager: ${PM}"
+            echo "VERIFY_NODE_DEPS_CP1_STATUS=FAILED" >> "$GITHUB_ENV"
+            exit 1 ;;
+        esac
+        rc=0
+        python3 "${ACTION_PATH}/singletons.py" --dir "${WORKDIR}" --names "${NAMES}" || rc=1
+        if [ "${PM}" = "npm" ]; then
+          if ! (cd "${WORKDIR}" && npm ls --all > /dev/null); then
+            echo "::error title=[VERIFY] npm ls::invalid or missing peer dependency (see log)"
+            rc=1
+          fi
+        fi
+        if [ "${rc}" -ne 0 ]; then
+          echo "VERIFY_NODE_DEPS_CP1_STATUS=FAILED" >> "$GITHUB_ENV"
+          exit 1
+        fi
+        echo "VERIFY_NODE_DEPS_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+
+branding:
+  icon: 'check-square'
+  color: 'blue'

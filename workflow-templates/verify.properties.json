@@ -1,0 +1,8 @@
+{
+    "name": "Verify",
+    "description": "Single required verification check (verify / result): scope-aware ladder of contract, lint, test and build steps per stack. Human PRs into develop pass immediately.",
+    "iconName": "octicon-check-circle",
+    "categories": [
+        "Continuous integration"
+    ]
+}

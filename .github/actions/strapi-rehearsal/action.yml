@@ -1,0 +1,159 @@
+# =============================================================================
+# Strapi Rehearsal
+# =============================================================================
+# Boot smoke and data-upgrade rehearsal for Strapi repos. Needs a Postgres
+# service on localhost:5432 (db/user/password strapi), psql and curl, Node with
+# the HEAD dependencies installed and built.
+#   strapi-changed=true  restore ci/fixture.sql.gz, boot the BASE commit (creates
+#                        the schema at the old version) and record table counts,
+#                        boot HEAD on the same database (migrations run), require
+#                        /_health 204 and unchanged content-table counts.
+#   strapi-changed=false boot HEAD on the empty database and require /_health 204.
+# The repo is responsible for a local upload provider and no external services
+# under NODE_ENV=ci. Secrets are generated per run; no real secrets are used.
+#
+# Inputs:
+#   base-sha           (optional)  PR base commit; empty forces a HEAD-only boot smoke.
+#   strapi-changed     (optional)  'true' to run the rehearsal.
+#   working-directory  (optional)  Directory with package.json.
+#   package-runner     (optional)  npm, yarn or pnpm (verify-web-install output `runner`).
+# =============================================================================
+name: 'Strapi Rehearsal'
+author: 'Simplify9'
+description: 'Boot Strapi against Postgres and, when @strapi/* changed, prove the upgrade keeps content-table row counts.'
+
+inputs:
+  base-sha:
+    description: 'PR base commit SHA. Empty (workflow_dispatch) means boot-smoke HEAD only.'
+    required: false
+    default: ''
+  strapi-changed:
+    description: 'true to restore ci/fixture.sql.gz and rehearse the upgrade from base-sha; anything else boots HEAD on an empty database.'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Directory containing the Strapi project (package.json).'
+    required: false
+    default: '.'
+  package-runner:
+    description: 'Tool that runs package scripts: npm, yarn or pnpm.'
+    required: false
+    default: 'npm'
+
+runs:
+  using: composite
+  steps:
+    - name: Rehearse
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        STRAPI_CHANGED: ${{ inputs.strapi-changed }}
+        WORKDIR: ${{ inputs.working-directory }}
+        RUNNER_PM: ${{ inputs.package-runner }}
+        ACTION_PATH: ${{ github.action_path }}
+        NODE_ENV: ci
+        DATABASE_CLIENT: postgres
+        DATABASE_HOST: localhost
+        DATABASE_PORT: '5432'
+        DATABASE_NAME: strapi
+        DATABASE_USERNAME: strapi
+        DATABASE_PASSWORD: strapi
+      run: |
+        set -euo pipefail
+        echo "VERIFY_STRAPI_REHEARSAL_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
+        # shellcheck source=rehearse.sh
+        source "${ACTION_PATH}/rehearse.sh"
+        # shellcheck source=../verify-web-install/detect_pm.sh
+        source "${ACTION_PATH}/../verify-web-install/detect_pm.sh"
+
+        # Fresh secrets for every run; never real ones.
+        for v in APP_KEYS ADMIN_JWT_SECRET API_TOKEN_SALT JWT_SECRET TRANSFER_TOKEN_SALT ENCRYPTION_KEY; do
+          export "${v}=$(openssl rand -base64 32)"
+        done
+
+        head_dir="$(cd "${WORKDIR}" && pwd)"
+        repo_root="$(git -C "${head_dir}" rev-parse --show-toplevel)"
+        rel="${head_dir#"${repo_root}"}"
+        db_url="postgres://strapi:strapi@localhost:5432/strapi"
+        health="http://localhost:1337"
+        tmp="${RUNNER_TEMP:-/tmp}/strapi-rehearsal"
+        mkdir -p "${tmp}"
+        server_pid=""
+
+        stop_server() {
+          if [ -n "${server_pid}" ]; then
+            # setsid made the server a group leader: kill the whole group (node child included).
+            kill -- "-${server_pid}" 2>/dev/null || kill "${server_pid}" 2>/dev/null || true
+            wait "${server_pid}" 2>/dev/null || true
+            server_pid=""
+          fi
+          local i
+          for ((i = 0; i < 30; i++)); do
+            (exec 3<>/dev/tcp/127.0.0.1/1337) 2>/dev/null || return 0
+            sleep 1
+          done
+          echo "::error title=[VERIFY] Rehearsal::port 1337 did not free after stopping Strapi"
+          return 1
+        }
+        start_server() { # <dir> <log>
+          (cd "$1" && exec setsid "${RUNNER_PM}" run start) > "$2" 2>&1 &
+          server_pid=$!
+        }
+        cleanup() {
+          stop_server || true
+          git -C "${repo_root}" worktree remove --force "${tmp}/base" 2>/dev/null || true
+        }
+        trap cleanup EXIT
+        boot() { # <dir> <label>: start, require health, leave running
+          start_server "$1" "${tmp}/$2.log"
+          if ! wait_health "${health}"; then
+            echo "::group::Strapi ($2) log tail"; tail -n 80 "${tmp}/$2.log"; echo "::endgroup::"
+            return 1
+          fi
+        }
+
+        if [ "${STRAPI_CHANGED}" = "true" ] && [ -n "${BASE_SHA}" ]; then
+          fixture="${head_dir}/ci/fixture.sql.gz"
+          if [ ! -f "${fixture}" ]; then
+            echo "::error title=[VERIFY] Rehearsal::@strapi/* changed but ci/fixture.sql.gz is missing; add a sanitized dump of the production schema and data"
+            exit 1
+          fi
+          gunzip -c "${fixture}" | psql "${db_url}" -v ON_ERROR_STOP=1 -q > /dev/null
+
+          git -C "${repo_root}" worktree add --detach "${tmp}/base" "${BASE_SHA}"
+          base_dir="${tmp}/base${rel}"
+          pm="$(detect_pm "${base_dir}")"
+          (
+            cd "${base_dir}"
+            case "${pm}" in
+              yarn-berry) yarn install --immutable ;;
+              yarn)       yarn install --frozen-lockfile ;;
+              npm)        npm ci ;;
+              pnpm)       pnpm install --frozen-lockfile ;;
+            esac
+            "${RUNNER_PM}" run build
+          )
+          boot "${base_dir}" base
+          table_counts "${db_url}" > "${tmp}/before.txt"
+          has_content_tables "${tmp}/before.txt"
+          stop_server
+          echo "Base: $(wc -l < "${tmp}/before.txt") tables counted"
+
+          boot "${head_dir}" head
+          table_counts "${db_url}" > "${tmp}/after.txt"
+          stop_server
+          if ! compare_counts "${tmp}/before.txt" "${tmp}/after.txt"; then
+            echo "::error title=[VERIFY] Rehearsal::content-table row counts changed across the Strapi upgrade (see lines above)"
+            exit 1
+          fi
+          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${BASE_SHA:0:7} kept all content-table row counts and /_health returned 204"
+        else
+          boot "${head_dir}" head
+          stop_server
+          echo "::notice title=[VERIFY] Rehearsal::boot smoke passed (/_health returned 204 on an empty database)"
+        fi
+        echo "VERIFY_STRAPI_REHEARSAL_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+
+branding:
+  icon: 'database'
+  color: 'blue'

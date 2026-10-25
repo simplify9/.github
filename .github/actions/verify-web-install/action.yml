@@ -1,0 +1,99 @@
+# =============================================================================
+# Verify Web Install
+# =============================================================================
+# Detects the package manager from the lockfile, sets up Node (cache only on
+# GitHub-hosted runners, see vite-cloudflare-worker.yml / commit 0f33f79) and
+# installs without modifying the lockfile:
+#   yarn.lock + .yarnrc.yml -> corepack, yarn install --immutable
+#   yarn.lock               -> yarn install --frozen-lockfile
+#   package-lock.json       -> npm ci
+#   pnpm-lock.yaml          -> corepack, pnpm install --frozen-lockfile
+# The CALLER job must export GITHUB_TOKEN at job level (yarn 1 expands
+# ${GITHUB_TOKEN} from .npmrc on every invocation) and have packages: read.
+#
+# Outputs: package-manager (npm|yarn|yarn-berry|pnpm), runner (npm|yarn|pnpm).
+# =============================================================================
+name: 'Verify Web Install'
+author: 'Simplify9'
+description: 'Detect the package manager from the lockfile, set up Node and install from the lockfile without modifying it.'
+
+inputs:
+  working-directory:
+    description: 'Directory containing package.json and the lockfile.'
+    required: false
+    default: '.'
+  node-version:
+    description: 'Node.js version.'
+    required: false
+    default: '24'
+
+outputs:
+  package-manager:
+    description: 'npm, yarn, yarn-berry or pnpm.'
+    value: ${{ steps.detect.outputs.pm }}
+  runner:
+    description: 'Tool used to run package scripts: npm, yarn or pnpm.'
+    value: ${{ steps.detect.outputs.runner }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure GitHub Packages auth
+      shell: bash
+      run: |
+        set -euo pipefail
+        NPMRC="${RUNNER_TEMP}/.npmrc"
+        if [[ -f "${HOME}/.npmrc" ]]; then cp "${HOME}/.npmrc" "$NPMRC"; fi
+        # shellcheck disable=SC2016 # literal placeholder, expanded by the package manager
+        printf '%s\n' '//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}' >> "$NPMRC"
+        grep -q '^@simplify9:registry=' "$NPMRC" || echo '@simplify9:registry=https://npm.pkg.github.com' >> "$NPMRC"
+        echo "NPM_CONFIG_USERCONFIG=${NPMRC}" >> "$GITHUB_ENV"
+
+    - name: Detect package manager
+      id: detect
+      shell: bash
+      env:
+        WORKDIR: ${{ inputs.working-directory }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        # shellcheck source=detect_pm.sh
+        source "${ACTION_PATH}/detect_pm.sh"
+        pm="$(detect_pm "${WORKDIR}")" || { echo "${pm}"; exit 1; }
+        echo "pm=${pm}" >> "$GITHUB_OUTPUT"
+        echo "runner=${pm%-berry}" >> "$GITHUB_OUTPUT"
+        echo "::notice title=[VERIFY] Install::package manager ${pm}"
+
+    # Corepack BEFORE setup-node so its yarn/pnpm cache can resolve the binary.
+    - name: Enable Corepack
+      if: steps.detect.outputs.pm == 'yarn-berry' || steps.detect.outputs.pm == 'pnpm'
+      shell: bash
+      run: corepack enable
+
+    # Cache only on GitHub-hosted runners: on self-hosted ones restore/save over
+    # the runner's own link is slower than a fresh install (commit 0f33f79).
+    - name: Setup Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ runner.environment == 'github-hosted' && steps.detect.outputs.runner || '' }}
+        cache-dependency-path: ${{ inputs.working-directory }}/*lock*
+        package-manager-cache: ${{ runner.environment == 'github-hosted' }}
+
+    - name: Install from lockfile
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ steps.detect.outputs.pm }}
+      run: |
+        set -euo pipefail
+        case "${PM}" in
+          yarn-berry) yarn install --immutable ;;
+          yarn)       yarn install --frozen-lockfile ;;
+          npm)        npm ci ;;
+          pnpm)       pnpm install --frozen-lockfile ;;
+        esac
+
+branding:
+  icon: 'package'
+  color: 'blue'
