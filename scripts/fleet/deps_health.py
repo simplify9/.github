@@ -102,7 +102,8 @@ def fetch_window(bot, org, lo, hi, extra=""):
         return got
     if lo < hi:
         mid = lo + (hi - lo) // 2  # dates, so halves never overlap
-        return fetch_window(bot, org, lo, mid) + fetch_window(bot, org, mid + timedelta(days=1), hi)
+        return (fetch_window(bot, org, lo, mid, extra)
+                + fetch_window(bot, org, mid + timedelta(days=1), hi, extra))
     if not extra:
         return [p for st in ("is:open", "is:merged", "is:closed -is:merged")
                 for p in fetch_window(bot, org, lo, hi, st)]

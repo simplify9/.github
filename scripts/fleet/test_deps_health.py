@@ -66,6 +66,20 @@ class T(unittest.TestCase):
         self.assertEqual(r["overdue_alerts"], {"critical": 1})
         self.assertEqual(r["open_verify_contract_issues"], 1)
 
+    def test_split_window_keeps_extra_qualifier(self):
+        qs = []
+
+        def fake(q, bail_over_cap=False):
+            qs.append(q)
+            return [], 1500 if "2026-10-01..2026-10-04" in q else 0
+        orig, d.search_prs = d.search_prs, fake
+        try:
+            d.fetch_window("bot", "o", datetime(2026, 10, 1), datetime(2026, 10, 4), "is:open")
+        finally:
+            d.search_prs = orig
+        self.assertEqual(len(qs), 3)
+        self.assertTrue(all("is:open" in q for q in qs), qs)
+
 
 if __name__ == "__main__":
     unittest.main()
