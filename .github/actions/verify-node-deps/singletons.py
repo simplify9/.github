@@ -40,9 +40,12 @@ def main() -> int:
     ap.add_argument("--names", default="react,react-dom,react-native,next")
     a = ap.parse_args()
     root = Path(a.dir)
-    if not (root / "node_modules").is_dir() and (root / ".pnp.cjs").exists():
-        print("skipped (PnP): no node_modules to scan")
-        return 0
+    if not (root / "node_modules").is_dir():
+        if (root / ".pnp.cjs").exists():
+            print("skipped (PnP): no node_modules to scan")
+            return 0
+        print(f"::error title=[VERIFY] Node deps::node_modules not found in {root} (install did not run?)")
+        return 1
     found = find_versions(root, [n for n in a.names.split(",") if n])
     bad = problems(found)
     for p in bad:

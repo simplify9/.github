@@ -69,6 +69,13 @@ class SingletonTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn("skipped (PnP)", r.stdout)
 
+    def test_missing_node_modules_fails(self):
+        r = subprocess.run([sys.executable, str(HERE / "singletons.py"), "--dir", str(self.root),
+                            "--names", "react"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("::error title=[VERIFY] Node deps::node_modules not found in "
+                      + str(self.root) + " (install did not run?)", r.stdout)
+
     def test_cli_duplicate_fails(self):
         pkg(self.root, "node_modules/react", "react", "18.3.1")
         pkg(self.root, "node_modules/l/node_modules/react", "react", "19.0.0")
