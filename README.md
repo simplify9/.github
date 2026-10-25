@@ -1489,16 +1489,29 @@ The org ships Renovate presets in `renovate/`. They are inert until a self-hoste
 Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack preset extends `default`.
 
 `default` policy:
-- Non-breaking updates (minor, patch, pin, digest) form one group and automerge.
+- Non-breaking updates (minor, patch, pin, digest) form one weekly group and automerge. This includes 0.x patch updates.
 - npm releases wait 7 days; everything else waits 3 days.
-- Breaking updates (major, or 0.x minor) need dashboard approval and never automerge.
-- Breaking security fixes open immediately but a human merges them.
-- Vulnerability alerts automerge with no release-age wait.
+- 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
+- Security fixes open immediately with no release-age wait. Non-major security fixes automerge; major or 0.x minor security fixes are left for a human to merge.
 - Lock files are maintained monthly.
 
 Rule order matters: a later `packageRules` entry overrides an earlier one. Stack presets extend `default`, so their own rules come after it.
 
 To override a repo's policy, add its own `renovate.json` that extends the preset and then sets its own keys or `packageRules`. Keep the override narrow; the org presets are the default for every enrolled repo.
+
+### Strapi major upgrades
+
+Strapi major upgrades change the database schema and the API response shape, so they are never merged on a dependency PR alone. The `strapi` preset attaches this runbook to every major PR.
+
+1. Back up the production database and media.
+2. Restore a production snapshot into a throwaway Postgres.
+3. On a branch, run `npx @strapi/upgrade major` and resolve every `__TODO__` it leaves.
+4. Replace or remove plugins that are incompatible with the new major.
+5. Boot the new major against the restored copy. Migrations run there, not in production.
+6. Compare per-table row counts and spot-check content against the snapshot.
+7. Test every frontend against the new response format. Use the `Strapi-Response-Format: v4` header as a temporary bridge if needed.
+8. Run the verify workflow's Strapi rehearsal on the branch.
+9. Take a production backup right before the maintenance-window deploy.
 
 Validate the presets with `bash renovate/validate.sh` (needs network for `npx`). It runs `renovate-config-validator --strict` on every file in `renovate/`, pinned to `renovate@44.181.5`.
 
