@@ -1,0 +1,1304 @@
+# =============================================================================
+# Verify -- reusable workflow (one required check per repo)
+# =============================================================================
+# Called by workflow-templates/verify.yml as the job id `verify`, so the check
+# to mark REQUIRED in org rulesets is `verify / result`. That one check gates
+# auto-merge of Renovate PRs into develop and every PR into the default branch.
+#
+# Scope: the full ladder runs when the event is workflow_dispatch,
+# OR the PR base is the repo's default branch, OR the PR author is the bot
+# (input `bot-login`). A human PR into develop/development/staging skips every
+# job except `result`, which then passes immediately (about 1 billed minute).
+# The scope expression appears in the `plan` and `result` jobs below; the verify-plan
+# action's test_scope.sh asserts both copies are identical and documents the truth table.
+#
+# Jobs:
+#   plan      scope gate: effective known-failing list, deps_changed, contract_mode
+#   contract  per-stack verification contract (verify-contract action)
+#   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke
+#             (strapi: install and consistency only)
+#   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test, docker build
+#   docker-smoke  opt-in (smoke-path): run the image and probe an HTTP path
+#   react-native, android, maestro, flutter, strapi
+#             per-stack ladders (see each job)
+#   vuln-report  informational, default-branch PRs only: critical Dependabot alerts
+#             as a warning. NOT in `result.needs`, so it can never fail the check.
+#   result    always runs; fails on any failed/cancelled needed job, or when the
+#             scope is full and `plan` did not succeed. Skipped jobs are fine.
+#             Uploads verify-report.json as artifact `verify-report`.
+#
+# `stack: infra` runs no ladder jobs: result passes when plan + contract succeed.
+# =============================================================================
+name: Verify
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: "Stack to verify: dotnet-service, dotnet-library, web, react-native, flutter, strapi, or infra (infra runs no ladder jobs)."
+        required: true
+        type: string
+      working-directory:
+        description: Directory containing the project (repo root by default).
+        required: false
+        type: string
+        default: "."
+      known-failing:
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e bundle android maestro analyze docker smoke rehearsal)."
+        required: false
+        type: string
+        default: ""
+      contract-deadline:
+        description: Contract deadline (YYYY-MM-DD). Empty means warn mode and known-failing never expires.
+        required: false
+        type: string
+        default: ""
+      bot-login:
+        description: Login of the dependency bot whose PRs always get the full ladder.
+        required: false
+        type: string
+        default: "s9-deps-bot[bot]"
+      node-version:
+        description: Node.js version for web, react-native and strapi stacks.
+        required: false
+        type: string
+        default: "24"
+      dotnet-version:
+        description: .NET SDK version for dotnet stacks.
+        required: false
+        type: string
+        default: "10.0.x"
+      java-version:
+        description: Java version for Android builds.
+        required: false
+        type: string
+        default: "17"
+      flutter-version:
+        description: Flutter version for the flutter stack.
+        required: false
+        type: string
+        default: "3.x"
+      smoke-path:
+        description: HTTP path probed by the docker smoke test (empty skips the HTTP probe).
+        required: false
+        type: string
+        default: ""
+      docker-build-github-token:
+        description: >-
+          Mount the job's GITHUB_TOKEN into the docker build as the BuildKit secret GITHUB_TOKEN
+          (RUN --mount=type=secret,id=GITHUB_TOKEN), for dependencies installed from GitHub
+          Packages. Absent from the image and its history. Applies to the docker rung and docker-smoke.
+        required: false
+        type: boolean
+        default: false
+      postgres-version:
+        description: PostgreSQL version for jobs that need a database.
+        required: false
+        type: string
+        default: "16"
+    secrets:
+      dependabot-alerts-token:
+        description: Token able to read Dependabot alerts (critical-vulnerability gate).
+        required: false
+      nuget-restore-token:
+        description: Token for restoring private NuGet packages.
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+jobs:
+  plan:
+    name: plan
+    # Full-scope expression. Must equal the one in `result` (guarded by
+    # .github/actions/verify-plan/test_scope.sh; truth table: verify_full in scope.sh).
+    if: github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    outputs:
+      known_failing: ${{ steps.plan.outputs.known_failing }}
+      deps_changed: ${{ steps.plan.outputs.deps_changed }}
+      contract_mode: ${{ steps.plan.outputs.contract_mode }}
+      strapi_changed: ${{ steps.plan.outputs.strapi_changed }}
+    steps:
+      - name: Plan
+        id: plan
+        uses: simplify9/.github/.github/actions/verify-plan@main
+        with:
+          github-token: ${{ github.token }}
+          event-name: ${{ github.event_name }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+          known-failing: ${{ inputs.known-failing }}
+          deadline: ${{ inputs.contract-deadline }}
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify plan
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Stack | `${{ inputs.stack }}` |
+            | Deps changed | `${{ steps.plan.outputs.deps_changed }}` |
+            | Contract mode | `${{ steps.plan.outputs.contract_mode }}` |
+
+  contract:
+    name: contract
+    needs: plan
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    outputs:
+      missing: ${{ steps.contract.outputs.missing }}
+      mode: ${{ steps.contract.outputs.mode }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verification contract
+        id: contract
+        uses: simplify9/.github/.github/actions/verify-contract@main
+        with:
+          stack: ${{ inputs.stack }}
+          working-directory: ${{ inputs.working-directory }}
+          deadline: ${{ inputs.contract-deadline }}
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verification contract
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Mode | `${{ steps.contract.outputs.mode }}` |
+            | Missing | `${{ steps.contract.outputs.missing }}` |
+
+  # --- Per-stack ladders ---
+  node:
+    name: node
+    needs: plan
+    if: inputs.stack == 'web' || inputs.stack == 'strapi'
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    # Untrusted PR code runs here: read-only token, no deploy secrets. The token
+    # is exported job-wide because yarn 1 expands ${GITHUB_TOKEN} from .npmrc on
+    # every invocation (see vite-cloudflare-worker.yml).
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Detect package manager, set up Node and install from the lockfile.
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
+        uses: simplify9/.github/.github/actions/verify-web-install@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
+      - name: Consistency
+        id: consistency
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' consistency ') }}
+        uses: simplify9/.github/.github/actions/verify-node-deps@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          package-manager: ${{ steps.install.outputs.package-manager }}
+
+      - name: Lint
+        id: lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' lint ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' lint; then
+            "${RUNNER}" run lint
+          else
+            echo "::notice title=[VERIFY] lint::no lint script in package.json, skipped"
+          fi
+
+      - name: Typecheck
+        id: typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' typecheck ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' typecheck; then
+            "${RUNNER}" run typecheck
+          else
+            echo "::notice title=[VERIFY] typecheck::no typecheck script in package.json, skipped"
+          fi
+
+      - name: Test
+        id: test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' test; then
+            "${RUNNER}" run test
+          else
+            echo "::notice title=[VERIFY] test::no test script in package.json, skipped"
+          fi
+
+      - name: Build
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' build; then
+            "${RUNNER}" run build
+          else
+            echo "::notice title=[VERIFY] build::no build script in package.json, skipped"
+          fi
+      - name: Workers dry run
+        id: worker-dry-run
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' worker-dry-run ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f wrangler.toml ] || [ -f wrangler.json ] || [ -f wrangler.jsonc ]; then
+            npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/wrangler"
+          else
+            echo "::notice title=[VERIFY] worker-dry-run::no wrangler config, skipped"
+          fi
+
+      - name: Probe e2e script
+        id: e2e-probe
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' }}
+        shell: bash
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts?.["test:e2e"] ? 0 : 1)'; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: E2E (repo Playwright script)
+        id: e2e
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' && steps.e2e-probe.outputs.has == 'true' && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        shell: bash
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
+          "${RUNNER}" run test:e2e
+
+      # No e2e script: fallback smoke test until the contract deadline (after it
+      # the contract job already fails). Reported under the canonical id `e2e`.
+      - name: Smoke test (no e2e script)
+        id: smoke
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' && steps.e2e-probe.outputs.has == 'false' && needs.plan.outputs.contract_mode != 'enforce' && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        uses: simplify9/.github/.github/actions/verify-web-smoke@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["install", "consistency", "lint", "typecheck", "test", "build", "worker-dry-run", "e2e", "smoke"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              name = "e2e" if i == "smoke" else i
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(name)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify node
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Package manager | `${{ steps.install.outputs.package-manager }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+  # .NET ladder. Runs from the repo root: the dotnet-build action has no
+  # working-directory input, so a sub-directory is scoped through its `projects`
+  # glob and the resolved build-target stays relative to the root.
+  dotnet:
+    name: dotnet
+    needs: plan
+    if: startsWith(inputs.stack, 'dotnet-')
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Anchor step: restore + build, tests off so `test` has its own id.
+      - name: Restore and build
+        id: build
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        env:
+          # Read by a nuget.config credential written as %NUGET_AUTH_TOKEN%.
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
+        with:
+          projects: ${{ inputs.working-directory }}/**/*.csproj
+          run-tests: 'false'
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      # Catches the multi-project drift class: one csproj bumps a package, a
+      # sibling does not -> NU1605 downgrade / NU1608 / NU1107 / NU1603.
+      - name: Consistency (NuGet version conflicts)
+        id: consistency
+        if: ${{ !cancelled() && steps.build.outputs.build-target != '' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' consistency ') }}
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ steps.build.outputs.build-target }}
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
+        run: |
+          set -euo pipefail
+          dotnet restore "$BUILD_TARGET" --force-evaluate -p:WarningsAsErrors=NU1605%3BNU1608%3BNU1107%3BNU1603
+
+      - name: Test
+        id: test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.build.outputs.build-target != '' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ steps.build.outputs.build-target }}
+        run: |
+          set -euo pipefail
+          dotnet test "$BUILD_TARGET" --no-build -c Release
+
+      - name: Detect Dockerfile
+        id: dockerfile
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        shell: bash
+        env:
+          WORKDIR: ${{ inputs.working-directory }}
+        run: |
+          if [ -f "$WORKDIR/Dockerfile" ]; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] docker::no Dockerfile in $WORKDIR, skipped"
+          fi
+
+      - name: Docker build (no push)
+        id: docker
+        if: ${{ !cancelled() && steps.dockerfile.outputs.has == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' docker ') }}
+        uses: simplify9/.github/.github/actions/docker-build-push@main
+        with:
+          push: 'false'
+          image-name: verify-build
+          version: pr-${{ github.run_id }}
+          dockerfile: ${{ inputs.working-directory }}/Dockerfile
+          context: ${{ inputs.working-directory }}
+          build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', github.token) || '' }}
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["build", "consistency", "test", "docker"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(i)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify dotnet
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Build target | `${{ steps.build.outputs.build-target }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  # Opt-in (smoke-path set): needs a local Docker daemon, so GitHub-hosted only.
+  docker-smoke:
+    name: docker-smoke
+    needs: plan
+    if: inputs.smoke-path != '' && startsWith(inputs.stack, 'dotnet-')
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Docker smoke
+        id: smoke
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' smoke ') }}
+        shell: bash
+        env:
+          SMOKE_PATH: ${{ inputs.smoke-path }}
+          GITHUB_TOKEN: ${{ inputs.docker-build-github-token && github.token || '' }}
+          WITH_TOKEN: ${{ inputs.docker-build-github-token }}
+        run: |
+          set -euo pipefail
+          if [ "$WITH_TOKEN" = "true" ]; then
+            DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t verify .
+          else
+            docker build -t verify .
+          fi
+          docker run -d --name verify-smoke -p 8080:8080 -e ASPNETCORE_URLS=http://+:8080 verify
+          curl --fail --retry 30 --retry-connrefused --retry-delay 2 "http://localhost:8080${SMOKE_PATH}"
+
+      - name: Container logs
+        if: ${{ failure() || steps.smoke.outcome == 'failure' }}
+        shell: bash
+        run: docker logs verify-smoke || true
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.smoke.outcome }}
+          CONCLUSION: ${{ steps.smoke.conclusion }}
+        run: |
+          failed="" warned=""
+          if [ "$OUTCOME" = "failure" ]; then
+            if [ "$CONCLUSION" = "success" ]; then warned="smoke"; else failed="smoke"; fi
+          fi
+          {
+            echo "failed=$failed"
+            echo "warned=$warned"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify docker smoke
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Probe | `${{ inputs.smoke-path }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+  # React Native ladder (yarn classic). Untrusted PR code runs here: read-only
+  # token, no secrets. The token is exported job-wide because yarn 1 expands
+  # ${GITHUB_TOKEN} from .npmrc on every invocation.
+  react-native:
+    name: react-native
+    needs: plan
+    if: inputs.stack == 'react-native'
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
+
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
+        shell: bash
+        run: yarn install --frozen-lockfile
+
+      - name: Contract (react / react-native)
+        id: contract
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' consistency ') }}
+        uses: simplify9/.github/.github/actions/check-react-native-contract@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          fail-on-unknown: 'true'
+
+      - name: Align deps (rnx-kit check)
+        id: align
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' consistency ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'const p=require("./package.json");process.exit((p.devDependencies||{})["@rnx-kit/align-deps"]?0:1)'; then
+            yarn rnx-align-deps
+          else
+            echo "::notice title=[VERIFY] consistency::@rnx-kit/align-deps not a devDependency, skipped"
+          fi
+
+      - name: Lint
+        id: lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' lint ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' lint; then
+            yarn run lint
+          else
+            echo "::notice title=[VERIFY] lint::no lint script in package.json, skipped"
+          fi
+
+      - name: Typecheck
+        id: typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' typecheck ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' typecheck; then
+            yarn run typecheck
+          elif [ -f tsconfig.json ]; then
+            npx tsc --noEmit
+          else
+            echo "::notice title=[VERIFY] typecheck::no typecheck script or tsconfig.json, skipped"
+          fi
+
+      - name: Test
+        id: test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' test; then
+            yarn run test
+          else
+            echo "::notice title=[VERIFY] test::no test script in package.json, skipped"
+          fi
+
+      # Bundling both platforms catches resolution/transform breakage that
+      # lint, tsc and unit tests miss.
+      - name: Bundle (android and ios)
+        id: bundle
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' bundle ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f index.js ]; then entry=index.js
+          elif [ -f index.ts ]; then entry=index.ts
+          else echo "::error title=[VERIFY] bundle::no index.js or index.ts entry file"; exit 1
+          fi
+          for p in android ios; do
+            npx react-native bundle --platform "$p" --dev false --entry-file "$entry" \
+              --bundle-output "$RUNNER_TEMP/$p.bundle" --assets-dest "$RUNNER_TEMP/$p-assets"
+          done
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          # step id -> canonical id (contract and align both report `consistency`)
+          ids = {"install": "install", "contract": "consistency", "align": "consistency",
+                 "lint": "lint", "typecheck": "typecheck", "test": "test", "bundle": "bundle"}
+          failed, warned = [], []
+          for i, name in ids.items():
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              lst = warned if s.get("conclusion") == "success" else failed
+              if name not in lst:
+                  lst.append(name)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify react-native
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  android:
+    name: android
+    needs: [plan, react-native]
+    # Every rung runs so one run reports all failures: build even when react-native failed; plan success is explicit
+    # because !cancelled() drops the implicit success() (human PRs skip plan).
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.react-native.result != 'cancelled' }}
+    runs-on: ${{ vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+      apk: ${{ steps.collect.outputs.apk }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
+
+      # No `cache: gradle` here: setup-gradle owns Gradle home caching (AGENTS.md).
+      - name: Setup Java
+        uses: actions/setup-java@v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') || contains(format(' {0} ', needs.plan.outputs.known_failing), ' android ') }}
+        shell: bash
+        run: yarn install --frozen-lockfile
+
+      - name: Assemble debug APK
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' android ') }}
+        shell: bash
+        run: cd android && ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        id: upload
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-apk
+          path: ${{ inputs.working-directory }}/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+          APK_OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          failed, warned = [], []
+          # This job has one canonical id; a failed install is reported under it too.
+          for i in ("install", "build"):
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              lst = warned if s.get("conclusion") == "success" else failed
+              if "android" not in lst:
+                  lst.append("android")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+              f.write("apk=" + ("true" if os.environ["APK_OUTCOME"] == "success" else "false") + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify android
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  # Hosted label only: office runner pods have no KVM.
+  maestro:
+    name: maestro
+    needs: [plan, android]
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.android.result != 'cancelled' && needs.android.outputs.apk == 'true' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Repos without a smoke flow skip the (paid) emulator job; the contract job
+      # enforces the flow file after the deadline.
+      - name: Probe smoke flow
+        id: flow
+        shell: bash
+        working-directory: .
+        env:
+          WD: ${{ inputs.working-directory }}
+        run: |
+          if test -f "$WD/.maestro/smoke.yaml"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] maestro::no .maestro/smoke.yaml - smoke skipped (the contract job reports maestro-smoke)"
+          fi
+
+      # udev rule from GitHub's 2024-04-02 changelog (KVM on hosted Linux runners).
+      - name: Enable KVM
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Download APK
+        id: apk
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
+        uses: actions/download-artifact@v8
+        with:
+          name: verify-apk
+          path: ${{ runner.temp }}/apk
+
+      - name: Setup Node
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
+          cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
+
+      - name: Setup Java
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
+        uses: actions/setup-java@v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Install
+        id: install
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
+        shell: bash
+        run: yarn install --frozen-lockfile
+
+      # A debug APK loads its JS from Metro (adb reverse below).
+      - name: Start Metro
+        id: metro
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
+        shell: bash
+        run: |
+          nohup npx react-native start --port 8081 > "$RUNNER_TEMP/metro.log" 2>&1 &
+          echo "Metro started in background"
+
+      - name: Install Maestro
+        id: maestro-cli
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
+        shell: bash
+        env:
+          MAESTRO_VERSION: 2.11.0
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Smoke flow (emulator)
+        id: smoke
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' && steps.metro.outcome == 'success' && steps.maestro-cli.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          working-directory: ${{ inputs.working-directory }}
+          script: adb install -r ${{ runner.temp }}/apk/*.apk && adb reverse tcp:8081 tcp:8081 && maestro test .maestro/smoke.yaml
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          failed, warned = [], []
+          # Any rung failing here means the smoke flow could not run: one canonical id.
+          for i in ("apk", "install", "metro", "maestro-cli", "smoke"):
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              lst = warned if s.get("conclusion") == "success" else failed
+              if "maestro" not in lst:
+                  lst.append("maestro")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify maestro
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  flutter:
+    name: flutter
+    needs: plan
+    if: inputs.stack == 'flutter'
+    # Android runner: the debug APK build needs the Android SDK.
+    runs-on: ${{ vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Same JDK setup as flutter-android-build.yml; office images may lack one.
+      - name: Setup Java
+        uses: actions/setup-java@v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ inputs.flutter-version }}
+          cache: true
+
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        id: analyze
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' analyze ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter analyze
+
+      - name: Test
+        id: test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && hashFiles(format('{0}/test/**', inputs.working-directory)) != '' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter test
+
+      - name: Build debug APK
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --debug
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["install", "analyze", "test", "build"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(i)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify flutter
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  strapi:
+    name: strapi
+    needs: plan
+    if: inputs.stack == 'strapi'
+    # Service containers need a Docker daemon: hosted runner.
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Throwaway database for the boot smoke and the data-upgrade rehearsal.
+    services:
+      postgres:
+        image: postgres:${{ inputs.postgres-version }}
+        env:
+          POSTGRES_USER: strapi
+          POSTGRES_PASSWORD: strapi
+          POSTGRES_DB: strapi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U strapi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      # Full history: the PR base commit becomes a git worktree for the rehearsal.
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
+        uses: simplify9/.github/.github/actions/verify-web-install@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
+      - name: Build
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        shell: bash
+        env:
+          RUNNER_PM: ${{ steps.install.outputs.runner }}
+        run: |
+          set -euo pipefail
+          "${RUNNER_PM}" run build
+
+      # workflow_dispatch has no base commit: strapi_changed is false there, boot smoke only.
+      - name: Rehearsal
+        id: rehearsal
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' rehearsal ') }}
+        uses: simplify9/.github/.github/actions/strapi-rehearsal@main
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          strapi-changed: ${{ needs.plan.outputs.strapi_changed }}
+          working-directory: ${{ inputs.working-directory }}
+          package-runner: ${{ steps.install.outputs.runner }}
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["install", "build", "rehearsal"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(i)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify strapi
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Upgrade rehearsal | `${{ needs.plan.outputs.strapi_changed }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  vuln-report:
+    name: vuln-report
+    needs: plan
+    # No !cancelled(): the implicit success() keeps this skipped when plan is skipped.
+    if: github.base_ref == github.event.repository.default_branch
+    # Informational only: not in result.needs, so it never fails `verify / result`.
+    continue-on-error: true
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Critical vulnerability report
+        id: vulns
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Vulnerability report (informational)
+          status: ${{ job.status }}
+          details: Critical Dependabot alerts on this repository. Informational only; this job never fails verify / result.
+
+  result:
+    name: result
+    # `if: always()` is essential: a job whose needs were skipped is skipped, and
+    # a skipped required check never reports. Verdict is computed from needs results.
+    needs: [plan, contract, node, dotnet, docker-smoke, react-native, android, maestro, flutter, strapi]
+    if: always()
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate
+        id: verdict
+        shell: bash
+        env:
+          # Same expression as the `plan` job `if:`.
+          FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login }}
+          BASE: ${{ github.base_ref }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          needs = json.loads(os.environ["NEEDS"])
+          full = os.environ["FULL"] == "true"
+          base = os.environ["BASE"]
+
+          def out(job, key):
+              return (needs.get(job, {}).get("outputs") or {}).get(key, "") or ""
+
+          bad = sorted(j for j, n in needs.items() if n.get("result") in ("failure", "cancelled"))
+          plan_ok = needs.get("plan", {}).get("result") == "success"
+          problems = [f"{j} {needs[j]['result']}" for j in bad]
+          if full and not plan_ok and "plan" not in bad:
+              problems.append(f"plan {needs.get('plan', {}).get('result')} (expected success)")
+
+          ladder = [j for j in needs if j not in ("plan", "contract")]
+          report = {
+              "scope": "full" if full else "skipped-human-develop",
+              "failed": sorted(w for j in ladder for w in out(j, "failed").split()),
+              "warned": sorted(w for j in ladder for w in out(j, "warned").split()),
+              "missing": out("contract", "missing").split(),
+          }
+          with open("verify-report.json", "w") as f:
+              json.dump(report, f, indent=2)
+
+          status = "failure" if problems else "success"
+          if problems:
+              line = "Verification failed: " + "; ".join(problems)
+          elif not full:
+              line = f"Human PR into {base}: full verification runs on PRs into the default branch and on Renovate PRs."
+          else:
+              line = "Verification passed."
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"status={status}\n")
+              f.write(f"summary={line}\n")
+          print(line)
+          if problems:
+              print("::error title=[VERIFY] Result::" + "; ".join(problems))
+          PY
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-report
+          path: verify-report.json
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify result
+          status: ${{ steps.verdict.outputs.status }}
+          details: ${{ steps.verdict.outputs.summary }}
+
+      - name: Enforce verdict
+        if: always() && steps.verdict.outputs.status != 'success'
+        shell: bash
+        run: exit 1

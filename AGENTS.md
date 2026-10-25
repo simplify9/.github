@@ -76,6 +76,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `docker/build-push-action` | `@v7` | |
 | `cloudflare/wrangler-action` | `@v4` | Used for all Cloudflare Workers deploys (`command: deploy`). Deployment URL is the `deployment-url` output |
 | `gradle/actions/setup-gradle` | `@v5` | **Pinned to v5.** Do NOT use `gradle/gradle-build-action` (archived). v6.x is not adopted — stay on v5 |
+| `reactivecircus/android-emulator-runner` | `@v2` | `verify` Maestro smoke job (hosted runner, KVM enabled via udev rule, `api-level: 34`); Maestro CLI version pinned via `MAESTRO_VERSION` (2.11.0); the installer script is fetched from get.maestro.mobile.dev at run time, on a hosted runner with a read-only token |
 | `ruby/setup-ruby` | `@v1` | iOS: Ruby/Bundler-managed CocoaPods (`bundler-cache`) |
 | `subosito/flutter-action` | `@v2` | Flutter SDK setup (Flutter iOS/Android workflows). Version selector via `flutter-version` input, default `3.x` |
 | `maxim-lobanov/setup-xcode` | `@v1` | iOS Xcode version selection |
@@ -315,6 +316,7 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 | Workflow | Purpose | Key inputs |
 |---|---|---|
 | `react-native-contract-gate.yml` | Thin `workflow_call` wrapper around `check-react-native-contract`, producing the single check `rn-contract / check` (mark it **required** on the branch Dependabot targets, usually `develop`). Fails a PR when the resolved `react` doesn't exactly match the version `react-native`'s bundled renderer requires, or when `react` is duplicated in the tree — a runtime crash that type-check, lint, jest and Metro bundling all miss. Called from the `react-native-contract-check` template. `contents: read` only; no secrets. | `working-directory` (default `.`), `fail-on-unknown` (default `true`, fail closed), `runner` (default `ubuntu-latest`) |
+| `verify.yml` | Skeleton of the single required check `verify / result`. Full ladder only for `workflow_dispatch`, PRs into the default branch, or PRs authored by `bot-login`; a human PR into develop/development/staging passes immediately (only `result` runs). Jobs: `plan`, `contract` (`verify-contract`), the `node` web ladder (install via `verify-web-install`, consistency via `verify-node-deps`, lint, typecheck, test, build, Workers dry run, then the repo's `test:e2e` or, before the contract deadline, the `verify-web-smoke` fallback; strapi runs install and consistency only; job outputs `failed`/`warned`), the `dotnet` ladder (`dotnet-build` with tests off, `consistency` = `dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors to catch one-csproj-bumped drift, `test`, and a no-push `docker-build-push` build when a Dockerfile exists), the opt-in `docker-smoke` job (needs `smoke-path`; hosted runner; runs the image and curls the path), the `strapi` job (hosted runner, Postgres service; `install`, `build`, then the `strapi-rehearsal` action: boots HEAD on an empty database, or, when the PR diff changes an `"@strapi/` dependency in `package.json` (`strapi_changed` plan output), restores `ci/fixture.sql.gz`, boots the base commit from a git worktree, boots HEAD on the same database and requires `/_health` 204 and unchanged content-table row counts; `rehearse.sh` tested by `test_rehearse.sh`), the `react-native` ladder (`install`, `consistency`, `lint`, `typecheck`, `test`, `bundle`), `android` (debug build), `maestro` (skipped without an APK or `.maestro/smoke.yaml`), the `flutter` ladder (`install`, `analyze`, `test`, `build`), the informational `vuln-report` (`check-critical-vulns`, default-branch PRs only, `continue-on-error`, deliberately NOT in `result.needs` so it can never fail the check; no `!cancelled()` so it stays skipped when `plan` is skipped) and `result` (`if: always()`, fails on any failed/cancelled needed job or a non-successful `plan` in full scope; uploads `verify-report`). `stack: infra` runs no ladder jobs. The `plan` job calls the `verify-plan` action (`scope.sh`, tested by `test_scope.sh`, which also guards the duplicated scope expression). | `stack` (required), `working-directory`, `known-failing`, `contract-deadline`, `bot-login`, `node-version`, `dotnet-version`, `java-version`, `flutter-version`, `smoke-path`, `docker-build-github-token`, `postgres-version`; secrets `dependabot-alerts-token`, `nuget-restore-token`. **`verify` installs and runs PR code with no deploy secrets**: every job is `contents: read` / `packages: read`, never add a deploy secret or write permission to it. Contract item ids live in `verify-contract/contract.py` (README lists them) |
 
 **Never add a `yarn install` (or any install/execute) step to this gate** — it runs on plain `pull_request` against PR-controlled `package.json`/lockfile, and installing would execute freshly-published dependency code. It reads the lockfile statically and fetches only the renderer file it needs. See the README's React Native contract section for the full rationale.
 
@@ -322,7 +324,7 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 
 ## Workflow Templates
 
-`workflow-templates/` holds the twelve starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
+`workflow-templates/` holds the thirteen starter workflows GitHub surfaces in the "New workflow" picker for org repos. Each is a `<name>.yml` + `<name>.properties.json` pair (the `.properties.json` supplies `name`, `description`, `iconName`, `categories`). Each template's job `uses:` a reusable workflow at `@main`.
 
 | Template | Calls reusable workflow | Trigger |
 |---|---|---|
@@ -338,6 +340,7 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 | `critical-vuln-check` | `critical-vuln-gate.yml` | `pull_request_target` on `main`, `develop` |
 | `dependabot-auto-merge` | `critical-vuln-gate.yml` (+ inline auto-merge job) | `pull_request_target` on `main`, `develop` |
 | `react-native-contract-check` | `react-native-contract-gate.yml` | `pull_request` on `main`, `develop` |
+| `verify` | `verify.yml` | `pull_request` on `main`, `develop`, `development`, `staging`, `gigstaging` + `workflow_dispatch` |
 
 **When you add, rename, or change the interface of a reusable workflow that has a template, update the matching `workflow-templates/<x>.yml` AND its `.properties.json` in the same change.** The deploy/build templates (both Cloudflare, `generic-chart-cicd`, and the four mobile ones) trigger on `push` to `develop`/`main` plus `workflow_dispatch`, and gate a dev job and a prod job per branch with `if:` on `github.ref` / `github.ref_name`; `service-cicd` and `nuget-publish` trigger on `main` only. The two Security templates trigger on **`pull_request_target`** (never `push`): Dependabot's own PRs get no repository secrets and a read-only token under plain `pull_request`, so the gate could never read `DEPENDABOT_ALERTS_TOKEN`. That is safe only because they never check out or execute PR code. `react-native-contract-check` deliberately uses plain **`pull_request`**, because it must read the PR's own `package.json` and lockfile; it needs no secrets and must never install or run PR code.
 
@@ -347,14 +350,14 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 
 ## Composite Action Reference
 
-All 20 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
+All 26 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
 
 ### Versioning & Tagging
 - `determine-semver` — Computes the next `major.minor.patch` from git tags. Inputs: `major`, `minor`, `release-branch`, `current-ref`, `build-id`. Outputs: `version`, `git-tag`, `is-release`.
 - `tag-github-origin` — Creates a lightweight git tag via the GitHub REST API (no checkout). Inputs: `github-token`, `repository`, `tag`, `sha`. Outputs: `created`, `ref`.
 
 ### Docker
-- `docker-build-push` — Build + push (optionally multi-platform via Buildx/QEMU) up to three tags (version, branch name, `latest`). Inputs: `image-name`, `version`, `username`, `password`, `registry`, `platforms`, `build-args`, `build-secrets`. Outputs: `image-tags`, `image-digest`.
+- `docker-build-push` — Build + push (optionally multi-platform via Buildx/QEMU) up to three tags (version, branch name, `latest`). Inputs: `image-name`, `version`, `username`, `password`, `registry`, `platforms`, `build-args`, `build-secrets`, `push`. Outputs: `image-tags`, `image-digest`. **Build-only mode:** `push: 'false'` skips the registry login, so `username`/`password` are optional (used by the `verify` docker rung and `docker-smoke`).
   docker-build-push detects a shared in-cluster BuildKit from the runner's environment (S9_BUILDKIT_ENDPOINT, S9_BUILDKIT_TLS_DIR) and then uses buildx's remote driver, skips the type=gha cache and the build summary; multi-platform builds are refused there. GitHub-hosted behaviour is unchanged. Pass credentials as `build-secrets`, not `build-args`: build arguments are recorded with the build.
 
 ### Helm
@@ -391,6 +394,14 @@ All 20 actions are composite. Call them in job steps with `uses: simplify9/.gith
 
 ### React Native
 - `check-react-native-contract` — Static (never installs or executes PR code) check that the lockfile-resolved `react` exactly matches the version `react-native`'s shipped renderer asserts, and that `react` isn't duplicated; reads the expected version from `node_modules` when present, otherwise fetches only the renderer file from the CDN. Falls back to Fabric's `reconcilerVersion` on RN ≥ 0.86 (Paper removed) and fails closed if it still can't determine the contract. Inputs: `working-directory`, `fail-on-unknown`. Outputs: `status`, `react`, `expected-react`. Used by `react-native-contract-gate.yml`.
+
+### Verify
+- `verify-plan` — Scope helper (`scope.sh`, tested by `test_scope.sh`, which also asserts the scope expression copied into `plan` and `result` stays identical). Inputs: `event-name`, `repository`, `pr-number`, `known-failing`, `deadline`, `github-token`. Outputs: `known_failing`, `deps_changed`, `contract_mode`, `strapi_changed`.
+- `verify-contract` — Reports missing Verification Contract items (`contract.py`, stdlib only, tested by `test_contract.py`). Inputs: `stack` (required), `working-directory`, `deadline`. Outputs: `missing`, `mode` (`warn`/`enforce`). Adding an item means editing `contract.py`, its test and the README table together.
+- `verify-web-install` — `detect_pm.sh` picks npm/yarn/yarn-berry/pnpm from the lockfile (tested by `test_detect_pm.sh`), sets up Node, installs without modifying the lockfile. Inputs: `working-directory`, `node-version`. Outputs: `package-manager`, `runner`.
+- `verify-node-deps` — `singletons.py` fails on duplicate `react`/`react-dom`/`react-native`/`next` in `node_modules` and, for npm, on invalid peers; reports "skipped (PnP)" instead of passing when there is no `node_modules`. Inputs: `package-manager` (required), `working-directory`, `names`.
+- `verify-web-smoke` — `smoke.mjs` serves the build output and loads it in Chromium, failing on page or console errors (tested by `smoke.test.mjs` via `node --test`). Input: `working-directory`.
+- `strapi-rehearsal` — `rehearse.sh` boots Strapi on Postgres; with `strapi-changed: true` restores `ci/fixture.sql.gz`, boots the base commit (git worktree) then HEAD and requires `/_health` 204 and unchanged content-table row counts (tested by `test_rehearse.sh`). Inputs: `base-sha`, `strapi-changed`, `working-directory`, `package-runner`.
 
 ### Shared
 - `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` -> SUCCESS / FAILED), `details`. Used by every reusable workflow.
