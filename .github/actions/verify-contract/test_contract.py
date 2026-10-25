@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from datetime import date
 
@@ -47,6 +49,18 @@ class MissingItems(unittest.TestCase):
     def test_unknown_stack_raises(self):
         with self.assertRaises(ValueError):
             c.missing_items("cobol", set(), None, 0, False)
+
+class Scan(unittest.TestCase):
+    def test_scan_ignores_vendored_dirs(self):
+        with tempfile.TemporaryDirectory() as d:
+            for rel in ("node_modules/yarn.lock", "ios/Pods/X.Tests/X.Tests.csproj"):
+                path = os.path.join(d, rel)
+                os.makedirs(os.path.dirname(path))
+                open(path, "w").close()
+            files, csprojs, health = c.scan(d)
+        self.assertEqual((files, csprojs, health), (set(), 0, False))
+        self.assertEqual(c.missing_items("dotnet-library", files, None, csprojs, health),
+                         ["lockfile", "toolchain-pin", "cpm", "test-project"])
 
 
 class Mode(unittest.TestCase):

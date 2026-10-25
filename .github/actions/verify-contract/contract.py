@@ -20,7 +20,7 @@ SCRIPTS = {
     "react-native": ["lint", "typecheck", "test"],
     "strapi": ["build"],
 }
-SKIP_DIRS = {".git", "node_modules", "bin", "obj", "build", ".dart_tool", ".yarn"}
+SKIP_DIRS = {".git", "node_modules", "bin", "obj", "build", ".dart_tool", ".yarn", "Pods"}
 STACKS = set(NODE) | {"dotnet-service", "dotnet-library", "flutter", "infra"}
 
 

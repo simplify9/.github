@@ -71,10 +71,11 @@ runs:
         for id in ${missing}; do
           echo "::${level} title=[VERIFY] Contract::missing contract item: ${id}"
         done
-        echo "VERIFY_CONTRACT_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
         if [ "${mode}" = "enforce" ] && [ -n "${missing}" ]; then
+          echo "VERIFY_CONTRACT_CP1_STATUS=FAILED" >> "$GITHUB_ENV"
           exit 1
         fi
+        echo "VERIFY_CONTRACT_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
 branding:
   icon: 'check-square'
