@@ -82,6 +82,14 @@ on:
         required: false
         type: string
         default: ""
+      docker-build-github-token:
+        description: >-
+          Mount the job's GITHUB_TOKEN into the docker build as the BuildKit secret GITHUB_TOKEN
+          (RUN --mount=type=secret,id=GITHUB_TOKEN), for dependencies installed from GitHub
+          Packages. Absent from the image and its history. Applies to the docker rung and docker-smoke.
+        required: false
+        type: boolean
+        default: false
       postgres-version:
         description: PostgreSQL version for jobs that need a database.
         required: false
@@ -447,6 +455,7 @@ jobs:
           version: pr-${{ github.run_id }}
           dockerfile: ${{ inputs.working-directory }}/Dockerfile
           context: ${{ inputs.working-directory }}
+          build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', github.token) || '' }}
 
       - name: Collect outcomes
         id: collect
@@ -512,9 +521,15 @@ jobs:
         shell: bash
         env:
           SMOKE_PATH: ${{ inputs.smoke-path }}
+          GITHUB_TOKEN: ${{ inputs.docker-build-github-token && github.token || '' }}
+          WITH_TOKEN: ${{ inputs.docker-build-github-token }}
         run: |
           set -euo pipefail
-          docker build -t verify .
+          if [ "$WITH_TOKEN" = "true" ]; then
+            DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t verify .
+          else
+            docker build -t verify .
+          fi
           docker run -d --name verify-smoke -p 8080:8080 -e ASPNETCORE_URLS=http://+:8080 verify
           curl --fail --retry 30 --retry-connrefused --retry-delay 2 "http://localhost:8080${SMOKE_PATH}"
 
