@@ -711,8 +711,10 @@ runs:
         retention-days: 5
         if-no-files-found: warn
 
+    # Skipped when the critical step succeeded: then only the SLA step can have
+    # failed, and it emits its own [VULN-SLA] error.
     - name: Report failure
-      if: failure()
+      if: failure() && steps.check.outcome != 'success'
       shell: bash
       env:
         REPOSITORY: ${{ inputs.repository != '' && inputs.repository || github.repository }}
