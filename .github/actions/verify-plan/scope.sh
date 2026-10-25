@@ -27,3 +27,9 @@ deps_changed_from_list() {
   local pattern='(^|/)(package\.json|yarn\.lock|package-lock\.json|pnpm-lock\.yaml|Directory\.Packages\.props|pubspec\..*|Gemfile.*)$|\.csproj$|(^|/)(android|ios)/'
   if grep -Eq "${pattern}" <<< "$1"; then echo true; else echo false; fi
 }
+
+# strapi_changed_from_pr <newline-separated file paths> <package.json patch text> -> true|false
+# True when a package.json is in the PR and a changed (+/-) patch line names an "@strapi/ dependency.
+strapi_changed_from_pr() {
+  if grep -Eq '(^|/)package\.json$' <<< "$1" && grep -Eq '^[+-].*"@strapi/' <<< "$2"; then echo true; else echo false; fi
+}

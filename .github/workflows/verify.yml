@@ -19,7 +19,7 @@
 #             (strapi: install and consistency only)
 #   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test, docker build
 #   docker-smoke  opt-in (smoke-path): run the image and probe an HTTP path
-#   react-native, android, maestro, flutter, strapi
+#   react-native, android, maestro, flutter
 #             ladder stubs (`if: false`), replaced by later tasks; ids are fixed
 #             so `result.needs` never changes
 #   result    always runs; fails on any failed/cancelled needed job, or when the
@@ -123,6 +123,7 @@ jobs:
       known_failing: ${{ steps.plan.outputs.known_failing }}
       deps_changed: ${{ steps.plan.outputs.deps_changed }}
       contract_mode: ${{ steps.plan.outputs.contract_mode }}
+      strapi_changed: ${{ steps.plan.outputs.strapi_changed }}
     steps:
       - name: Plan
         id: plan
@@ -1082,11 +1083,112 @@ jobs:
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
 
   strapi:
+    name: strapi
     needs: plan
-    if: inputs.stack == ''
-    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    if: inputs.stack == 'strapi'
+    # Service containers need a Docker daemon: hosted runner.
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Throwaway database for the boot smoke and the data-upgrade rehearsal.
+    services:
+      postgres:
+        image: postgres:${{ inputs.postgres-version }}
+        env:
+          POSTGRES_USER: strapi
+          POSTGRES_PASSWORD: strapi
+          POSTGRES_DB: strapi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U strapi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
-      - run: echo "stub"
+      # Full history: the PR base commit becomes a git worktree for the rehearsal.
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
+        uses: simplify9/.github/.github/actions/verify-web-install@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
+      - name: Build
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        shell: bash
+        env:
+          RUNNER_PM: ${{ steps.install.outputs.runner }}
+        run: |
+          set -euo pipefail
+          "${RUNNER_PM}" run build
+
+      # workflow_dispatch has no base commit: strapi_changed is false there, boot smoke only.
+      - name: Rehearsal
+        id: rehearsal
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' rehearsal ') }}
+        uses: simplify9/.github/.github/actions/strapi-rehearsal@main
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          strapi-changed: ${{ needs.plan.outputs.strapi_changed }}
+          working-directory: ${{ inputs.working-directory }}
+          package-runner: ${{ steps.install.outputs.runner }}
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["install", "build", "rehearsal"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(i)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify strapi
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Upgrade rehearsal | `${{ needs.plan.outputs.strapi_changed }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
 
   result:
     name: result

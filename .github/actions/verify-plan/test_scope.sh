@@ -35,6 +35,13 @@ test_deps_changed_large_list() {
   eq "${FUNCNAME[0]}" true "$(deps_changed_from_list "$big")"
   set +o pipefail
 }
+test_strapi_changed_true() {
+  eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'src/a.js\npackage.json' $'@@ -1,3 +1,3 @@\n-    "@strapi/strapi": "5.1.0",\n+    "@strapi/strapi": "5.2.0",')"
+}
+test_strapi_changed_false_other_dep() {
+  eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'package.json' $'@@ -1,3 +1,3 @@\n     "@strapi/strapi": "5.1.0",\n-    "left-pad": "1.0.0",\n+    "left-pad": "1.1.0",')"
+}
+test_strapi_changed_no_package_json() { eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'src/a.js\nREADME.md' '')"; }
 test_scope_expression_copies_identical() {
   canon="github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login"
   yml="${here}/../../workflows/verify.yml"
