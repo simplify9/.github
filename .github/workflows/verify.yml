@@ -15,7 +15,9 @@
 # Jobs:
 #   plan      scope gate: effective known-failing list, deps_changed, contract_mode
 #   contract  per-stack verification contract (verify-contract action)
-#   node, dotnet, docker-smoke, react-native, android, maestro, flutter, strapi
+#   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke
+#             (strapi: install and consistency only)
+#   dotnet, docker-smoke, react-native, android, maestro, flutter, strapi
 #             ladder stubs (`if: false`), replaced by later tasks; ids are fixed
 #             so `result.needs` never changes
 #   result    always runs; fails on any failed/cancelled needed job, or when the
@@ -174,11 +176,190 @@ jobs:
   # `inputs.stack == ''` is never true (stack is required): a disabled stub that
   # keeps actionlint quiet (it rejects a literal `if: false`).
   node:
+    name: node
     needs: plan
-    if: inputs.stack == ''
+    if: inputs.stack == 'web' || inputs.stack == 'strapi'
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    # Untrusted PR code runs here: read-only token, no deploy secrets. The token
+    # is exported job-wide because yarn 1 expands ${GITHUB_TOKEN} from .npmrc on
+    # every invocation (see vite-cloudflare-worker.yml).
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
-      - run: echo "stub"
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Detect package manager, set up Node and install from the lockfile.
+      - name: Install
+        id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
+        uses: simplify9/.github/.github/actions/verify-web-install@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
+      - name: Consistency
+        id: consistency
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' consistency ') }}
+        uses: simplify9/.github/.github/actions/verify-node-deps@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          package-manager: ${{ steps.install.outputs.package-manager }}
+
+      - name: Lint
+        id: lint
+        if: inputs.stack == 'web'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' lint ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' lint; then
+            "${RUNNER}" run lint
+          else
+            echo "::notice title=[VERIFY] lint::no lint script in package.json, skipped"
+          fi
+
+      - name: Typecheck
+        id: typecheck
+        if: inputs.stack == 'web'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' typecheck ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' typecheck; then
+            "${RUNNER}" run typecheck
+          else
+            echo "::notice title=[VERIFY] typecheck::no typecheck script in package.json, skipped"
+          fi
+
+      - name: Test
+        id: test
+        if: inputs.stack == 'web'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' test; then
+            "${RUNNER}" run test
+          else
+            echo "::notice title=[VERIFY] test::no test script in package.json, skipped"
+          fi
+
+      - name: Build
+        id: build
+        if: inputs.stack == 'web'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' build; then
+            "${RUNNER}" run build
+          else
+            echo "::notice title=[VERIFY] build::no build script in package.json, skipped"
+          fi
+      - name: Workers dry run
+        id: worker-dry-run
+        if: inputs.stack == 'web'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' worker-dry-run ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f wrangler.toml ] || [ -f wrangler.json ] || [ -f wrangler.jsonc ]; then
+            npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/wrangler"
+          else
+            echo "::notice title=[VERIFY] worker-dry-run::no wrangler config, skipped"
+          fi
+
+      - name: Probe e2e script
+        id: e2e-probe
+        if: inputs.stack == 'web'
+        shell: bash
+        run: |
+          if node -e 'process.exit(require("./package.json").scripts?.["test:e2e"] ? 0 : 1)'; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: E2E (repo Playwright script)
+        id: e2e
+        if: inputs.stack == 'web' && steps.e2e-probe.outputs.has == 'true'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        shell: bash
+        env:
+          RUNNER: ${{ steps.install.outputs.runner }}
+        run: |
+          set -euo pipefail
+          npx playwright install --with-deps chromium
+          "${RUNNER}" run test:e2e
+
+      # No e2e script: fallback smoke test until the contract deadline (after it
+      # the contract job already fails). Reported under the canonical id `e2e`.
+      - name: Smoke test (no e2e script)
+        id: smoke
+        if: inputs.stack == 'web' && steps.e2e-probe.outputs.has == 'false' && needs.plan.outputs.contract_mode != 'enforce'
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        uses: simplify9/.github/.github/actions/verify-web-smoke@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          ids = ["install", "consistency", "lint", "typecheck", "test", "build", "worker-dry-run", "e2e", "smoke"]
+          failed, warned = [], []
+          for i in ids:
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              name = "e2e" if i == "smoke" else i
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(name)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify node
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Package manager | `${{ steps.install.outputs.package-manager }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
   dotnet:
     needs: plan
     if: inputs.stack == ''

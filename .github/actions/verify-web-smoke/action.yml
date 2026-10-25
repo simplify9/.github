@@ -1,0 +1,42 @@
+# =============================================================================
+# Verify Web Smoke
+# =============================================================================
+# Fallback for web repos without a `test:e2e` script: serves the built app
+# (`next start -p 3000` when next is a dependency, else python http.server in
+# dist/build/out), waits up to 60 s for HTTP 200 on /, loads / in Chromium and
+# fails on any pageerror or console error. Prints "[VERIFY] smoke: <n> errors".
+# Playwright is installed into $RUNNER_TEMP/smoke so the app's deps are never
+# touched. Run after the build step.
+# =============================================================================
+name: 'Verify Web Smoke'
+author: 'Simplify9'
+description: 'Serve the built web app and load it in Chromium, failing on page or console errors.'
+
+inputs:
+  working-directory:
+    description: 'Project directory (contains package.json and the build output).'
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Install Playwright
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/smoke"
+        npm i --prefix "${RUNNER_TEMP}/smoke" playwright@1.64.0
+        npx --prefix "${RUNNER_TEMP}/smoke" playwright install --with-deps chromium
+        cp "${ACTION_PATH}/smoke.mjs" "${RUNNER_TEMP}/smoke/smoke.mjs"
+
+    - name: Run smoke test
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: node "${RUNNER_TEMP}/smoke/smoke.mjs"
+
+branding:
+  icon: 'activity'
+  color: 'blue'
