@@ -528,7 +528,10 @@ jobs:
             docker build -t verify .
           fi
           docker run -d --name verify-smoke -p 8080:8080 -e ASPNETCORE_URLS=http://+:8080 verify
-          curl --fail --retry 30 --retry-connrefused --retry-delay 2 "http://localhost:8080${SMOKE_PATH}"
+          # --max-time bounds each attempt (an accepted but unanswered connection
+          # otherwise hangs until the job timeout); --retry-all-errors also retries
+          # resets and 5xx while the app is still starting.
+          curl --fail --max-time 10 --retry 30 --retry-all-errors --retry-delay 2 "http://localhost:8080${SMOKE_PATH}"
 
       - name: Container logs
         if: ${{ failure() || steps.smoke.outcome == 'failure' }}
