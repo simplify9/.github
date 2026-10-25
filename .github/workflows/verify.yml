@@ -731,7 +731,9 @@ jobs:
   android:
     name: android
     needs: [plan, react-native]
-    if: inputs.stack == 'react-native'
+    # R12 across jobs: build even when react-native failed; plan success is explicit
+    # because !cancelled() drops the implicit success() (human PRs skip plan).
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.react-native.result != 'cancelled' }}
     runs-on: ${{ vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     outputs:
@@ -829,7 +831,7 @@ jobs:
   maestro:
     name: maestro
     needs: [plan, android]
-    if: inputs.stack == 'react-native' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch)
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.android.result != 'cancelled' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     outputs:
@@ -849,8 +851,25 @@ jobs:
         with:
           persist-credentials: false
 
+      # Repos without a smoke flow skip the (paid) emulator job; the contract job
+      # enforces the flow file after the deadline.
+      - name: Probe smoke flow
+        id: flow
+        shell: bash
+        working-directory: .
+        env:
+          WD: ${{ inputs.working-directory }}
+        run: |
+          if test -f "$WD/.maestro/smoke.yaml"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] maestro::no .maestro/smoke.yaml - smoke skipped (the contract job reports maestro-smoke)"
+          fi
+
       # udev rule from GitHub's 2024-04-02 changelog (KVM on hosted Linux runners).
       - name: Enable KVM
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
         shell: bash
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -858,12 +877,15 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Download APK
+        id: apk
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
         uses: actions/download-artifact@v8
         with:
           name: verify-apk
           path: ${{ runner.temp }}/apk
 
       - name: Setup Node
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
@@ -871,6 +893,7 @@ jobs:
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
 
       - name: Setup Java
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
         uses: actions/setup-java@v6.0.1
         with:
           distribution: temurin
@@ -878,13 +901,14 @@ jobs:
 
       - name: Install
         id: install
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
         shell: bash
         run: yarn install --frozen-lockfile
 
       # A debug APK loads its JS from Metro (adb reverse below).
       - name: Start Metro
         id: metro
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
         shell: bash
         run: |
           nohup npx react-native start --port 8081 > "$RUNNER_TEMP/metro.log" 2>&1 &
@@ -892,7 +916,7 @@ jobs:
 
       - name: Install Maestro
         id: maestro-cli
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
         shell: bash
         env:
           MAESTRO_VERSION: 2.11.0
@@ -903,7 +927,7 @@ jobs:
 
       - name: Smoke flow (emulator)
         id: smoke
-        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.metro.outcome == 'success' && steps.maestro-cli.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' && steps.metro.outcome == 'success' && steps.maestro-cli.outcome == 'success' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -924,7 +948,7 @@ jobs:
           steps = json.loads(os.environ["STEPS"])
           failed, warned = [], []
           # Any rung failing here means the smoke flow could not run: one canonical id.
-          for i in ("install", "metro", "maestro-cli", "smoke"):
+          for i in ("apk", "install", "metro", "maestro-cli", "smoke"):
               s = steps.get(i)
               if not s or s.get("outcome") != "failure":
                   continue
