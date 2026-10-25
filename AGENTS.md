@@ -75,6 +75,7 @@ Composite actions are the smallest units of work. Reusable workflows orchestrate
 | `docker/build-push-action` | `@v7` | |
 | `cloudflare/wrangler-action` | `@v4` | Used for all Cloudflare Workers deploys (`command: deploy`). Deployment URL is the `deployment-url` output |
 | `gradle/actions/setup-gradle` | `@v5` | **Pinned to v5.** Do NOT use `gradle/gradle-build-action` (archived). v6.x is not adopted — stay on v5 |
+| `reactivecircus/android-emulator-runner` | `@v2` | `verify` Maestro smoke job (hosted runner, KVM enabled via udev rule, `api-level: 34`); Maestro CLI pinned to 2.11.0 |
 | `ruby/setup-ruby` | `@v1` | iOS: Ruby/Bundler-managed CocoaPods (`bundler-cache`) |
 | `subosito/flutter-action` | `@v2` | Flutter SDK setup (Flutter iOS/Android workflows). Version selector via `flutter-version` input, default `3.x` |
 | `maxim-lobanov/setup-xcode` | `@v1` | iOS Xcode version selection |
