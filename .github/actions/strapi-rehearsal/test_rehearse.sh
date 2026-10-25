@@ -29,5 +29,21 @@ test_compare_counts_new_table_ignored() {
   cmp_run 'articles 10\n' 'articles 10\ncomments 7\n'
   if [ "${rc}" -eq 0 ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
 }
+test_compare_counts_dropped_table_fails() {
+  cmp_run 'articles 10\nusers 2\n' 'users 2\n'
+  if [ "${rc}" -eq 1 ] && [ "${out}" = "[VERIFY] rehearsal: articles 10 -> dropped" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+test_compare_counts_dropped_bookkeeping_ignored() {
+  cmp_run 'strapi_x 3\narticles 1\n' 'articles 1\n'
+  if [ "${rc}" -eq 0 ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+test_compare_counts_empty_count_fails() {
+  cmp_run 'articles \n' 'articles 10\n'
+  if [ "${rc}" -ne 0 ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+hct() { printf '%b' "$1" > "${tmp}/h"; has_content_tables "${tmp}/h" 2>/dev/null; }
+test_has_content_tables_empty_fails() { if hct ''; then bad "$1" "passed"; else ok "$1"; fi; }
+test_has_content_tables_only_bookkeeping_fails() { if hct 'strapi_x 1\nadmin_users 2\n'; then bad "$1" "passed"; else ok "$1"; fi; }
+test_has_content_tables_ok() { if hct 'strapi_x 1\narticles 0\n'; then ok "$1"; else bad "$1" "failed"; fi; }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t" "$t"; done
 if [ "${fails}" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

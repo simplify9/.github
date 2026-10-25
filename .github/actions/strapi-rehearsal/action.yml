@@ -135,6 +135,7 @@ runs:
           )
           boot "${base_dir}" base
           table_counts "${db_url}" > "${tmp}/before.txt"
+          has_content_tables "${tmp}/before.txt"
           stop_server
           echo "Base: $(wc -l < "${tmp}/before.txt") tables counted"
 
