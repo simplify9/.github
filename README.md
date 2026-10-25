@@ -1510,7 +1510,7 @@ Strapi major upgrades change the database schema and the API response shape, so 
 5. Boot the new major against the restored copy. Migrations run there, not in production.
 6. Compare per-table row counts and spot-check content against the snapshot.
 7. Test every frontend against the new response format. Use the `Strapi-Response-Format: v4` header as a temporary bridge if needed.
-8. Run the verify workflow's Strapi rehearsal on the branch.
+8. Run the verify workflow's Strapi rehearsal on the branch (requires the `verify` workflow with `stack: strapi`, documented in the "Verification (verify)" section once that PR lands).
 9. Take a production backup right before the maintenance-window deploy.
 
 Validate the presets with `bash renovate/validate.sh` (needs network for `npx`). It runs `renovate-config-validator --strict` on every file in `renovate/`, pinned to `renovate@44.181.5`.
