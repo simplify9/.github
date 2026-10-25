@@ -159,7 +159,7 @@
 # =============================================================================
 name: 'Check Critical Dependabot Vulnerabilities'
 author: 'Simplify9'
-description: 'Fails if the repository has any open critical-severity Dependabot alert.'
+description: 'Fails if the repository has any open critical-severity Dependabot alert, and (when sla-mode is enforce; warn-only by default) on high/medium alerts past their 30/90-day deadline.'
 
 inputs:
   dependabot-alerts-token:
