@@ -47,6 +47,25 @@ class T(unittest.TestCase):
         self.assertEqual(d.overdue_alerts(alerts, NOW),
                          {"critical": 1, "high": 1, "medium": 1})
 
+    def test_excluded(self):
+        self.assertTrue(d.excluded("zz-app", ["zz-"]))
+        self.assertFalse(d.excluded("app-zz", ["zz-"]))
+        self.assertFalse(d.excluded("zz-app", []))
+
+    def test_summarize_scopes_and_exclusions(self):
+        old = {**pr("OPEN", 24 * 40), "repo": "keep", "title": "Update all non-major dependencies"}
+        gone = {**old, "repo": "zz-skip"}
+        win = [{**pr("MERGED", 10, 1), "repo": "keep"}, {**pr("MERGED", 10, 1), "repo": "zz-skip"}]
+        alerts = [{"repository": {"name": n}, "security_advisory": {"severity": "critical"},
+                   "created_at": iso(NOW)} for n in ("keep", "zz-skip")]
+        issues = [{"repository": {"name": n}} for n in ("keep", "zz-skip", "zz-skip")]
+        r = d.summarize([old, gone], win, alerts, issues, NOW, ["zz-"])
+        self.assertEqual(r["open"]["open"], 1)  # created before --since, still counted
+        self.assertEqual(r["stale_nonmajor_repos"], ["keep"])
+        self.assertEqual(r["window"]["merged"], 1)
+        self.assertEqual(r["overdue_alerts"], {"critical": 1})
+        self.assertEqual(r["open_verify_contract_issues"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,11 @@ weekly created-date windows (each paginated), and the counts are computed from
 the fetched PRs. A window that hits the cap is reported on stderr.
 
 Usage:
-  scripts/fleet/deps_health.py --since 2026-10-08 [--json]
+  scripts/fleet/deps_health.py --since 2026-10-08 [--json] [--exclude-prefix PREFIX ...]
+
+S1 and S5 cover ALL currently open bot PRs; S2 and S4 cover PRs created since --since.
+--exclude-prefix (repeatable, default none) drops repos whose name starts with PREFIX from
+every metric, e.g. --exclude-prefix <retired-client>- .
 
 Requires: gh (authenticated with repo read on the org).
 """
@@ -18,7 +22,7 @@ import json
 import statistics
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 BOTS = ("app/dependabot", "app/s9-deps-bot")
 NONMAJOR = "non-major dependencies"
@@ -106,9 +110,26 @@ def fetch_window(bot, org, lo, hi, extra=""):
     return got
 
 
-def fetch_prs(since, now, org):
-    prs = [p for bot in BOTS for p in fetch_window(bot, org, since.date(), now.date())]
-    return [p for p in prs if not p["repo"].startswith("riverhead-")]
+def excluded(repo, prefixes):
+    return any(repo.startswith(x) for x in prefixes)
+
+
+def fetch_prs(org, lo, hi, extra=""):
+    return [p for bot in BOTS for p in fetch_window(bot, org, lo, hi, extra)]
+
+
+def summarize(open_prs, window_prs, alerts, issues, now, prefixes):
+    """All metrics, with the repo exclusion applied once to every input."""
+    keep = lambda rows, f: [r for r in rows if not excluded(f(r), prefixes)]
+    open_prs = keep(open_prs, lambda r: r["repo"])
+    window_prs = keep(window_prs, lambda r: r["repo"])
+    return {
+        "open": pr_metrics(open_prs, now),
+        "window": pr_metrics(window_prs, now),
+        "stale_nonmajor_repos": stale_nonmajor(open_prs, now),
+        "overdue_alerts": overdue_alerts(keep(alerts, lambda r: r["repository"]["name"]), now),
+        "open_verify_contract_issues": len(keep(issues, lambda r: r["repository"]["name"])),
+    }
 
 
 def pct(x):
@@ -117,38 +138,39 @@ def pct(x):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--since", required=True, help="YYYY-MM-DD, PRs created on/after")
+    ap.add_argument("--since", required=True, help="YYYY-MM-DD, window for S2/S4 (PRs created on/after)")
     ap.add_argument("--org", default="simplify9")
+    ap.add_argument("--exclude-prefix", action="append", default=[], metavar="PREFIX",
+                    help="skip repos whose name starts with PREFIX (repeatable)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     now = datetime.now(timezone.utc)
-    since = datetime.fromisoformat(a.since).replace(tzinfo=timezone.utc)
+    since = datetime.fromisoformat(a.since).date()
 
-    prs = fetch_prs(since, now, a.org)
-    m = pr_metrics(prs, now)
-    stale = stale_nonmajor(prs, now)
+    # ponytail: open set halves from 2019-01-01, ~11 extra cheap queries; start at the oldest open PR if it matters
+    open_prs = fetch_prs(a.org, date(2019, 1, 1), now.date(), "is:open")
+    window_prs = fetch_prs(a.org, since, now.date())
     alerts = [json.loads(l) for l in gh(
         "api", f"/orgs/{a.org}/dependabot/alerts?state=open&per_page=100",
         "--paginate", "--jq", ".[]|tojson").splitlines() if l]
-    overdue = overdue_alerts(alerts, now)
-    contract = len(json.loads(gh("search", "issues", "--owner", a.org, "--label", "verify-contract",
-                                 "--state", "open", "--limit", "1000", "--json", "number")))
-    res = {"since": a.since, "prs": m, "stale_nonmajor_repos": stale,
-           "overdue_alerts": overdue, "open_verify_contract_issues": contract}
+    issues = json.loads(gh("search", "issues", "--owner", a.org, "--label", "verify-contract",
+                           "--state", "open", "--limit", "1000", "--json", "number,repository"))
+    res = {"since": a.since, **summarize(open_prs, window_prs, alerts, issues, now, a.exclude_prefix)}
     if a.json:
         print(json.dumps(res, indent=2))
         return
-    print(f"deps health since {a.since} ({len(prs)} bot PRs, org {a.org})")
-    h = m["median_hours_to_merge"]
+    o, w, ov = res["open"], res["window"], res["overdue_alerts"]
+    h = w["median_hours_to_merge"]
+    print(f"deps health, org {a.org} (S2/S4 over PRs created since {a.since}: {sum(w[k] for k in ('open', 'merged', 'closed_unmerged'))})")
     for k, v in [
-        ("S1 open bot PRs", f"{m['open']} ({m['open_over_24h']} older than 24h)"),
-        ("S2 merge rate", f"{pct(m['merge_rate'])} ({m['merged']} merged, {m['closed_unmerged']} closed unmerged)"),
-        ("S4 median hours to merge", "n/a" if h is None else f"{h:.1f}"),
-        ("S5 repos non-major pending >14d", f"{len(stale)}"),
-        ("S6 alerts past deadline", ", ".join(f"{s}={n}" for s, n in sorted(overdue.items())) or "0"),
-        ("S7 open verify-contract issues", f"{contract}"),
+        ("S1 open bot PRs (all)", f"{o['open']} ({o['open_over_24h']} older than 24h)"),
+        ("S2 merge rate (since)", f"{pct(w['merge_rate'])} ({w['merged']} merged, {w['closed_unmerged']} closed unmerged)"),
+        ("S4 median hours to merge (since)", "n/a" if h is None else f"{h:.1f}"),
+        ("S5 repos non-major pending >14d (all)", f"{len(res['stale_nonmajor_repos'])}"),
+        ("S6 alerts past deadline", ", ".join(f"{s}={n}" for s, n in sorted(ov.items())) or "0"),
+        ("S7 open verify-contract issues", f"{res['open_verify_contract_issues']}"),
     ]:
-        print(f"  {k:<34} {v}")
+        print(f"  {k:<40} {v}")
 
 
 if __name__ == "__main__":
