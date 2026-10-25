@@ -5,7 +5,7 @@
 # to mark REQUIRED in org rulesets is `verify / result`. That one check gates
 # auto-merge of Renovate PRs into develop and every PR into the default branch.
 #
-# Scope (spec ruling): the full ladder runs when the event is workflow_dispatch,
+# Scope: the full ladder runs when the event is workflow_dispatch,
 # OR the PR base is the repo's default branch, OR the PR author is the bot
 # (input `bot-login`). A human PR into develop/development/staging skips every
 # job except `result`, which then passes immediately (about 1 billed minute).
@@ -19,9 +19,10 @@
 #             (strapi: install and consistency only)
 #   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test, docker build
 #   docker-smoke  opt-in (smoke-path): run the image and probe an HTTP path
-#   react-native, android, maestro, flutter
-#             ladder stubs (`if: false`), replaced by later tasks; ids are fixed
-#             so `result.needs` never changes
+#   react-native, android, maestro, flutter, strapi
+#             per-stack ladders (see each job)
+#   vuln-report  informational, default-branch PRs only: critical Dependabot alerts
+#             as a warning. NOT in `result.needs`, so it can never fail the check.
 #   result    always runs; fails on any failed/cancelled needed job, or when the
 #             scope is full and `plan` did not succeed. Skipped jobs are fine.
 #             Uploads verify-report.json as artifact `verify-report`.
@@ -183,9 +184,7 @@ jobs:
             | Mode | `${{ steps.contract.outputs.mode }}` |
             | Missing | `${{ steps.contract.outputs.missing }}` |
 
-  # --- Ladder stubs (C4-C9 replace these; keep the ids) ---
-  # `inputs.stack == ''` is never true (stack is required): a disabled stub that
-  # keeps actionlint quiet (it rejects a literal `if: false`).
+  # --- Per-stack ladders ---
   node:
     name: node
     needs: plan
@@ -1190,6 +1189,34 @@ jobs:
             | Failed | `${{ steps.collect.outputs.failed }}` |
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
 
+  vuln-report:
+    name: vuln-report
+    needs: plan
+    # No !cancelled(): the implicit success() keeps this skipped when plan is skipped.
+    if: github.base_ref == github.event.repository.default_branch
+    # Informational only: not in result.needs, so it never fails `verify / result`.
+    continue-on-error: true
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Critical vulnerability report
+        id: vulns
+        uses: simplify9/.github/.github/actions/check-critical-vulns@main
+        with:
+          dependabot-alerts-token: ${{ secrets.dependabot-alerts-token }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Vulnerability report (informational)
+          status: ${{ job.status }}
+          details: Critical Dependabot alerts on this repository. Informational only; this job never fails verify / result.
+
   result:
     name: result
     # `if: always()` is essential: a job whose needs were skipped is skipped, and
@@ -1238,7 +1265,7 @@ jobs:
           if problems:
               line = "Verification failed: " + "; ".join(problems)
           elif not full:
-              line = f"Human PR into {base}: verification not required by policy (spec ruling 5)."
+              line = f"Human PR into {base}: full verification runs on PRs into the default branch and on Renovate PRs."
           else:
               line = "Verification passed."
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:

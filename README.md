@@ -32,6 +32,7 @@
   - [Helm Chart CI/CD](#helm-chart-cicd)
   - [Mobile · iOS & Android](#mobile--ios--android)
   - [Security](#security)
+  - [Verification (`verify`)](#verification-verify)
 - [Composite Action Reference](#composite-action-reference)
 - [Dependabot](#dependabot)
 - [Core Architecture & Conventions](#core-architecture--conventions)
@@ -193,7 +194,8 @@ for every repository.
 │   │   ├── android-build.yml
 │   │   ├── flutter-ios-build.yml
 │   │   ├── flutter-android-build.yml
-│   │   └── critical-vuln-gate.yml
+│   │   ├── critical-vuln-gate.yml
+│   │   └── verify.yml
 │   ├── actions/                 <- composite actions
 │   │   ├── determine-semver/
 │   │   ├── tag-github-origin/
@@ -212,6 +214,8 @@ for every repository.
 │   │   ├── ios-install-profile/
 │   │   ├── xcode-build/
 │   │   ├── xcode-export/
+│   │   ├── verify-plan/ verify-contract/ verify-web-install/
+│   │   ├── verify-node-deps/ verify-web-smoke/ strapi-rehearsal/
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
 │   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
@@ -834,6 +838,103 @@ jobs:
 
 **Notes:** this is the same check embedded as a build-time gate in 11 of the other reusable workflows in this repo (see above) — see the **Critical Vulnerability Check** and **Dependabot Auto-Merge** starter templates below for the PR-time uses. Requires Dependabot alerts enabled on the repo (a free feature — no GitHub Advanced Security license needed). Also forwards `github-token: secrets.GITHUB_TOKEN` to `check-critical-vulns` so it can verify npm alerts against the PR's own branch — see [PR-branch verification](#pr-branch-verification-npm-only--breaking-the-fix-your-own-block-deadlock) below.
 
+### Verification (`verify`)
+
+#### `verify.yml`
+
+One reusable workflow that runs the per-stack verification ladder for a PR and reports a single result. The required status check is **`verify / result`** (the caller job is named `verify`): mark exactly that check as required in the org ruleset. `result` always reports, so a skipped ladder never leaves the check pending.
+
+**Scope.** The full ladder runs on PRs into the repo's default branch, on Renovate PRs (author `s9-deps-bot[bot]`, input `bot-login`) whatever their base, and on manual `workflow_dispatch`. A human PR into `develop`, `development` or `staging` skips every job except `result`, which passes immediately (about one billed minute). "Default branch" is read from the repository, not hard-coded to `main`.
+
+**Security.** `verify` installs dependencies and runs the PR's own code (tests, builds, the app under a smoke test). Every job has a read-only token (`contents: read`, `packages: read`) and no deploy secrets; the caller template passes only `dependabot-alerts-token` and `nuget-restore-token`.
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `stack` | Yes | - | `dotnet-service`, `dotnet-library`, `web`, `react-native`, `flutter`, `strapi` or `infra` (`infra` runs no ladder jobs) |
+| `working-directory` | | `.` | Project directory |
+| `known-failing` | | `''` | Space-separated step ids tolerated until `contract-deadline` (see below) |
+| `contract-deadline` | | `''` | `YYYY-MM-DD`. Empty or invalid = warn mode and `known-failing` never expires |
+| `bot-login` | | `s9-deps-bot[bot]` | Login whose PRs always get the full ladder |
+| `node-version` | | `24` | Node.js (web, react-native, strapi) |
+| `dotnet-version` | | `10.0.x` | .NET SDK (dotnet stacks) |
+| `java-version` | | `17` | Java (Android builds, Flutter) |
+| `flutter-version` | | `3.x` | Flutter (flutter stack) |
+| `smoke-path` | | `''` | HTTP path probed by `docker-smoke` (dotnet stacks); empty skips the job |
+| `docker-build-github-token` | | `false` | Boolean, opt-in. Mounts the job's `GITHUB_TOKEN` into the docker build as the BuildKit secret `GITHUB_TOKEN` (`RUN --mount=type=secret,id=GITHUB_TOKEN`) for GitHub Packages installs; never in the image. Applies to the docker rung and `docker-smoke` |
+| `postgres-version` | | `16` | PostgreSQL for jobs that need a database (strapi) |
+
+**Secrets** (all optional): `dependabot-alerts-token` (informational `vuln-report`), `nuget-restore-token` (private NuGet feed), `npm-token` (private npm packages).
+
+**Ladder per stack** (ids are what `known-failing` accepts and what `verify-report` lists):
+
+| Stack | Steps |
+|---|---|
+| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` (`e2e`) or, until the deadline, a built-in Chromium load that fails on page or console errors (`smoke`) |
+| `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
+| `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test`, `docker` (no-push build when a `Dockerfile` exists); opt-in `smoke` (`docker-smoke`, needs `smoke-path`) |
+| `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (emulator smoke) |
+| `flutter` | `install`, `analyze`, `test`, `build` (debug APK) |
+| `infra` | none: `result` passes when `plan` and `contract` succeed |
+
+`maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
+
+**`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
+
+**Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before the deadline, an error after it. Item ids per stack:
+
+| Item id | Stacks | Requires |
+|---|---|---|
+| `lockfile` | all but `infra` | a lockfile (`yarn.lock`, `package-lock.json`, `pnpm-lock.yaml`, `pubspec.lock`, `packages.lock.json` or, for .NET, `Directory.Packages.props`) |
+| `toolchain-pin` | all but `infra` | node stacks: `.nvmrc`, `engines.node` or `packageManager`; .NET: `global.json`; flutter: `.fvmrc` or `pubspec.lock` |
+| `cpm` | `dotnet-service` (more than one csproj), `dotnet-library` | `Directory.Packages.props` (central package management) |
+| `health-endpoint` | `dotnet-service` | `MapHealthChecks(` or a `"/health"` route in a `.cs` file |
+| `test-project` | `dotnet-service`, `dotnet-library` | a `*.csproj` with `Test` in its path |
+| `dockerfile` | `dotnet-service` | a `Dockerfile` |
+| `script:<name>` | `web`: `lint`, `typecheck`, `test`, `build`, `test:e2e`; `react-native`: `lint`, `typecheck`, `test`; `strapi`: `build` | that script in `package.json` |
+| `align-deps` | `react-native` | `@rnx-kit/align-deps` in `devDependencies` |
+| `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
+| `widget-test` | `flutter` | a `test/**/*_test.dart` file |
+| `strapi-fixture` | `strapi` | `ci/fixture.sql.gz` |
+
+`stack: infra` has no contract items.
+
+**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes an `"@strapi/` dependency in `package.json`, it also restores `ci/fixture.sql.gz` (a plain-SQL dump of a representative database) into Postgres, boots the base commit from a git worktree so it migrates the fixture, boots HEAD on the same database, and compares content-table row counts. The `rehearsal` step fails when either boot is unhealthy, the fixture is missing or empty, a table was dropped, or any content-table row count changed.
+
+**Informational vuln report.** On PRs into the default branch a `vuln-report` job runs `check-critical-vulns` and surfaces open critical Dependabot alerts in its summary. It is `continue-on-error` and is not part of `result`'s needs, so it can never fail `verify / result`.
+
+**Outputs / artifacts:** `result` uploads `verify-report.json` (artifact `verify-report`, 5 days) with `scope`, `failed`, `warned` and `missing`.
+
+**Required caller permissions:** `contents: read`, `packages: read`, `pull-requests: read` (the `plan` job lists the PR's files).
+
+```yaml
+name: Verify
+on:
+  pull_request:
+    branches: [main, develop, development, staging, gigstaging]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+concurrency:
+  group: verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    uses: simplify9/.github/.github/workflows/verify.yml@main
+    with:
+      stack: web
+      known-failing: 'typecheck e2e'
+      contract-deadline: '2026-12-20'
+    secrets:
+      dependabot-alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+      nuget-restore-token: ${{ secrets.NUGET_PACKAGE_PAT }}
+```
+
 ---
 
 ## Composite Action Reference
@@ -844,7 +945,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -901,6 +1002,17 @@ All 19 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `ios-install-profile` | Install a `.mobileprovision`, extract UUID/Name + best-effort Team ID/Bundle ID (`profileBase64`) |
 | `xcode-build` | `xcodebuild archive` with manual signing (`workspace`, `scheme`, `archivePath`, `developmentTeam`, `provisioningProfileUuid`, `keychainPath`) |
 | `xcode-export` | `xcodebuild -exportArchive` -> `.ipa` (`archivePath`, `exportOptionsPlist`, `exportPath`) |
+
+### Verify
+
+| Action | Purpose | Key inputs | Key outputs |
+|---|---|---|---|
+| `verify-plan` | Scope helper (`scope.sh`, tested by `test_scope.sh`): effective known-failing list, whether dependency files changed, contract mode | `event-name`, `repository`, `pr-number`, `known-failing`, `deadline`, `github-token` | `known_failing`, `deps_changed`, `contract_mode`, `strapi_changed` |
+| `verify-contract` | Report which Verification Contract items a repo lacks (`contract.py`); warn before the deadline, error after | `stack` (required), `working-directory`, `deadline` | `missing`, `mode` |
+| `verify-web-install` | Detect the package manager from the lockfile (`detect_pm.sh`), set up Node, install from the lockfile without modifying it | `working-directory`, `node-version` | `package-manager` (`npm`/`yarn`/`yarn-berry`/`pnpm`), `runner` |
+| `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
+| `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
+| `strapi-rehearsal` | Boot Strapi against Postgres; when `@strapi/*` changed, restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts (`rehearse.sh`) | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
 
 ### Shared
 
