@@ -84,6 +84,7 @@ This repo also ships **org workflow templates** (`workflow-templates/`) that app
 | Critical Vulnerability Check | `critical-vuln-gate.yml` | `pull_request_target` -> `main`, `develop` |
 | Dependabot Auto-Merge | `critical-vuln-gate.yml` | `pull_request_target` -> `main`, `develop` |
 | React Native Contract Check | `react-native-contract-gate.yml` | `pull_request` -> `main`, `develop` |
+| Verify | `verify.yml` | `pull_request` -> `main`, `develop`, `development`, `staging`, `gigstaging`; `workflow_dispatch` |
 
 ---
 

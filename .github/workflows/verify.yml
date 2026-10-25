@@ -1,0 +1,335 @@
+# =============================================================================
+# Verify -- reusable workflow (one required check per repo)
+# =============================================================================
+# Called by workflow-templates/verify.yml as the job id `verify`, so the check
+# to mark REQUIRED in org rulesets is `verify / result`. That one check gates
+# auto-merge of Renovate PRs into develop and every PR into the default branch.
+#
+# Scope (spec ruling): the full ladder runs when the event is workflow_dispatch,
+# OR the PR base is the repo's default branch, OR the PR author is the bot
+# (input `bot-login`). A human PR into develop/development/staging skips every
+# job except `result`, which then passes immediately (about 1 billed minute).
+# The scope expression is duplicated in verify-scope.sh (verify_full) and in the
+# `plan` and `result` jobs below; test_verify_scope.sh documents the truth table.
+#
+# Jobs:
+#   plan      scope gate: effective known-failing list, deps_changed, contract_mode
+#   contract  per-stack verification contract (verify-contract action)
+#   node, dotnet, docker-smoke, react-native, android, maestro, flutter, strapi
+#             ladder stubs (`if: false`), replaced by later tasks; ids are fixed
+#             so `result.needs` never changes
+#   result    always runs; fails on any failed/cancelled needed job, or when the
+#             scope is full and `plan` did not succeed. Skipped jobs are fine.
+#             Uploads verify-report.json as artifact `verify-report`.
+#
+# `stack: infra` runs no ladder jobs: result passes when plan + contract succeed.
+# =============================================================================
+name: Verify
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: "Stack to verify: dotnet-service, dotnet-library, web, react-native, flutter, strapi, or infra (infra runs no ladder jobs)."
+        required: true
+        type: string
+      working-directory:
+        description: Directory containing the project (repo root by default).
+        required: false
+        type: string
+        default: "."
+      known-failing:
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e bundle android maestro analyze docker smoke rehearsal)."
+        required: false
+        type: string
+        default: ""
+      contract-deadline:
+        description: Contract deadline (YYYY-MM-DD). Empty means warn mode and known-failing never expires.
+        required: false
+        type: string
+        default: ""
+      bot-login:
+        description: Login of the dependency bot whose PRs always get the full ladder.
+        required: false
+        type: string
+        default: "s9-deps-bot[bot]"
+      node-version:
+        description: Node.js version for web, react-native and strapi stacks.
+        required: false
+        type: string
+        default: "24"
+      dotnet-version:
+        description: .NET SDK version for dotnet stacks.
+        required: false
+        type: string
+        default: "10.0.x"
+      java-version:
+        description: Java version for Android builds.
+        required: false
+        type: string
+        default: "17"
+      flutter-version:
+        description: Flutter version for the flutter stack.
+        required: false
+        type: string
+        default: "3.x"
+      smoke-path:
+        description: HTTP path probed by the docker smoke test (empty skips the HTTP probe).
+        required: false
+        type: string
+        default: ""
+      postgres-version:
+        description: PostgreSQL version for jobs that need a database.
+        required: false
+        type: string
+        default: "16"
+    secrets:
+      dependabot-alerts-token:
+        description: Token able to read Dependabot alerts (critical-vulnerability gate).
+        required: false
+      nuget-restore-token:
+        description: Token for restoring private NuGet packages.
+        required: false
+      npm-token:
+        description: Token for restoring private npm packages.
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+jobs:
+  plan:
+    name: plan
+    # Full-scope expression. Keep in sync with verify_full in verify-scope.sh
+    # (truth table: test_verify_scope.sh) and with the `result` job below.
+    if: github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    outputs:
+      known_failing: ${{ steps.plan.outputs.known_failing }}
+      deps_changed: ${{ steps.plan.outputs.deps_changed }}
+      contract_mode: ${{ steps.plan.outputs.contract_mode }}
+    steps:
+      - name: Checkout scope helpers
+        uses: actions/checkout@v7
+        with:
+          repository: simplify9/.github
+          ref: main
+          sparse-checkout: .github/workflows/verify-scope.sh
+          sparse-checkout-cone-mode: false
+          path: .s9-verify
+          persist-credentials: false
+
+      - name: Plan
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          KNOWN_FAILING: ${{ inputs.known-failing }}
+          DEADLINE: ${{ inputs.contract-deadline }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=verify-scope.sh
+          source .s9-verify/.github/workflows/verify-scope.sh
+          today="$(date -u +%F)"
+          known="$(known_failing_effective "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
+          mode="$(contract_mode "${DEADLINE}" "${today}")"
+
+          deps=true
+          if [ "${EVENT}" != "workflow_dispatch" ]; then
+            files="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
+            pattern='(^|/)(package\.json|yarn\.lock|package-lock\.json|pnpm-lock\.yaml|Directory\.Packages\.props|pubspec\..*|Gemfile.*)$|\.csproj$|(^|/)(android|ios)/'
+            if printf '%s\n' "${files}" | grep -Eq "${pattern}"; then deps=true; else deps=false; fi
+          fi
+
+          {
+            echo "known_failing=${known}"
+            echo "deps_changed=${deps}"
+            echo "contract_mode=${mode}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "::notice title=[VERIFY] Plan::event=${EVENT} deps_changed=${deps} contract_mode=${mode} known_failing=${known:-none}"
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify plan
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Stack | `${{ inputs.stack }}` |
+            | Deps changed | `${{ steps.plan.outputs.deps_changed }}` |
+            | Contract mode | `${{ steps.plan.outputs.contract_mode }}` |
+
+  contract:
+    name: contract
+    needs: plan
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    outputs:
+      missing: ${{ steps.contract.outputs.missing }}
+      mode: ${{ steps.contract.outputs.mode }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verification contract
+        id: contract
+        uses: simplify9/.github/.github/actions/verify-contract@main
+        with:
+          stack: ${{ inputs.stack }}
+          working-directory: ${{ inputs.working-directory }}
+          deadline: ${{ inputs.contract-deadline }}
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verification contract
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Mode | `${{ steps.contract.outputs.mode }}` |
+            | Missing | `${{ steps.contract.outputs.missing }}` |
+
+  # --- Ladder stubs (C4-C9 replace these; keep the ids) ---
+  # `inputs.stack == ''` is never true (stack is required): a disabled stub that
+  # keeps actionlint quiet (it rejects a literal `if: false`).
+  node:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  dotnet:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  docker-smoke:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  react-native:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  android:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  maestro:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  flutter:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+  strapi:
+    needs: plan
+    if: inputs.stack == ''
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - run: echo "stub"
+
+  result:
+    name: result
+    # `if: always()` is essential: a job whose needs were skipped is skipped, and
+    # a skipped required check never reports. Verdict is computed from needs results.
+    needs: [plan, contract, node, dotnet, docker-smoke, react-native, android, maestro, flutter, strapi]
+    if: always()
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate
+        id: verdict
+        shell: bash
+        env:
+          # Same expression as the `plan` job `if:`.
+          FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login }}
+          BASE: ${{ github.base_ref }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+
+          needs = json.loads(os.environ["NEEDS"])
+          full = os.environ["FULL"] == "true"
+          base = os.environ["BASE"]
+
+          def out(job, key):
+              return (needs.get(job, {}).get("outputs") or {}).get(key, "") or ""
+
+          bad = sorted(j for j, n in needs.items() if n.get("result") in ("failure", "cancelled"))
+          plan_ok = needs.get("plan", {}).get("result") == "success"
+          problems = [f"{j} {needs[j]['result']}" for j in bad]
+          if full and not plan_ok and "plan" not in bad:
+              problems.append(f"plan {needs.get('plan', {}).get('result')} (expected success)")
+
+          ladder = [j for j in needs if j not in ("plan", "contract")]
+          report = {
+              "scope": "full" if full else "skipped-human-develop",
+              "failed": sorted(w for j in ladder for w in out(j, "failed").split()),
+              "warned": sorted(w for j in ladder for w in out(j, "warned").split()),
+              "missing": out("contract", "missing").split(),
+          }
+          with open("verify-report.json", "w") as f:
+              json.dump(report, f, indent=2)
+
+          status = "failure" if problems else "success"
+          if problems:
+              line = "Verification failed: " + "; ".join(problems)
+          elif not full:
+              line = f"Human PR into {base}: verification not required by policy (spec ruling 5)."
+          else:
+              line = "Verification passed."
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"status={status}\n")
+              f.write(f"summary={line}\n")
+          print(line)
+          if problems:
+              print("::error title=[VERIFY] Result::" + "; ".join(problems))
+          PY
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-report
+          path: verify-report.json
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify result
+          status: ${{ steps.verdict.outputs.status }}
+          details: ${{ steps.verdict.outputs.summary }}
+
+      - name: Enforce verdict
+        if: always() && steps.verdict.outputs.status != 'success'
+        shell: bash
+        run: exit 1
