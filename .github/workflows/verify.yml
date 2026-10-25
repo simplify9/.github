@@ -103,9 +103,6 @@ on:
       nuget-restore-token:
         description: Token for restoring private NuGet packages.
         required: false
-      npm-token:
-        description: Token for restoring private npm packages.
-        required: false
 
 permissions:
   contents: read
@@ -392,7 +389,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Anchor step (R12): restore + build, tests off so `test` has its own id.
+      # Anchor step: restore + build, tests off so `test` has its own id.
       - name: Restore and build
         id: build
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
@@ -451,7 +448,7 @@ jobs:
         uses: simplify9/.github/.github/actions/docker-build-push@main
         with:
           push: 'false'
-          image-name: verify-${{ github.event.repository.name }}
+          image-name: verify-build
           version: pr-${{ github.run_id }}
           dockerfile: ${{ inputs.working-directory }}/Dockerfile
           context: ${{ inputs.working-directory }}
@@ -597,7 +594,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          cache: yarn
+          cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
 
       - name: Install
@@ -731,7 +729,7 @@ jobs:
   android:
     name: android
     needs: [plan, react-native]
-    # R12 across jobs: build even when react-native failed; plan success is explicit
+    # Every rung runs so one run reports all failures: build even when react-native failed; plan success is explicit
     # because !cancelled() drops the implicit success() (human PRs skip plan).
     if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.react-native.result != 'cancelled' }}
     runs-on: ${{ vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
@@ -758,7 +756,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          cache: yarn
+          cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
 
       # No `cache: gradle` here: setup-gradle owns Gradle home caching (AGENTS.md).
@@ -773,6 +772,7 @@ jobs:
 
       - name: Install
         id: install
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') || contains(format(' {0} ', needs.plan.outputs.known_failing), ' android ') }}
         shell: bash
         run: yarn install --frozen-lockfile
 
@@ -883,6 +883,7 @@ jobs:
       - name: Download APK
         id: apk
         if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
         uses: actions/download-artifact@v8
         with:
           name: verify-apk
@@ -893,7 +894,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          cache: yarn
+          cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
 
       - name: Setup Java
@@ -906,6 +908,7 @@ jobs:
       - name: Install
         id: install
         if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
         shell: bash
         run: yarn install --frozen-lockfile
 
@@ -913,6 +916,7 @@ jobs:
       - name: Start Metro
         id: metro
         if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
         shell: bash
         run: |
           nohup npx react-native start --port 8081 > "$RUNNER_TEMP/metro.log" 2>&1 &
@@ -921,6 +925,7 @@ jobs:
       - name: Install Maestro
         id: maestro-cli
         if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
         shell: bash
         env:
           MAESTRO_VERSION: 2.11.0

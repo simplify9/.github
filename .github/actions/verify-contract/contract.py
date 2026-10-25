@@ -27,7 +27,7 @@ STACKS = set(NODE) | {"dotnet-service", "dotnet-library", "flutter", "infra"}
 def missing_items(stack, files, package_json, csproj_count, has_health_mapping):
     if stack not in STACKS:
         raise ValueError("unknown stack: %s" % stack)
-    if stack == "infra":  # no requirements (ruling R1)
+    if stack == "infra":  # infra repos have no contract items
         return []
     pkg = package_json or {}
     names = {f.rsplit("/", 1)[-1] for f in files}

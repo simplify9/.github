@@ -863,15 +863,15 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `docker-build-github-token` | | `false` | Boolean, opt-in. Mounts the job's `GITHUB_TOKEN` into the docker build as the BuildKit secret `GITHUB_TOKEN` (`RUN --mount=type=secret,id=GITHUB_TOKEN`) for GitHub Packages installs; never in the image. Applies to the docker rung and `docker-smoke` |
 | `postgres-version` | | `16` | PostgreSQL for jobs that need a database (strapi) |
 
-**Secrets** (all optional): `dependabot-alerts-token` (informational `vuln-report`), `nuget-restore-token` (private NuGet feed), `npm-token` (private npm packages).
+**Secrets** (all optional): `dependabot-alerts-token` (informational `vuln-report`), `nuget-restore-token` (private NuGet feed).
 
 **Ladder per stack** (ids are what `known-failing` accepts and what `verify-report` lists):
 
 | Stack | Steps |
 |---|---|
-| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` (`e2e`) or, until the deadline, a built-in Chromium load that fails on page or console errors (`smoke`) |
+| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` (`e2e`) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`) |
 | `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
-| `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test`, `docker` (no-push build when a `Dockerfile` exists); opt-in `smoke` (`docker-smoke`, needs `smoke-path`) |
+| `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test`, `docker` (no-push build when a `Dockerfile` exists); opt-in `smoke` (`docker-smoke`, .NET only, needs `smoke-path`) |
 | `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (emulator smoke) |
 | `flutter` | `install`, `analyze`, `test`, `build` (debug APK) |
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
@@ -911,7 +911,7 @@ name: Verify
 on:
   pull_request:
     branches: [main, develop, development, staging, gigstaging]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
