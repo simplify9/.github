@@ -1,0 +1,81 @@
+# =============================================================================
+# Verify Contract
+# =============================================================================
+# Reports which items of the per-stack Verification Contract a repo lacks.
+# Before `deadline` each missing item is a warning; from the deadline on it is
+# an error and the step fails.
+#
+# Inputs:
+#   stack              (required)  dotnet-service | dotnet-library | web |
+#                                  react-native | flutter | strapi | infra
+#   working-directory  (optional)  Directory to scan. Default ".".
+#   deadline           (optional)  YYYY-MM-DD. Empty or invalid means warn mode.
+#
+# Outputs:
+#   missing  Space-separated ids of missing items (empty when compliant).
+#   mode     "warn" or "enforce".
+#
+# Usage:
+#   - uses: simplify9/.github/.github/actions/verify-contract@main
+#     with:
+#       stack: web
+#       deadline: 2026-12-20
+# =============================================================================
+name: 'Verify Contract'
+author: 'Simplify9'
+description: 'Report which required tests and scripts of the per-stack Verification Contract a repo lacks (warn before the deadline, error after).'
+
+inputs:
+  stack:
+    description: 'Stack name: dotnet-service, dotnet-library, web, react-native, flutter, strapi or infra.'
+    required: true
+  working-directory:
+    description: 'Directory to scan.'
+    required: false
+    default: '.'
+  deadline:
+    description: 'Contract deadline (YYYY-MM-DD). Empty or invalid means warn mode.'
+    required: false
+    default: ''
+
+outputs:
+  missing:
+    description: 'Space-separated ids of missing contract items.'
+    value: ${{ steps.check.outputs.missing }}
+  mode:
+    description: 'warn or enforce.'
+    value: ${{ steps.check.outputs.mode }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check verification contract
+      id: check
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+        WORKDIR: ${{ inputs.working-directory }}
+        DEADLINE: ${{ inputs.deadline }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        echo "VERIFY_CONTRACT_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
+        echo "::notice title=[VERIFY] Contract::stack=${STACK} dir=${WORKDIR} deadline=${DEADLINE:-none}"
+        result=$(python3 "${ACTION_PATH}/contract.py" --stack "${STACK}" --dir "${WORKDIR}" --deadline "${DEADLINE}")
+        mode=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["mode"])' "${result}")
+        missing=$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["missing"]))' "${result}")
+        echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+        echo "missing=${missing}" >> "$GITHUB_OUTPUT"
+        level=warning
+        [ "${mode}" = "enforce" ] && level=error
+        for id in ${missing}; do
+          echo "::${level} title=[VERIFY] Contract::missing contract item: ${id}"
+        done
+        echo "VERIFY_CONTRACT_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+        if [ "${mode}" = "enforce" ] && [ -n "${missing}" ]; then
+          exit 1
+        fi
+
+branding:
+  icon: 'check-square'
+  color: 'blue'
