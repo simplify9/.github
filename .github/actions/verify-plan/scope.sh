@@ -29,7 +29,15 @@ deps_changed_from_list() {
 }
 
 # strapi_changed_from_pr <newline-separated file paths> <package.json patch text> -> true|false
-# True when a package.json is in the PR and a changed (+/-) patch line names an "@strapi/ dependency.
+# True when the PR can change what Strapi does to existing data on boot: a changed (+/-)
+# package.json patch line names an "@strapi/ dependency, or it touches a database migration,
+# a content-type schema or a component (Strapi alters tables to match those on boot).
 strapi_changed_from_pr() {
-  if grep -Eq '(^|/)package\.json$' <<< "$1" && grep -Eq '^[+-].*"@strapi/' <<< "$2"; then echo true; else echo false; fi
+  local data='(^|/)database/migrations/|(^|/)src/(api/[^/]+/content-types/[^/]+/schema\.json|components/.+\.json)$'
+  if grep -Eq "${data}" <<< "$1" \
+    || { grep -Eq '(^|/)package\.json$' <<< "$1" && grep -Eq '^[+-].*"@strapi/' <<< "$2"; }; then
+    echo true
+  else
+    echo false
+  fi
 }

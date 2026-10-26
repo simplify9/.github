@@ -899,7 +899,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 `stack: infra` has no contract items.
 
-**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes an `"@strapi/` dependency in `package.json`, it also restores `ci/fixture.sql.gz` (a plain-SQL dump of a representative database) into Postgres, boots the base commit from a git worktree so it migrates the fixture, boots HEAD on the same database, and compares content-table row counts. The `rehearsal` step fails when either boot is unhealthy, the fixture is missing or empty, a table was dropped, or any content-table row count changed.
+**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes an `"@strapi/` dependency in `package.json`, a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also restores `ci/fixture.sql.gz` (a plain-SQL dump of a representative database) into Postgres, boots the base commit from a git worktree so it migrates the fixture, boots HEAD on the same database, and compares content-table row counts. The `rehearsal` step fails when either boot is unhealthy, the fixture is missing or empty, a table was dropped, or any content-table row count changed.
 
 **Informational vuln report.** On PRs into the default branch a `vuln-report` job runs `check-critical-vulns` and surfaces open critical Dependabot alerts in its summary. It is `continue-on-error` and is not part of `result`'s needs, so it can never fail `verify / result`.
 
@@ -1013,7 +1013,7 @@ All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-web-install` | Detect the package manager from the lockfile (`detect_pm.sh`), set up Node, install from the lockfile without modifying it | `working-directory`, `node-version` | `package-manager` (`npm`/`yarn`/`yarn-berry`/`pnpm`), `runner` |
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
-| `strapi-rehearsal` | Boot Strapi against Postgres; when `@strapi/*` changed, restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts (`rehearse.sh`) | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
+| `strapi-rehearsal` | Boot Strapi against Postgres; when `@strapi/*`, a database migration, a content-type schema or a component changed, restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts (`rehearse.sh`) | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
 
 ### Shared
 

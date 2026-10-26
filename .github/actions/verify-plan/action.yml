@@ -55,7 +55,7 @@ outputs:
     description: 'warn or enforce.'
     value: ${{ steps.plan.outputs.contract_mode }}
   strapi_changed:
-    description: 'true when a package.json diff changed an "@strapi/ dependency (false on workflow_dispatch).'
+    description: 'true when the PR changed an "@strapi/ dependency, a database migration, a content-type schema or a component (false on workflow_dispatch).'
     value: ${{ steps.plan.outputs.strapi_changed }}
 
 runs:
