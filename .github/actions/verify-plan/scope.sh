@@ -28,16 +28,12 @@ deps_changed_from_list() {
   if grep -Eq "${pattern}" <<< "$1"; then echo true; else echo false; fi
 }
 
-# strapi_changed_from_pr <newline-separated file paths> <package.json patch text> -> true|false
-# True when the PR can change what Strapi does to existing data on boot: a changed (+/-)
-# package.json patch line names an "@strapi/ dependency, or it touches a database migration,
-# a content-type schema or a component (Strapi alters tables to match those on boot).
+# strapi_changed_from_pr <newline-separated file paths> -> true|false
+# True when the PR can change what Strapi does to existing data on boot: any dependency
+# change (an @strapi bump, but also a lock file refresh or a driver update moves Strapi's
+# own dependencies), a database migration, a content-type schema or a component (Strapi
+# alters tables to match those on boot). Only the strapi job reads it.
 strapi_changed_from_pr() {
-  local data='(^|/)database/migrations/|(^|/)src/(api/[^/]+/content-types/[^/]+/schema\.json|components/.+\.json)$'
-  if grep -Eq "${data}" <<< "$1" \
-    || { grep -Eq '(^|/)package\.json$' <<< "$1" && grep -Eq '^[+-].*"@strapi/' <<< "$2"; }; then
-    echo true
-  else
-    echo false
-  fi
+  local data='(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$|(^|/)database/migrations/|(^|/)src/(api/[^/]+/content-types/[^/]+/schema\.json|components/.+\.json)$'
+  if grep -Eq "${data}" <<< "$1"; then echo true; else echo false; fi
 }

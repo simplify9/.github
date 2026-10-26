@@ -20,7 +20,7 @@
 # =============================================================================
 name: 'Strapi Rehearsal'
 author: 'Simplify9'
-description: 'Boot Strapi against Postgres and, when @strapi/* changed, prove the upgrade keeps content-table row counts.'
+description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove the change keeps content-table row counts.'
 
 inputs:
   base-sha:
@@ -115,7 +115,7 @@ runs:
         if [ "${STRAPI_CHANGED}" = "true" ] && [ -n "${BASE_SHA}" ]; then
           fixture="${head_dir}/ci/fixture.sql.gz"
           if [ ! -f "${fixture}" ]; then
-            echo "::error title=[VERIFY] Rehearsal::@strapi/* changed but ci/fixture.sql.gz is missing; add a sanitized dump of the production schema and data"
+            echo "::error title=[VERIFY] Rehearsal::dependencies or data definitions changed but ci/fixture.sql.gz is missing; add a sanitized dump of the production schema and data"
             exit 1
           fi
           gunzip -c "${fixture}" | psql "${db_url}" -v ON_ERROR_STOP=1 -q > /dev/null
