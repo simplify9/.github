@@ -750,6 +750,23 @@ jobs:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
+      # Hosted runners have ~14 GB free; a large React Native app's native build ran out
+      # ("No space left on device"). Same reclaim as android-build.yml, hosted runners only:
+      # self-hosted runners keep their toolchains.
+      - name: Free disk space
+        if: ${{ runner.environment == 'github-hosted' }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo rm -rf /usr/share/dotnet            || true
+          sudo rm -rf /opt/ghc /usr/local/.ghcup   || true
+          sudo rm -rf /usr/share/swift             || true
+          sudo rm -rf /usr/local/share/powershell  || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL  || true
+          sudo rm -rf /usr/local/share/boost       || true
+          docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | sed 's/^/    /'
+
       - name: Checkout PR
         uses: actions/checkout@v7
         with:
@@ -779,12 +796,14 @@ jobs:
         shell: bash
         run: yarn install --frozen-lockfile
 
+      # One ABI, x86_64, the Maestro emulator's: verify needs a buildable APK, not a
+      # release, and four ABIs quadruple the native compile, its disk and its minutes.
       - name: Assemble debug APK
         id: build
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' android ') }}
         shell: bash
-        run: cd android && ./gradlew assembleDebug --no-daemon
+        run: cd android && ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=x86_64
 
       - name: Upload APK
         id: upload
