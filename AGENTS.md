@@ -403,7 +403,12 @@ All 26 actions are composite. Call them in job steps with `uses: simplify9/.gith
 - `verify-node-deps` — `singletons.py` fails on duplicate `react`/`react-dom`/`react-native`/`next` in `node_modules` and, for npm, on invalid peers; reports "skipped (PnP)" instead of passing when there is no `node_modules`. Inputs: `package-manager` (required), `working-directory`, `names`.
 - `verify-web-smoke` — `smoke.mjs` serves the build output and loads it in Chromium, failing on page or console errors (tested by `smoke.test.mjs` via `node --test`). Input: `working-directory`.
 - `verify-secret-scan` — `scan.py` (stdlib, tested by `test_scan.py`; no `action.yml` yet, called by path) refuses committed CI data with personal data or secrets; exit 0/1/2; never prints a value (emails as `***@domain`, else first 4 characters). Holds `CI_ADMIN_EMAIL`/`CI_ADMIN_HASH` (public CI-only admin) and `STRAPI_SECRET_TABLES`. Do not weaken a pattern to get a fixture through: add the address to the repo's `ci/fixture-allow.txt` or regenerate the fixture.
-- `strapi-rehearsal` — `rehearse.sh` boots Strapi on Postgres; with `strapi-changed: true` restores `ci/fixture.sql.gz`, boots the base commit (git worktree) then HEAD and requires `/_health` 204 and unchanged content-table row counts (tested by `test_rehearse.sh`). Inputs: `base-sha`, `strapi-changed`, `working-directory`, `package-runner`.
+- `strapi-rehearsal` — `rehearse.sh` boots Strapi on Postgres; with `strapi-changed: true`:
+  - scans `ci/fixture.sql.gz` (`verify-secret-scan --strapi-dump`), restores it, boots the base commit (git worktree) then HEAD
+  - requires `/_health` 204 and unchanged content-table row counts, columns (`compare_columns`) and per-column value fingerprints (`column_fingerprints`/`compare_fingerprints`)
+  - `declared_changes` honours only the lines the PR adds to `ci/rehearsal-expected-changes.txt`, so never make it read the head file alone
+  - uploads diffs as `strapi-rehearsal-diff` on failure
+  - tested by `test_rehearse.sh`; its Postgres-backed test needs `PG_TEST_URL` Inputs: `base-sha`, `strapi-changed`, `working-directory`, `package-runner`.
 
 ### Shared
 - `write-job-summary` — Appends a standardized, status-aware section to `$GITHUB_STEP_SUMMARY`. Inputs: `title`, `status` (`${{ job.status }}` -> SUCCESS / FAILED), `details`. Used by every reusable workflow.

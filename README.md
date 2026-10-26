@@ -899,7 +899,27 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 `stack: infra` has no contract items.
 
-**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also restores `ci/fixture.sql.gz` (a plain-SQL dump of a representative database) into Postgres, boots the base commit from a git worktree so it migrates the fixture, boots HEAD on the same database, and compares content-table row counts. The `rehearsal` step fails when either boot is unhealthy, the fixture is missing or empty, a table was dropped, or any content-table row count changed.
+**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also does the following:
+1. Scans `ci/fixture.sql.gz` with `verify-secret-scan --strapi-dump` and refuses a fixture that holds personal data or secrets.
+2. Restores the fixture into Postgres.
+3. Boots the base commit from a git worktree, so it migrates the fixture.
+4. Boots HEAD on the same database.
+5. Compares, for content tables (Strapi bookkeeping tables `strapi_*`, `admin_*`, `up_*` and `i18n_locale` are excluded):
+   - row counts
+   - **columns:** none dropped, no type changed
+   - **values:** a per-column fingerprint, md5 over every row in `id` order
+
+The `rehearsal` step fails when any of these happens:
+- either boot is unhealthy
+- the fixture is missing, empty or fails the scan
+- a table or column was dropped, or a column's type changed
+- any content-table row count or column value changed
+
+**Intended changes** go in `ci/rehearsal-expected-changes.txt`, one per line: `table` or `table.column` (`#` comments allowed), added in the same PR as the change. Declared differences are reported with ` (declared)` instead of failing.
+- **Only the lines the PR adds** (head vs base) count. A file merged once cannot loosen the check on later PRs, and bot PRs, which never change it, fail on any data change.
+- Human PRs into `develop` pass instantly, so a developer's lines are first honoured on the promotion PR into the default branch, whose diff contains them.
+
+On failure the diffs are uploaded as the artifact `strapi-rehearsal-diff` (5 days).
 
 **Making `ci/fixture.sql.gz`.** Never hand-edit or hand-dump it: run `scripts/strapi-fixture/strapi_fixture.py` on a machine with Docker (DevOps, not CI):
 
@@ -1033,7 +1053,7 @@ All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
 | `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures; later HAR and mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), JWTs, private keys, common tokens, connection strings with a password and a non-local host; `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
-| `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts (`rehearse.sh`) | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
+| `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, scan and restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts, columns and column values, except lines the PR adds to `ci/rehearsal-expected-changes.txt` (`rehearse.sh`); diffs in artifact `strapi-rehearsal-diff` | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
 
 ### Shared
 

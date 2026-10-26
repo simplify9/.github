@@ -20,7 +20,7 @@
 # =============================================================================
 name: 'Strapi Rehearsal'
 author: 'Simplify9'
-description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove the change keeps content-table row counts.'
+description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove on a scanned fixture that the upgrade keeps content-table row counts, columns and values.'
 
 inputs:
   base-sha:
@@ -118,7 +118,20 @@ runs:
             echo "::error title=[VERIFY] Rehearsal::dependencies or data definitions changed but ci/fixture.sql.gz is missing; add a sanitized dump of the production schema and data"
             exit 1
           fi
+          # Refuse a fixture that still holds personal data or secrets (values are never printed).
+          allow=()
+          [ -f "${head_dir}/ci/fixture-allow.txt" ] && allow=(--allow "${head_dir}/ci/fixture-allow.txt")
+          if ! python3 "${ACTION_PATH}/../verify-secret-scan/scan.py" --strapi-dump "${allow[@]}" "${fixture}"; then
+            echo "::error title=[VERIFY] Rehearsal::ci/fixture.sql.gz failed the personal-data/secret scan (see lines above); regenerate it with scripts/strapi-fixture"
+            exit 1
+          fi
           gunzip -c "${fixture}" | psql "${db_url}" -v ON_ERROR_STOP=1 -q > /dev/null
+
+          # Intended changes: only the lines this PR adds to ci/rehearsal-expected-changes.txt count.
+          mkdir -p "${tmp}/diff"
+          git -C "${repo_root}" show "${BASE_SHA}:${rel#/}${rel:+/}ci/rehearsal-expected-changes.txt" \
+            > "${tmp}/declared-base.txt" 2>/dev/null || : > "${tmp}/declared-base.txt"
+          declared_changes "${tmp}/declared-base.txt" "${head_dir}/ci/rehearsal-expected-changes.txt" > "${tmp}/declared.txt"
 
           git -C "${repo_root}" worktree add --detach "${tmp}/base" "${BASE_SHA}"
           base_dir="${tmp}/base${rel}"
@@ -136,23 +149,44 @@ runs:
           boot "${base_dir}" base
           table_counts "${db_url}" > "${tmp}/before.txt"
           has_content_tables "${tmp}/before.txt"
+          table_columns "${db_url}" > "${tmp}/before-cols.txt"
+          column_fingerprints "${db_url}" "${tmp}/before-cols.txt" > "${tmp}/before-fp.txt"
           stop_server
           echo "Base: $(wc -l < "${tmp}/before.txt") tables counted"
 
           boot "${head_dir}" head
           table_counts "${db_url}" > "${tmp}/after.txt"
+          table_columns "${db_url}" > "${tmp}/after-cols.txt"
+          column_fingerprints "${db_url}" "${tmp}/after-cols.txt" > "${tmp}/after-fp.txt"
           stop_server
-          if ! compare_counts "${tmp}/before.txt" "${tmp}/after.txt"; then
-            echo "::error title=[VERIFY] Rehearsal::content-table row counts changed across the Strapi upgrade (see lines above)"
+
+          failed=()
+          compare_counts "${tmp}/before.txt" "${tmp}/after.txt" "${tmp}/declared.txt" > "${tmp}/diff/counts.txt" || failed+=("row counts")
+          compare_columns "${tmp}/before-cols.txt" "${tmp}/after-cols.txt" "${tmp}/declared.txt" > "${tmp}/diff/columns.txt" || failed+=("columns")
+          compare_fingerprints "${tmp}/before-fp.txt" "${tmp}/after-fp.txt" "${tmp}/declared.txt" > "${tmp}/diff/values.txt" || failed+=("values")
+          cat "${tmp}"/diff/*.txt
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error title=[VERIFY] Rehearsal::the Strapi upgrade changed data (${failed[*]}; see lines above). Declare intended changes in ci/rehearsal-expected-changes.txt"
             exit 1
           fi
-          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${BASE_SHA:0:7} kept all content-table row counts and /_health returned 204"
+          declared_n="$(cat "${tmp}"/diff/*.txt | grep -c ' (declared)$' || true)"
+          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${BASE_SHA:0:7} kept content-table row counts, columns and values (${declared_n} declared change(s) reported) and /_health returned 204"
         else
           boot "${head_dir}" head
           stop_server
           echo "::notice title=[VERIFY] Rehearsal::boot smoke passed (/_health returned 204 on an empty database)"
         fi
         echo "VERIFY_STRAPI_REHEARSAL_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
+
+    # Column/value/API diffs, kept for 5 days when the rehearsal fails.
+    - name: Upload rehearsal diff
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: strapi-rehearsal-diff
+        path: ${{ runner.temp }}/strapi-rehearsal/diff
+        retention-days: 5
+        if-no-files-found: ignore
 
 branding:
   icon: 'database'
