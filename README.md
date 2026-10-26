@@ -908,14 +908,17 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
    - row counts
    - **columns:** none dropped, no type changed
    - **values:** a per-column fingerprint, md5 over every row in `id` order
+   - **content API:** the base logs in as the fixture's CI admin and creates a read-only API token. For every collection and single type in `src/api/*/content-types/*/schema.json`, both commits' REST responses (first page of 100, `populate=*`) must match. HEAD's `/admin` must answer 200.
 
 The `rehearsal` step fails when any of these happens:
 - either boot is unhealthy
 - the fixture is missing, empty or fails the scan
 - a table or column was dropped, or a column's type changed
 - any content-table row count or column value changed
+- a content-API response changed or a type disappeared
+- `/admin` did not answer 200
 
-**Intended changes** go in `ci/rehearsal-expected-changes.txt`, one per line: `table` or `table.column` (`#` comments allowed), added in the same PR as the change. Declared differences are reported with ` (declared)` instead of failing.
+**Intended changes** go in `ci/rehearsal-expected-changes.txt`, one per line: `table`, `table.column` or `api:<pluralName>` (`#` comments allowed), added in the same PR as the change. Declared differences are reported with ` (declared)` instead of failing.
 - **Only the lines the PR adds** (head vs base) count. A file merged once cannot loosen the check on later PRs, and bot PRs, which never change it, fail on any data change.
 - Human PRs into `develop` pass instantly, so a developer's lines are first honoured on the promotion PR into the default branch, whose diff contains them.
 
@@ -1053,7 +1056,7 @@ All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
 | `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures; later HAR and mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), JWTs, private keys, common tokens, connection strings with a password and a non-local host; `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
-| `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, scan and restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts, columns and column values, except lines the PR adds to `ci/rehearsal-expected-changes.txt` (`rehearse.sh`); diffs in artifact `strapi-rehearsal-diff` | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
+| `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, scan and restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts, columns, column values and content-API responses plus `/admin` 200, except lines the PR adds to `ci/rehearsal-expected-changes.txt` (`rehearse.sh`, `api_check.py`); diffs in artifact `strapi-rehearsal-diff` | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
 
 ### Shared
 

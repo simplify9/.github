@@ -20,7 +20,7 @@
 # =============================================================================
 name: 'Strapi Rehearsal'
 author: 'Simplify9'
-description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove on a scanned fixture that the upgrade keeps content-table row counts, columns and values.'
+description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove on a scanned fixture that the upgrade keeps content-table row counts, columns, values and content-API responses.'
 
 inputs:
   base-sha:
@@ -151,6 +151,12 @@ runs:
           has_content_tables "${tmp}/before.txt"
           table_columns "${db_url}" > "${tmp}/before-cols.txt"
           column_fingerprints "${db_url}" "${tmp}/before-cols.txt" > "${tmp}/before-fp.txt"
+          # Content API as the base serves it, read with a read-only token of the fixture's CI admin.
+          python3 "${ACTION_PATH}/api_check.py" types --src "${base_dir}" "${head_dir}" > "${tmp}/types.json"
+          api_token="$(python3 "${ACTION_PATH}/api_check.py" token --base-url "${health}")"
+          echo "::add-mask::${api_token}"
+          python3 "${ACTION_PATH}/api_check.py" snapshot --base-url "${health}" --token "${api_token}" \
+            --types "${tmp}/types.json" --out "${tmp}/api-before"
           stop_server
           echo "Base: $(wc -l < "${tmp}/before.txt") tables counted"
 
@@ -158,19 +164,29 @@ runs:
           table_counts "${db_url}" > "${tmp}/after.txt"
           table_columns "${db_url}" > "${tmp}/after-cols.txt"
           column_fingerprints "${db_url}" "${tmp}/after-cols.txt" > "${tmp}/after-fp.txt"
+          python3 "${ACTION_PATH}/api_check.py" snapshot --base-url "${health}" --token "${api_token}" \
+            --types "${tmp}/types.json" --out "${tmp}/api-after"
+          admin_code="$(curl -sL -o /dev/null -w '%{http_code}' "${health}/admin" || true)"
           stop_server
 
           failed=()
           compare_counts "${tmp}/before.txt" "${tmp}/after.txt" "${tmp}/declared.txt" > "${tmp}/diff/counts.txt" || failed+=("row counts")
           compare_columns "${tmp}/before-cols.txt" "${tmp}/after-cols.txt" "${tmp}/declared.txt" > "${tmp}/diff/columns.txt" || failed+=("columns")
           compare_fingerprints "${tmp}/before-fp.txt" "${tmp}/after-fp.txt" "${tmp}/declared.txt" > "${tmp}/diff/values.txt" || failed+=("values")
+          python3 "${ACTION_PATH}/api_check.py" compare --before "${tmp}/api-before" --after "${tmp}/api-after" \
+            --declared "${tmp}/declared.txt" > "${tmp}/diff/api.txt" || failed+=("content API")
+          if [ "${admin_code}" != "200" ]; then
+            echo "[VERIFY] rehearsal: head /admin returned ${admin_code:-no response}" >> "${tmp}/diff/api.txt"
+            failed+=("admin panel")
+          fi
           cat "${tmp}"/diff/*.txt
           if [ "${#failed[@]}" -gt 0 ]; then
-            echo "::error title=[VERIFY] Rehearsal::the Strapi upgrade changed data (${failed[*]}; see lines above). Declare intended changes in ci/rehearsal-expected-changes.txt"
+            failed_list="$(printf '%s, ' "${failed[@]}")"
+            echo "::error title=[VERIFY] Rehearsal::the Strapi upgrade changed data (${failed_list%, }; see lines above). Declare intended changes in ci/rehearsal-expected-changes.txt"
             exit 1
           fi
           declared_n="$(cat "${tmp}"/diff/*.txt | grep -c ' (declared)$' || true)"
-          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${BASE_SHA:0:7} kept content-table row counts, columns and values (${declared_n} declared change(s) reported) and /_health returned 204"
+          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${BASE_SHA:0:7} kept content-table row counts, columns, values and content-API responses (${declared_n} declared change(s) reported); /_health 204 and /admin 200"
         else
           boot "${head_dir}" head
           stop_server
