@@ -407,6 +407,8 @@ All 26 actions are composite. Call them in job steps with `uses: simplify9/.gith
   - scans `ci/fixture.sql.gz` (`verify-secret-scan --strapi-dump`), restores it, boots the base commit (git worktree) then HEAD
   - requires `/_health` 204, `/admin` 200, and unchanged content-table row counts, columns (`compare_columns`), per-column value fingerprints (`column_fingerprints`/`compare_fingerprints`) and content-API responses
   - the API comparison is `api_check.py` (stdlib, tested by `test_api_check.py`): it logs in as the fixture's public CI admin, so fixtures must come from `scripts/strapi-fixture`
+  - additions (new types, fields, meta) pass by design (`_covers`), like new columns; base and head each snapshot their own types
+  - the rehearsal base is `rehearsal_base` (merge commit's first parent, else `base-sha`), used for the base boot and for `declared_changes`
   - `declared_changes` honours only the lines the PR adds to `ci/rehearsal-expected-changes.txt`, so never make it read the head file alone
   - uploads diffs as `strapi-rehearsal-diff` on failure
   - tested by `test_rehearse.sh`; its Postgres-backed test needs `PG_TEST_URL` Inputs: `base-sha`, `strapi-changed`, `working-directory`, `package-runner`.

@@ -61,7 +61,7 @@ def api_token(base_url):
         raise RuntimeError("admin login as %s failed (HTTP %s): the fixture has no CI admin (or a different password); "
                            "regenerate it with scripts/strapi-fixture" % (CI_ADMIN_EMAIL, status))
     status, created = _request("POST", base_url + "/admin/api-tokens", token=body["data"]["token"],
-                               body={"name": "verify-ci", "description": "verify rehearsal", "type": "read-only", "lifespan": None})
+                               body={"name": "verify-ci", "description": "verify rehearsal", "type": "read-only"})
     key = (created or {}).get("data", {}).get("accessKey")
     if status not in (200, 201) or not key:
         raise RuntimeError("creating a read-only API token failed (HTTP %s)" % status)
@@ -82,22 +82,40 @@ def snapshot(base_url, token, types, out):
             f.write(json.dumps(obj, sort_keys=True, indent=1))
 
 
+def _covers(base, head):
+    """True when head keeps everything base had: equal scalars, equal list lengths. Keys only in head are
+    additions (a new field, new meta), which a consumer of the API does not break on, so they pass."""
+    if isinstance(base, dict):
+        return isinstance(head, dict) and all(k in head and _covers(v, head[k]) for k, v in base.items())
+    if isinstance(base, list):
+        return isinstance(head, list) and len(base) == len(head) and all(_covers(b, h) for b, h in zip(base, head))
+    return base == head
+
+
+def _is_status(obj):
+    return isinstance(obj, dict) and set(obj) == {"status"}
+
+
 def compare_snapshots(before_dir, after_dir, declared):
     """-> (failures, reported). Diffs go to <parent of before_dir>/diff/api-<pluralName>.diff."""
     diff_dir = os.path.join(os.path.dirname(os.path.abspath(before_dir)), "diff")
     failures, reported = [], []
-    for name in sorted(os.listdir(before_dir)):
-        if not name.endswith(".json"):
-            continue
+    names = sorted(n for n in os.listdir(before_dir) if n.endswith(".json"))
+    compared = 0
+    for name in names:
         plural = name[:-5]
         b, after = os.path.join(before_dir, name), os.path.join(after_dir, name)
+        with open(b, encoding="utf-8") as f1:
+            old = f1.read()
+        compared += not _is_status(json.loads(old))
         if not os.path.exists(after):
             msg = "[VERIFY] rehearsal: api %s removed" % plural
         else:
-            with open(b, encoding="utf-8") as f1, open(after, encoding="utf-8") as f2:
-                old, new = f1.read().splitlines(True), f2.read().splitlines(True)
-            if old == new:
+            with open(after, encoding="utf-8") as f2:
+                new = f2.read()
+            if _covers(json.loads(old), json.loads(new)):
                 continue
+            old, new = old.splitlines(True), new.splitlines(True)
             os.makedirs(diff_dir, exist_ok=True)
             with open(os.path.join(diff_dir, "api-%s.diff" % plural), "w", encoding="utf-8") as f:
                 f.writelines(difflib.unified_diff(old, new, "base/" + name, "head/" + name))
@@ -106,6 +124,8 @@ def compare_snapshots(before_dir, after_dir, declared):
             reported.append(msg + " (declared)")
         else:
             failures.append(msg)
+    if names and not compared:
+        failures.append("[VERIFY] rehearsal: api check compared nothing: every content type answered non-200 at base")
     return failures, reported
 
 

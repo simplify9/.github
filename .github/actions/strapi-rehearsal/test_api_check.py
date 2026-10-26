@@ -32,7 +32,9 @@ class Stub:
         class H(BaseHTTPRequestHandler):
             def _reply(self):
                 path = self.path.split("?", 1)[0]
-                seen.append((self.command, self.path, self.headers.get("Authorization")))
+                n = int(self.headers.get("Content-Length") or 0)
+                sent = json.loads(self.rfile.read(n)) if n else None
+                seen.append((self.command, self.path, self.headers.get("Authorization"), sent))
                 status, body = routes.get((self.command, path), (404, {"error": "nope"}))
                 data = json.dumps(body).encode()
                 self.send_response(status)
@@ -134,6 +136,50 @@ class Compare(unittest.TestCase):
         rc, out, _ = run(["compare", "--before", self.before, "--after", self.after, "--declared", decl])
         self.assertEqual(rc, 0)
         self.assertIn("api articles response changed (declared)", out)
+
+
+class ReviewFixes(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.before = os.path.join(self.tmp.name, "api-before")
+        self.after = os.path.join(self.tmp.name, "api-after")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_compare_additions_ignored(self):
+        write(self.before, "articles", '{"data": [{"id": 1, "title": "a"}], "meta": {}}')
+        write(self.after, "articles", '{"data": [{"id": 1, "title": "a", "slug": null}], "meta": {"x": 1}}')
+        self.assertEqual(a.compare_snapshots(self.before, self.after, set()), ([], []))
+
+    def test_compare_removed_key_or_entry_fails(self):
+        write(self.before, "articles", '{"data": [{"id": 1, "title": "a"}, {"id": 2, "title": "b"}]}')
+        write(self.after, "articles", '{"data": [{"id": 1}, {"id": 2, "title": "b"}]}')
+        self.assertEqual(a.compare_snapshots(self.before, self.after, set())[0],
+                         ["[VERIFY] rehearsal: api articles response changed"])
+        write(self.after, "articles", '{"data": [{"id": 1, "title": "a"}]}')
+        self.assertEqual(len(a.compare_snapshots(self.before, self.after, set())[0]), 1)
+
+    def test_compare_nothing_compared_fails(self):
+        write(self.before, "articles", '{"status": 403}')
+        write(self.after, "articles", '{"status": 403}')
+        self.assertEqual(a.compare_snapshots(self.before, self.after, set())[0],
+                         ["[VERIFY] rehearsal: api check compared nothing: every content type answered non-200 at base"])
+
+    def test_compare_no_types_is_fine(self):
+        os.makedirs(self.before)
+        os.makedirs(self.after)
+        self.assertEqual(a.compare_snapshots(self.before, self.after, set()), ([], []))
+
+    def test_token_body_has_no_lifespan(self):
+        stub = Stub({("POST", "/admin/login"): (200, {"data": {"token": "jwt"}}),
+                     ("POST", "/admin/api-tokens"): (201, {"data": {"accessKey": "k"}})})
+        try:
+            run(["token", "--base-url", stub.url])
+        finally:
+            stub.close()
+        self.assertNotIn("lifespan", stub.seen[1][3])
+        self.assertEqual(stub.seen[1][3]["type"], "read-only")
 
 
 class Http(unittest.TestCase):

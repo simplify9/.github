@@ -14,7 +14,8 @@ import re
 import sys
 from collections import namedtuple
 
-Finding = namedtuple("Finding", "line kind masked")
+# where: "table.column" for findings inside a pg_dump COPY section (--strapi-dump), else "".
+Finding = namedtuple("Finding", "line kind masked where", defaults=("",))
 
 # Public by design: the CI admin that scripts/strapi-fixture puts into every fixture. Its password
 # ("VerifyCiOnly-1") is only valid in throwaway databases; never restore a fixture into a real one.
@@ -35,8 +36,13 @@ STRAPI_SECRET_TABLES = frozenset({
 EXAMPLE_DOMAINS = {"example.com", "example.org", "example.net", "strapi.io"}
 RESERVED_SUFFIXES = (".invalid", ".example", ".test", ".localhost")
 LOCAL_HOSTS = r"(?:localhost|127\.0\.0\.1|host\.docker\.internal)"
+# Personal mailboxes: never allow-list the domain, scrub the column instead.
+FREE_MAIL = {"gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com", "msn.com",
+             "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com", "gmx.com", "yandex.com", "mail.ru"}
 
-EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})")
+# The lookbehind anchors the local part at its first character: without it a long run of local-part
+# characters (a hex bytea column) makes the search quadratic.
+EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})")
 PATTERNS = [
     ("password-hash", re.compile(r"\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}")),
     ("password-hash", re.compile(r"\$argon2(?:id|i|d)\$")),
@@ -49,7 +55,8 @@ PATTERNS = [
     ("connection-string", re.compile(
         r"(?i)(?:postgres(?:ql)?|amqps?|mongodb(?:\+srv)?|redis)://[^:/@\s\"']*:[^@\s\"']+@(?!" + LOCAL_HOSTS + r"\b)")),
 ]
-COPY = re.compile(r"^COPY public\.\"?([A-Za-z0-9_]+)\"? .* FROM stdin;$")
+COPY = re.compile(r"^COPY public\.\"?([A-Za-z0-9_]+)\"? \((.*)\) FROM stdin;$")
+INSERT = re.compile(r"^INSERT INTO (?:public\.)?\"?([A-Za-z0-9_]+)\"?[ (]")
 
 
 def load_allow(path):
@@ -78,13 +85,15 @@ def _email_allowed(address, domain, allow):
 
 
 def _in_url_userinfo(line, start):
-    """True when the match sits in `scheme://user:pass@host` (reported as a connection string instead)."""
+    """True when the match sits in `scheme://user:pass@host` (reported as a connection string instead):
+    a `://` in the same token with no path, query, fragment, escape or tag between it and the match."""
     token_start = max(line.rfind(c, 0, start) for c in " \t\"'") + 1
-    return "://" in line[token_start:start]
+    i = line.rfind("://", token_start, start)
+    return i >= 0 and not re.search(r"[/?#\\<>]", line[i + 3:start])
 
 
 def scan_lines(lines, allow, strapi_dump):
-    findings, secret_copy = [], None
+    findings, secret_copy, copy = [], None, None  # copy: (table, [columns]) while inside COPY data
     for n, line in enumerate(lines, 1):
         line = line.rstrip("\r\n")
         if strapi_dump:
@@ -95,17 +104,33 @@ def scan_lines(lines, allow, strapi_dump):
                     findings.append(Finding(secret_copy[0], "strapi-secret-table", secret_copy[2]))
                     secret_copy = (secret_copy[0], True, secret_copy[2])
                 continue
-            m = COPY.match(line)
-            if m and m.group(1) in STRAPI_SECRET_TABLES:
-                secret_copy = (n, False, m.group(1))
+            if copy is not None and line == "\\.":
+                copy = None
                 continue
+            m = COPY.match(line)
+            if m:
+                if m.group(1) in STRAPI_SECRET_TABLES:
+                    secret_copy = (n, False, m.group(1))
+                else:
+                    copy = (m.group(1), [c.strip().strip('"') for c in m.group(2).split(",")])
+                continue
+            m = INSERT.match(line)
+            if m and m.group(1) in STRAPI_SECRET_TABLES:
+                findings.append(Finding(n, "strapi-secret-table", m.group(1)))
+                continue
+
+        def where(pos):
+            if copy is None:
+                return ""
+            i = line.count("\t", 0, pos)
+            return "%s.%s" % (copy[0], copy[1][i] if i < len(copy[1]) else "?")
         for m in EMAIL.finditer(line):
             if not _email_allowed(m.group(0), m.group(1), allow) and not _in_url_userinfo(line, m.start()):
-                findings.append(Finding(n, "email", "***@" + m.group(1).lower()))
+                findings.append(Finding(n, "email", "***@" + m.group(1).lower(), where(m.start())))
         for kind, rx in PATTERNS:
             for m in rx.finditer(line):
                 if m.group(0) != CI_ADMIN_HASH:
-                    findings.append(Finding(n, kind, m.group(0)[:4] + "…"))
+                    findings.append(Finding(n, kind, m.group(0)[:4] + "…", where(m.start())))
     return findings
 
 
@@ -135,9 +160,12 @@ def main(argv):
             return 2
         for fd in found:
             hint = ""
-            if fd.kind == "email":
+            if fd.kind == "email" and fd.masked[4:] in FREE_MAIL:
+                hint = " (a personal mailbox: list the column in ci/fixture-pii.txt and regenerate the fixture)"
+            elif fd.kind == "email":
                 hint = ' (if this is public business content, add "@%s" or the address to ci/fixture-allow.txt)' % fd.masked[4:]
-            print("::error file=%s,line=%d,title=[VERIFY] secret-scan::%s: %s%s" % (path, fd.line, fd.kind, fd.masked, hint))
+            at = " in " + fd.where if fd.where else ""
+            print("::error file=%s,line=%d,title=[VERIFY] secret-scan::%s: %s%s%s" % (path, fd.line, fd.kind, fd.masked, at, hint))
         total += len(found)
     if total:
         print("[VERIFY] secret-scan: %d finding(s); values are masked" % total)

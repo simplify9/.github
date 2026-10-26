@@ -102,6 +102,18 @@ test_compare_counts_declared_reported() {
   v2_run compare_counts 'articles 10\n' 'articles 20\n' 'articles\n'
   if [ "${rc}" -eq 0 ] && [ "${out}" = "[VERIFY] rehearsal: articles 10 -> 20 (declared)" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
 }
+test_rehearsal_base_prefers_merge_first_parent() {
+  local r="${tmp}/git" a c out
+  git init -q -b main "${r}" && cd "${r}" || { bad "$1" "git init"; return; }
+  git -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m A; a="$(git rev-parse HEAD)"
+  git checkout -q -b pr && git -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m B
+  git checkout -q main && git -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m C; c="$(git rev-parse HEAD)"
+  git -c user.email=t@example.invalid -c user.name=t merge -q --no-ff -m M pr
+  out="$(rehearsal_base "${r}" "${a}")"
+  local plain; git checkout -q pr; plain="$(rehearsal_base "${r}" "${a}")"
+  cd - > /dev/null || true
+  if [ "${out}" = "${c}" ] && [ "${plain}" = "${a}" ]; then ok "$1"; else bad "$1" "merge=${out} want ${c}; plain=${plain} want ${a}"; fi
+}
 # Needs a Postgres: PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres bash test_rehearse.sh
 test_fingerprints_quoting_no_id_and_empty() {
   if [ -z "${PG_TEST_URL:-}" ]; then echo "SKIP $1 (PG_TEST_URL unset)"; return; fi

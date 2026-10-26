@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                 ".github", "actions", "verify-secret-scan"))
@@ -67,6 +68,25 @@ def pii_columns(columns, extra):
         if PII_NAME.search(column) or (table, column) in extra:
             out.append((table, column, data_type))
     return out
+
+
+def unmatched_pii(columns, entries):
+    """ci/fixture-pii.txt entries that are not `table.column` of an existing column (typos must not pass silently)."""
+    existing = {(t, c) for t, c, _ in columns}
+    return [e for e in entries if "." not in e or tuple(e.split(".", 1)) not in existing]
+
+
+def pg_env(url):
+    """libpq environment for a postgres:// URL, so no credential appears in any process's argv."""
+    u = urllib.parse.urlsplit(url)
+    env = {"PGHOST": u.hostname, "PGPORT": str(u.port) if u.port else None,
+           "PGUSER": urllib.parse.unquote(u.username) if u.username else None,
+           "PGPASSWORD": urllib.parse.unquote(u.password) if u.password else None,
+           "PGDATABASE": urllib.parse.unquote(u.path.lstrip("/")) or None}
+    for k, v in urllib.parse.parse_qsl(u.query):
+        if k == "sslmode":
+            env["PGSSLMODE"] = v
+    return {k: v for k, v in env.items() if v}
 
 
 def _tables(columns):
@@ -191,9 +211,11 @@ def main(argv):
         print("environment variable %s is empty" % a.source_env, file=sys.stderr)
         return 2
     ci_dir = os.path.join(a.repo, "ci")
-    pii_extra = {tuple(e.split(".", 1)) for e in parse_list_file(os.path.join(ci_dir, "fixture-pii.txt")) if "." in e}
+    pii_entries = parse_list_file(os.path.join(ci_dir, "fixture-pii.txt"))
+    pii_extra = {tuple(e.split(".", 1)) for e in pii_entries if "." in e}
     name = "strapi-fixture-%d" % os.getpid()
-    env = dict(os.environ, SRC=os.environ[a.source_env])
+    src = pg_env(os.environ[a.source_env])
+    env = dict(os.environ, **src)
     try:
         _run(["docker", "run", "-d", "--rm", "--name", name, "-e", "POSTGRES_PASSWORD=fixture",
               "-e", "POSTGRES_DB=fixture", a.postgres_image], capture_output=True)
@@ -206,11 +228,20 @@ def main(argv):
             print("throwaway Postgres did not become ready", file=sys.stderr)
             return 1
         print("copying the source database into the throwaway container (read-only on the source)")
-        _run(["docker", "exec", "-e", "SRC", name, "bash", "-o", "pipefail", "-c",
-              'pg_dump --no-owner --no-privileges "$SRC" | psql -v ON_ERROR_STOP=1 -q -U postgres -d fixture > /dev/null'], env=env)
+        # libpq reads the source from PG* variables copied from this process's environment (`-e NAME`
+        # without a value), so the password is in no argv, on the host or in the container.
+        pass_env = [x for k in sorted(src) for x in ("-e", k)]
+        _run(["docker", "exec"] + pass_env + [name, "bash", "-o", "pipefail", "-c",
+              "pg_dump --no-owner --no-privileges | PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=postgres PGDATABASE=fixture "
+              "PGPASSWORD= PGSSLMODE=disable psql -v ON_ERROR_STOP=1 -q > /dev/null"],
+             env=env)
         columns = [tuple(l.split("\t")) for l in _psql(name, query=(
             "SELECT table_name, column_name, data_type FROM information_schema.columns "
             "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position")).splitlines()]
+        bad = unmatched_pii(columns, pii_entries)
+        if bad:
+            print("ci/fixture-pii.txt entries that match no column (expected table.column): %s" % ", ".join(bad), file=sys.stderr)
+            return 1
         sql = sanitize_sql(columns, pii_columns(columns, pii_extra), a.truncate)
         if any(c[0] == "strapi_core_store_settings" for c in columns):
             sql += "\n".join(_core_store_updates(name)) + "\n"

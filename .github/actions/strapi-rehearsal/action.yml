@@ -127,13 +127,16 @@ runs:
           fi
           gunzip -c "${fixture}" | psql "${db_url}" -v ON_ERROR_STOP=1 -q > /dev/null
 
+          # The commit the PR merges onto (merge commit's first parent; else the event's base SHA).
+          base_ref="$(rehearsal_base "${repo_root}" "${BASE_SHA}")"
+
           # Intended changes: only the lines this PR adds to ci/rehearsal-expected-changes.txt count.
           mkdir -p "${tmp}/diff"
-          git -C "${repo_root}" show "${BASE_SHA}:${rel#/}${rel:+/}ci/rehearsal-expected-changes.txt" \
+          git -C "${repo_root}" show "${base_ref}:${rel#/}${rel:+/}ci/rehearsal-expected-changes.txt" \
             > "${tmp}/declared-base.txt" 2>/dev/null || : > "${tmp}/declared-base.txt"
           declared_changes "${tmp}/declared-base.txt" "${head_dir}/ci/rehearsal-expected-changes.txt" > "${tmp}/declared.txt"
 
-          git -C "${repo_root}" worktree add --detach "${tmp}/base" "${BASE_SHA}"
+          git -C "${repo_root}" worktree add --detach "${tmp}/base" "${base_ref}"
           base_dir="${tmp}/base${rel}"
           pm="$(detect_pm "${base_dir}")"
           (
@@ -152,11 +155,13 @@ runs:
           table_columns "${db_url}" > "${tmp}/before-cols.txt"
           column_fingerprints "${db_url}" "${tmp}/before-cols.txt" > "${tmp}/before-fp.txt"
           # Content API as the base serves it, read with a read-only token of the fixture's CI admin.
-          python3 "${ACTION_PATH}/api_check.py" types --src "${base_dir}" "${head_dir}" > "${tmp}/types.json"
+          # Each side snapshots its own content types: a type new at head is an addition, not a change.
+          python3 "${ACTION_PATH}/api_check.py" types --src "${base_dir}" > "${tmp}/types-base.json"
+          python3 "${ACTION_PATH}/api_check.py" types --src "${head_dir}" > "${tmp}/types-head.json"
           api_token="$(python3 "${ACTION_PATH}/api_check.py" token --base-url "${health}")"
           echo "::add-mask::${api_token}"
           python3 "${ACTION_PATH}/api_check.py" snapshot --base-url "${health}" --token "${api_token}" \
-            --types "${tmp}/types.json" --out "${tmp}/api-before"
+            --types "${tmp}/types-base.json" --out "${tmp}/api-before"
           stop_server
           echo "Base: $(wc -l < "${tmp}/before.txt") tables counted"
 
@@ -165,7 +170,7 @@ runs:
           table_columns "${db_url}" > "${tmp}/after-cols.txt"
           column_fingerprints "${db_url}" "${tmp}/after-cols.txt" > "${tmp}/after-fp.txt"
           python3 "${ACTION_PATH}/api_check.py" snapshot --base-url "${health}" --token "${api_token}" \
-            --types "${tmp}/types.json" --out "${tmp}/api-after"
+            --types "${tmp}/types-head.json" --out "${tmp}/api-after"
           admin_code="$(curl -sL -o /dev/null -w '%{http_code}' "${health}/admin" || true)"
           stop_server
 
@@ -182,11 +187,18 @@ runs:
           cat "${tmp}"/diff/*.txt
           if [ "${#failed[@]}" -gt 0 ]; then
             failed_list="$(printf '%s, ' "${failed[@]}")"
+            {
+              echo "### Strapi rehearsal: ${failed_list%, }"
+              echo '```'
+              cat "${tmp}"/diff/*.txt
+              echo '```'
+              echo "Full diffs: artifact \`strapi-rehearsal-diff\`."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
             echo "::error title=[VERIFY] Rehearsal::the Strapi upgrade changed data (${failed_list%, }; see lines above). Declare intended changes in ci/rehearsal-expected-changes.txt"
             exit 1
           fi
           declared_n="$(cat "${tmp}"/diff/*.txt | grep -c ' (declared)$' || true)"
-          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${BASE_SHA:0:7} kept content-table row counts, columns, values and content-API responses (${declared_n} declared change(s) reported); /_health 204 and /admin 200"
+          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${base_ref:0:7} kept content-table row counts, columns, values and content-API responses (${declared_n} declared change(s) reported); /_health 204 and /admin 200"
         else
           boot "${head_dir}" head
           stop_server

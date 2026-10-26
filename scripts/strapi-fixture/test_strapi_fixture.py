@@ -110,6 +110,20 @@ class BlankSecrets(unittest.TestCase):
         self.assertEqual(f.blank_secrets({"password": 3, "token": None}), {"password": 3, "token": None})
 
 
+class ReviewFixes(unittest.TestCase):
+    def test_unmatched_pii_entries_reported(self):
+        cols = [("contacts", "full_name", V), ("articles", "title", V)]
+        self.assertEqual(f.unmatched_pii(cols, ["contacts.full_name", "articels.title", "nodot"]),
+                         ["articels.title", "nodot"])
+        self.assertEqual(f.unmatched_pii(cols, ["contacts.full_name"]), [])
+
+    def test_pg_env_from_url(self):
+        env = f.pg_env("postgres://ro%40user:p%3Ass@db.example.co:25060/cms?sslmode=require")
+        self.assertEqual(env, {"PGHOST": "db.example.co", "PGPORT": "25060", "PGUSER": "ro@user",
+                               "PGPASSWORD": "p:ss", "PGDATABASE": "cms", "PGSSLMODE": "require"})
+        self.assertEqual(f.pg_env("postgresql://u@h/d"), {"PGHOST": "h", "PGUSER": "u", "PGDATABASE": "d"})
+
+
 class ListFile(unittest.TestCase):
     def test_parse_list_file_crlf_comments(self):
         with tempfile.TemporaryDirectory() as d:

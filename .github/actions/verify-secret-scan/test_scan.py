@@ -60,6 +60,39 @@ class Emails(unittest.TestCase):
         self.assertEqual(s.load_allow(None), NONE)
 
 
+class ReviewFixes(unittest.TestCase):
+    def test_email_after_url_is_found(self):
+        for line in ["Site: https://acme.co\\njane.doe@client.example.co",
+                     "https://acme.co<br>jane.doe@client.example.co",
+                     "https://acme.co/unsubscribe?email=jane.doe@client.example.co"]:
+            self.assertEqual(kinds(line), ["email"], line)
+
+    def test_location_in_strapi_dump(self):
+        rows = ["COPY public.contacts (id, note, mail) FROM stdin;", "1\tx\tjane@client.example.co", "\\."]
+        self.assertEqual(s.scan_lines(rows, NONE, True)[0].where, "contacts.mail")
+
+    def test_free_mail_hint_points_to_pii_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.sql")
+            with open(p, "w") as f:
+                f.write("someone@gmail.com\n")
+            rc, out = run_main([p])
+        self.assertEqual(rc, 1)
+        self.assertIn("ci/fixture-pii.txt", out)
+        self.assertNotIn('add "@gmail.com"', out)
+
+    def test_long_hex_run_is_fast(self):
+        import time
+        t = time.time()
+        self.assertEqual(kinds("\\x" + "ab12" * 50000), [])
+        self.assertLess(time.time() - t, 1.0)
+
+    def test_insert_into_secret_table_found(self):
+        rows = ["INSERT INTO public.strapi_webhooks (id, url) VALUES (1, 'https://hooks.example.co/x');"]
+        self.assertEqual([f.kind for f in s.scan_lines(rows, NONE, True)], ["strapi-secret-table"])
+        self.assertEqual(s.scan_lines(rows, NONE, False), [])
+
+
 class Secrets(unittest.TestCase):
     def test_bcrypt_found_ci_admin_allowed(self):
         self.assertEqual(s.scan_lines([BCRYPT], NONE, False), [s.Finding(1, "password-hash", "$2b$…")])

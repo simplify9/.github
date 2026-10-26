@@ -65,6 +65,17 @@ declared_changes() {
                     <(awk "${norm}" "$2" 2>/dev/null | LC_ALL=C sort -u)
 }
 
+# rehearsal_base <repo-root> <base-sha>: the commit the PR is rehearsed against. CI checks out GitHub's merge
+# commit, whose first parent is the base it actually merges onto; the event's base.sha can be older, and
+# lines merged into the base since then must not count as "added by this PR". Not a merge: <base-sha>.
+rehearsal_base() {
+  if git -C "$1" rev-parse -q --verify 'HEAD^2' > /dev/null; then
+    git -C "$1" rev-parse 'HEAD^1'
+  else
+    printf '%s\n' "$2"
+  fi
+}
+
 # table_columns <psql-url> -> sorted "table<TAB>column<TAB>data_type" lines for base tables in schema public.
 table_columns() {
   local out

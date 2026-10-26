@@ -908,19 +908,24 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
    - row counts
    - **columns:** none dropped, no type changed
    - **values:** a per-column fingerprint, md5 over every row in `id` order
-   - **content API:** the base logs in as the fixture's CI admin and creates a read-only API token. For every collection and single type in `src/api/*/content-types/*/schema.json`, both commits' REST responses (first page of 100, `populate=*`) must match. HEAD's `/admin` must answer 200.
+   - **content API:** the base logs in as the fixture's CI admin and creates a read-only API token. Each commit is read with its own content types from `src/api/*/content-types/*/schema.json` (REST list, first page of 100, `populate=*`).
+     - Every key, value and entry the base returned must still be there at HEAD.
+     - **Additions pass:** a new type, a new field, new `meta`.
+     - The check fails if no type answered 200 at the base, since nothing was compared.
+     - HEAD's `/admin` must answer 200.
 
 The `rehearsal` step fails when any of these happens:
 - either boot is unhealthy
 - the fixture is missing, empty or fails the scan
 - a table or column was dropped, or a column's type changed
 - any content-table row count or column value changed
-- a content-API response changed or a type disappeared
+- a content-API response lost or changed something (additions are fine), or a type disappeared
 - `/admin` did not answer 200
 
 **Intended changes** go in `ci/rehearsal-expected-changes.txt`, one per line: `table`, `table.column` or `api:<pluralName>` (`#` comments allowed), added in the same PR as the change. Declared differences are reported with ` (declared)` instead of failing.
 - **Only the lines the PR adds** (head vs base) count. A file merged once cannot loosen the check on later PRs, and bot PRs, which never change it, fail on any data change.
 - Human PRs into `develop` pass instantly, so a developer's lines are first honoured on the promotion PR into the default branch, whose diff contains them.
+- "Base" is the first parent of the merge commit CI checks out (what the PR actually merges onto), falling back to the event's base SHA.
 
 On failure the diffs are uploaded as the artifact `strapi-rehearsal-diff` (5 days).
 
@@ -940,7 +945,10 @@ SRC_DB='postgres://readonly_user:...@host:5432/db' \
   - replaces personal-data columns (names containing email, phone, mobile, msisdn, national id or ip, plus the repo's `ci/fixture-pii.txt`)
 - It then scans the dump with `verify-secret-scan` and writes the fixture only if the scan is clean and the file is under 50 MB gzipped.
 - `--postgres-image` (default `postgres:16`) must match the repo's verify `postgres-version` and be at least the source server's major version.
-- Repo files, all one entry per line with `#` comments: `ci/fixture-pii.txt` (`table.column` to scrub), `ci/fixture-allow.txt` (public business addresses that are real content: an address or `@domain`).
+- Repo files, all one entry per line with `#` comments:
+  - `ci/fixture-pii.txt`: `table.column` to scrub. An entry matching no column stops the tool, so typos can't pass silently.
+  - `ci/fixture-allow.txt`: public business addresses that are real content, as an address or `@domain`. Never allow-list a personal mailbox domain (gmail.com and similar); scrub that column instead, and the scan says so.
+- The source is passed to `pg_dump` through `PG*` environment variables, so the password is in no process's arguments.
 - **The CI admin's password is public. Never restore a fixture into a real environment.**
 
 **Informational vuln report.** On PRs into the default branch a `vuln-report` job runs `check-critical-vulns` and surfaces open critical Dependabot alerts in its summary. It is `continue-on-error` and is not part of `result`'s needs, so it can never fail `verify / result`.
