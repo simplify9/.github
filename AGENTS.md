@@ -14,6 +14,7 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 ├── workflow-templates/     <- org starter templates surfaced in GitHub's "New workflow" UI
 ├── renovate/               <- org Renovate presets (default + per-stack; validate with renovate/validate.sh)
 ├── scripts/fleet/          <- maintainer audits + deps_health.py fleet metrics (run locally, not from CI; read-only gh)
+├── scripts/strapi-fixture/ <- strapi_fixture.py: sanitized Strapi fixture maker (DevOps, Docker; tested by test_strapi_fixture.py)
 └── profile/README.md       <- org profile page
 ```
 

@@ -901,6 +901,25 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 **Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also restores `ci/fixture.sql.gz` (a plain-SQL dump of a representative database) into Postgres, boots the base commit from a git worktree so it migrates the fixture, boots HEAD on the same database, and compares content-table row counts. The `rehearsal` step fails when either boot is unhealthy, the fixture is missing or empty, a table was dropped, or any content-table row count changed.
 
+**Making `ci/fixture.sql.gz`.** Never hand-edit or hand-dump it: run `scripts/strapi-fixture/strapi_fixture.py` on a machine with Docker (DevOps, not CI):
+
+```bash
+SRC_DB='postgres://readonly_user:...@host:5432/db' \
+  python3 scripts/strapi-fixture/strapi_fixture.py --source-env SRC_DB --repo ../some-cms [--truncate form_submissions]
+```
+
+- The source URL is read from the named environment variable, never from the command line. The source is only read (`pg_dump`); use **staging**. A production source needs approval and a read-only role.
+- In a throwaway local Postgres it:
+  - anonymizes admin users; the lowest-id Super Admin becomes the **CI admin** `ci-admin@example.invalid`, password `VerifyCiOnly-1`, created if missing
+  - anonymizes app users (`up_users`)
+  - empties API/transfer tokens, sessions, webhooks and content history
+  - blanks secret-looking keys in the core store (OAuth provider secrets, email-provider keys)
+  - replaces personal-data columns (names containing email, phone, mobile, msisdn, national id or ip, plus the repo's `ci/fixture-pii.txt`)
+- It then scans the dump with `verify-secret-scan` and writes the fixture only if the scan is clean and the file is under 50 MB gzipped.
+- `--postgres-image` (default `postgres:16`) must match the repo's verify `postgres-version` and be at least the source server's major version.
+- Repo files, all one entry per line with `#` comments: `ci/fixture-pii.txt` (`table.column` to scrub), `ci/fixture-allow.txt` (public business addresses that are real content: an address or `@domain`).
+- **The CI admin's password is public. Never restore a fixture into a real environment.**
+
 **Informational vuln report.** On PRs into the default branch a `vuln-report` job runs `check-critical-vulns` and surfaces open critical Dependabot alerts in its summary. It is `continue-on-error` and is not part of `result`'s needs, so it can never fail `verify / result`.
 
 **Outputs / artifacts:** `result` uploads `verify-report.json` (artifact `verify-report`, 5 days) with `scope`, `failed`, `warned` and `missing`.
