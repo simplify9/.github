@@ -4,7 +4,16 @@
   "schedule": ["* 0-8 * * 3"],
   "lockFileMaintenance": { "schedule": ["* 0-8 * * 3"] },
   "packageRules": [
+    { "description": "Android build toolchain (Gradle, Android Gradle Plugin, Kotlin) must match what the framework supports: it moves with the framework upgrade, behind dashboard approval, never automerged",
+      "matchManagers": ["gradle", "gradle-wrapper"],
+      "matchDepNames": ["gradle", "com.android.application", "com.android.library", "com.android.tools.build:gradle", "/^org\\.jetbrains\\.kotlin/"],
+      "groupName": "android toolchain", "groupSlug": "android-toolchain", "dependencyDashboardApproval": true, "automerge": false },
+    { "description": "iOS toolchain (CocoaPods and the Ruby gems behind it): verify has no iOS build, so a person merges these after an iOS build",
+      "matchManagers": ["cocoapods", "bundler"],
+      "groupName": "ios toolchain", "groupSlug": "ios-toolchain", "automerge": false },
     { "description": "Flutter SDK constraint changes need a human: dashboard approval, never automerged",
-      "matchDepNames": ["flutter"], "dependencyDashboardApproval": true, "automerge": false }
+      "matchDepNames": ["flutter"], "dependencyDashboardApproval": true, "automerge": false },
+    { "description": "Resolved from the Flutter SDK, not Maven: the lookup always fails",
+      "matchDepNames": ["dev.flutter.flutter-plugin-loader"], "enabled": false }
   ]
 }
