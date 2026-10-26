@@ -2,6 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>simplify9/.github//renovate/default"],
   "schedule": ["* 0-8 * * 4"],
+  "lockFileMaintenance": { "schedule": ["* 0-8 * * 4"] },
   "packageRules": [
     { "description": "Strapi packages move as one group, pinned rather than ranged",
       "matchPackageNames": ["@strapi/**"], "groupName": "strapi", "groupSlug": "strapi", "rangeStrategy": "pin" },

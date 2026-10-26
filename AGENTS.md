@@ -13,7 +13,7 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 │   └── actions/            <- composite actions    (uses: in steps)
 ├── workflow-templates/     <- org starter templates surfaced in GitHub's "New workflow" UI
 ├── renovate/               <- org Renovate presets (default + per-stack; validate with renovate/validate.sh)
-├── scripts/fleet/          <- maintainer audits (run locally, not from CI)
+├── scripts/fleet/          <- maintainer audits + deps_health.py fleet metrics (run locally, not from CI; read-only gh)
 └── profile/README.md       <- org profile page
 ```
 
