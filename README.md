@@ -899,7 +899,57 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 `stack: infra` has no contract items.
 
-**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also restores `ci/fixture.sql.gz` (a plain-SQL dump of a representative database) into Postgres, boots the base commit from a git worktree so it migrates the fixture, boots HEAD on the same database, and compares content-table row counts. The `rehearsal` step fails when either boot is unhealthy, the fixture is missing or empty, a table was dropped, or any content-table row count changed.
+**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also does the following:
+1. Scans `ci/fixture.sql.gz` with `verify-secret-scan --strapi-dump` and refuses a fixture that holds personal data or secrets.
+2. Restores the fixture into Postgres.
+3. Boots the base commit from a git worktree, so it migrates the fixture.
+4. Boots HEAD on the same database.
+5. Compares, for content tables (Strapi bookkeeping tables `strapi_*`, `admin_*`, `up_*` and `i18n_locale` are excluded):
+   - row counts
+   - **columns:** none dropped, no type changed
+   - **values:** a per-column fingerprint, md5 over every row in `id` order
+   - **content API:** the base logs in as the fixture's CI admin and creates a read-only API token. Each commit is read with its own content types from `src/api/*/content-types/*/schema.json` (REST list, first page of 100, `populate=*`).
+     - Every key, value and entry the base returned must still be there at HEAD.
+     - **Additions pass:** a new type, a new field, new `meta`.
+     - The check fails if no type answered 200 at the base, since nothing was compared.
+     - HEAD's `/admin` must answer 200.
+
+The `rehearsal` step fails when any of these happens:
+- either boot is unhealthy
+- the fixture is missing, empty or fails the scan
+- a table or column was dropped, or a column's type changed
+- any content-table row count or column value changed
+- a content-API response lost or changed something (additions are fine), or a type disappeared
+- `/admin` did not answer 200
+
+**Intended changes** go in `ci/rehearsal-expected-changes.txt`, one per line: `table`, `table.column` or `api:<pluralName>` (`#` comments allowed), added in the same PR as the change. Declared differences are reported with ` (declared)` instead of failing.
+- **Only the lines the PR adds** (head vs base) count. A file merged once cannot loosen the check on later PRs, and bot PRs, which never change it, fail on any data change.
+- Human PRs into `develop` pass instantly, so a developer's lines are first honoured on the promotion PR into the default branch, whose diff contains them.
+- "Base" is the first parent of the merge commit CI checks out (what the PR actually merges onto), falling back to the event's base SHA.
+
+On failure the diffs are uploaded as the artifact `strapi-rehearsal-diff` (5 days).
+
+**Making `ci/fixture.sql.gz`.** Never hand-edit or hand-dump it: run `scripts/strapi-fixture/strapi_fixture.py` on a machine with Docker (DevOps, not CI):
+
+```bash
+SRC_DB='postgres://readonly_user:...@host:5432/db' \
+  python3 scripts/strapi-fixture/strapi_fixture.py --source-env SRC_DB --repo ../some-cms [--truncate form_submissions]
+```
+
+- The source URL is read from the named environment variable, never from the command line. The source is only read (`pg_dump`); use **staging**. A production source needs approval and a read-only role.
+- In a throwaway local Postgres it:
+  - anonymizes admin users; the lowest-id Super Admin becomes the **CI admin** `ci-admin@example.invalid`, password `VerifyCiOnly-1`, created if missing
+  - anonymizes app users (`up_users`)
+  - empties API/transfer tokens, sessions, webhooks and content history
+  - blanks secret-looking keys in the core store (OAuth provider secrets, email-provider keys)
+  - replaces personal-data columns (names containing email, phone, mobile, msisdn, national id or ip, plus the repo's `ci/fixture-pii.txt`)
+- It then scans the dump with `verify-secret-scan` and writes the fixture only if the scan is clean and the file is under 50 MB gzipped.
+- `--postgres-image` (default `postgres:16`) must match the repo's verify `postgres-version` and be at least the source server's major version.
+- Repo files, all one entry per line with `#` comments:
+  - `ci/fixture-pii.txt`: `table.column` to scrub. An entry matching no column stops the tool, so typos can't pass silently.
+  - `ci/fixture-allow.txt`: public business addresses that are real content, as an address or `@domain`. Never allow-list a personal mailbox domain (gmail.com and similar); scrub that column instead, and the scan says so.
+- The source is passed to `pg_dump` through `PG*` environment variables, so the password is in no process's arguments.
+- **The CI admin's password is public. Never restore a fixture into a real environment.**
 
 **Informational vuln report.** On PRs into the default branch a `vuln-report` job runs `check-critical-vulns` and surfaces open critical Dependabot alerts in its summary. It is `continue-on-error` and is not part of `result`'s needs, so it can never fail `verify / result`.
 
@@ -1013,7 +1063,8 @@ All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-web-install` | Detect the package manager from the lockfile (`detect_pm.sh`), set up Node, install from the lockfile without modifying it | `working-directory`, `node-version` | `package-manager` (`npm`/`yarn`/`yarn-berry`/`pnpm`), `runner` |
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
-| `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts (`rehearse.sh`) | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
+| `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures; later HAR and mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), JWTs, private keys, common tokens, connection strings with a password and a non-local host; `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
+| `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, scan and restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts, columns, column values and content-API responses plus `/admin` 200, except lines the PR adds to `ci/rehearsal-expected-changes.txt` (`rehearse.sh`, `api_check.py`); diffs in artifact `strapi-rehearsal-diff` | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
 
 ### Shared
 

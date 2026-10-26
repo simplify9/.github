@@ -23,20 +23,117 @@ has_content_tables() {
   return 1
 }
 
-# compare_counts <before-file> <after-file>: exit 1 and print a line per content table whose count
-# changed or that disappeared, and for any malformed line (table without a numeric count).
+# Shared awk prelude for the compare_* helpers: bookkeeping tables, and declared changes read from
+# the file in -v decl (lines `table` or `table.column`): a declared difference is printed with
+# " (declared)" and does not fail.
+AWK_DECLARED='
+  function skip(t) { return t ~ /^(strapi_|admin_|up_|i18n_locale)/ }
+  function report(t, c, msg) {
+    if ((t in d) || (c != "" && (t "." c) in d)) printf "%s (declared)\n", msg
+    else { print msg; bad = 1 }
+  }
+  BEGIN { while ((getline l < decl) > 0) d[l] = 1 }
+'
+
+# compare_counts <before-file> <after-file> [declared-file]: exit 1 and print a line per content table
+# whose count changed or that disappeared, and for any malformed line (table without a numeric count).
 # Strapi bookkeeping tables change legitimately and are ignored; new tables are ignored too.
 compare_counts() {
-  awk '
-    function skip(t) { return t ~ /^(strapi_|admin_|up_|i18n_locale)/ }
+  awk -v decl="${3:-/dev/null}" "${AWK_DECLARED}"'
     $2 !~ /^[0-9]+$/ { printf "[VERIFY] rehearsal: malformed count line: %s\n", $0; bad = 1; next }
-    NR == FNR { before[$1] = $2; next }
+    FILENAME == ARGV[1] { before[$1] = $2; next }
     { after[$1] = $2 }
     END {
       for (t in before) {
         if (skip(t)) continue
-        if (!(t in after)) { printf "[VERIFY] rehearsal: %s %s -> dropped\n", t, before[t]; bad = 1 }
-        else if (before[t] != after[t]) { printf "[VERIFY] rehearsal: %s %s -> %s\n", t, before[t], after[t]; bad = 1 }
+        if (!(t in after)) report(t, "", sprintf("[VERIFY] rehearsal: %s %s -> dropped", t, before[t]))
+        else if (before[t] != after[t]) report(t, "", sprintf("[VERIFY] rehearsal: %s %s -> %s", t, before[t], after[t]))
+      }
+      exit bad
+    }
+  ' "$1" "$2" | LC_ALL=C sort
+  return "${PIPESTATUS[0]}"
+}
+
+# declared_changes <base-file> <head-file>: the entries of ci/rehearsal-expected-changes.txt that this PR
+# adds (in head, not in base), normalized (CRLF, # comments, whitespace, blank lines), sorted. Lines
+# already on the base branch never count, so a merged file cannot loosen the check on later PRs.
+# A missing file is empty.
+declared_changes() {
+  local norm='{ sub(/\r$/, ""); sub(/#.*/, ""); gsub(/^[ \t]+|[ \t]+$/, ""); if ($0 != "") print }'
+  LC_ALL=C comm -13 <(awk "${norm}" "$1" 2>/dev/null | LC_ALL=C sort -u) \
+                    <(awk "${norm}" "$2" 2>/dev/null | LC_ALL=C sort -u)
+}
+
+# rehearsal_base <repo-root> <base-sha>: the commit the PR is rehearsed against. CI checks out GitHub's merge
+# commit, whose first parent is the base it actually merges onto; the event's base.sha can be older, and
+# lines merged into the base since then must not count as "added by this PR". Not a merge: <base-sha>.
+rehearsal_base() {
+  if git -C "$1" rev-parse -q --verify 'HEAD^2' > /dev/null; then
+    git -C "$1" rev-parse 'HEAD^1'
+  else
+    printf '%s\n' "$2"
+  fi
+}
+
+# table_columns <psql-url> -> sorted "table<TAB>column<TAB>data_type" lines for base tables in schema public.
+table_columns() {
+  local out
+  out="$(psql "$1" -v ON_ERROR_STOP=1 -At -F $'\t' -c "select c.table_name, c.column_name, c.data_type
+      from information_schema.columns c join information_schema.tables t
+        on t.table_schema = c.table_schema and t.table_name = c.table_name
+      where c.table_schema = 'public' and t.table_type = 'BASE TABLE'")" || {
+    echo "::error title=[VERIFY] rehearsal::could not list columns"; return 1; }
+  printf '%s\n' "${out}" | LC_ALL=C sort
+}
+
+# column_fingerprints <psql-url> <columns-file> -> sorted "table<TAB>column<TAB>md5" lines for content tables.
+# Per column: md5 over each row's md5(value::text) (NULL as '<null>'), in "id" order when the table has
+# an id column, else in sorted-hash order. An empty table hashes the empty string. Identifiers are quoted.
+column_fingerprints() {
+  local url="$1" t c qt qc ord h out=""
+  while IFS=$'\t' read -r t c _; do
+    [ -n "${t}" ] || continue
+    [[ "${t}" =~ ^(strapi_|admin_|up_|i18n_locale) ]] && continue
+    qt="\"${t//\"/\"\"}\""; qc="\"${c//\"/\"\"}\""
+    ord="md5(coalesce(${qc}::text, '<null>'))"
+    if awk -F'\t' -v t="${t}" '$1 == t && $2 == "id" { f = 1 } END { exit !f }' "$2"; then ord='"id"'; fi
+    h="$(psql "${url}" -v ON_ERROR_STOP=1 -At -c \
+      "select md5(coalesce(string_agg(md5(coalesce(${qc}::text, '<null>')), ',' order by ${ord}), '')) from public.${qt}")" || {
+      echo "::error title=[VERIFY] rehearsal::fingerprint failed for ${t}.${c}"; return 1; }
+    out+="${t}"$'\t'"${c}"$'\t'"${h}"$'\n'
+  done < "$2"
+  printf '%s' "${out}" | LC_ALL=C sort
+}
+
+# compare_columns <before> <after> [declared]: exit 1 per content-table column dropped or whose type
+# changed (new columns are fine).
+compare_columns() {
+  awk -F'\t' -v decl="${3:-/dev/null}" "${AWK_DECLARED}"'
+    FILENAME == ARGV[1] { before[$1 "\t" $2] = $3; next }
+    { after[$1 "\t" $2] = $3 }
+    END {
+      for (k in before) {
+        split(k, p, "\t"); if (skip(p[1])) continue
+        if (!(k in after)) report(p[1], p[2], sprintf("[VERIFY] rehearsal: column %s.%s dropped", p[1], p[2]))
+        else if (before[k] != after[k]) report(p[1], p[2], sprintf("[VERIFY] rehearsal: column %s.%s type %s -> %s", p[1], p[2], before[k], after[k]))
+      }
+      exit bad
+    }
+  ' "$1" "$2" | LC_ALL=C sort
+  return "${PIPESTATUS[0]}"
+}
+
+# compare_fingerprints <before> <after> [declared]: exit 1 per content-table column (present in both)
+# whose values changed.
+compare_fingerprints() {
+  awk -F'\t' -v decl="${3:-/dev/null}" "${AWK_DECLARED}"'
+    FILENAME == ARGV[1] { before[$1 "\t" $2] = $3; next }
+    { after[$1 "\t" $2] = $3 }
+    END {
+      for (k in before) {
+        split(k, p, "\t"); if (skip(p[1]) || !(k in after)) continue
+        if (before[k] != after[k]) report(p[1], p[2], sprintf("[VERIFY] rehearsal: %s.%s values changed", p[1], p[2]))
       }
       exit bad
     }
