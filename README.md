@@ -1618,8 +1618,8 @@ The org ships Renovate presets in `renovate/`. They are inert until a self-hoste
 | `default` | (none) | Base policy for every stack (see below) |
 | `dotnet` | Mon 00:00-08:59 | none |
 | `web` | Tue 00:00-08:59 | none |
-| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core` |
-| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval |
+| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) never automerged, as verify builds no iOS |
+| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android and iOS toolchain rules as `react-native` |
 | `strapi` | Thu 00:00-08:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
 | `infra` | Thu 00:00-08:59 | none |
 
