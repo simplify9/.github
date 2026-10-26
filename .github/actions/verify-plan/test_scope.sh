@@ -36,16 +36,16 @@ test_deps_changed_large_list() {
   set +o pipefail
 }
 test_strapi_changed_true() {
-  eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'src/a.js\npackage.json' $'@@ -1,3 +1,3 @@\n-    "@strapi/strapi": "5.1.0",\n+    "@strapi/strapi": "5.2.0",')"
+  eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'src/a.js\npackage.json')"
 }
-test_strapi_changed_false_other_dep() {
-  eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'package.json' $'@@ -1,3 +1,3 @@\n     "@strapi/strapi": "5.1.0",\n-    "left-pad": "1.0.0",\n+    "left-pad": "1.1.0",')"
+test_strapi_changed_lockfile_only() {
+  eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'package-lock.json')"
 }
-test_strapi_changed_no_package_json() { eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'src/a.js\nREADME.md' '')"; }
-test_strapi_changed_migration() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'database/migrations/2026-p10b.js' '')"; }
-test_strapi_changed_content_type_schema() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'cms/src/api/article/content-types/article/schema.json' '')"; }
-test_strapi_changed_component() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'src/components/shared/seo.json' '')"; }
-test_strapi_changed_false_other_src() { eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'src/api/article/controllers/article.js\nsrc/index.js' '')"; }
+test_strapi_changed_no_package_json() { eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'src/a.js\nREADME.md')"; }
+test_strapi_changed_migration() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'database/migrations/2026-p10b.js')"; }
+test_strapi_changed_content_type_schema() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'cms/src/api/article/content-types/article/schema.json')"; }
+test_strapi_changed_component() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'src/components/shared/seo.json')"; }
+test_strapi_changed_false_other_src() { eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'src/api/article/controllers/article.js\nsrc/index.js')"; }
 test_scope_expression_copies_identical() {
   canon="github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login"
   yml="${here}/../../workflows/verify.yml"
