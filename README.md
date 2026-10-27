@@ -881,7 +881,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
-**Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before the deadline, an error after it. Item ids per stack:
+**Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before its deadline, an error after it (see per-item deadlines below). Item ids per stack:
 
 | Item id | Stacks | Requires |
 |---|---|---|
@@ -895,8 +895,11 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `align-deps` | `react-native` | `@rnx-kit/align-deps` in `devDependencies` |
 | `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
+| `playwright` | `web` | `@playwright/test` in `devDependencies` and a `playwright.config.{ts,js,mjs,cjs}` in the project directory (since 2026-11-03) |
 
 `stack: infra` has no contract items.
+
+**Per-item deadlines.** Items added after the first contract version carry the day they shipped (above). Each one turns from a warning into an error at the later of the repo's `contract-deadline` and its ship date + 56 days, so a new requirement never fails a repo sooner than 8 weeks after it appears. Every other item uses `contract-deadline` itself. Without a valid `contract-deadline`, all items stay warnings.
 
 **Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. It works out each repo's set-up on every run:
 - **Postgres version:** the caller's `postgres-version` if set, else the version in `ci/fixture.sql.gz`'s header, else 17. The job starts it itself.

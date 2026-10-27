@@ -2,8 +2,10 @@
 # Verify Contract
 # =============================================================================
 # Reports which items of the per-stack Verification Contract a repo lacks.
-# Before `deadline` each missing item is a warning; from the deadline on it is
-# an error and the step fails.
+# Each missing item is a warning until its own deadline, then an error that
+# fails the step: v1 items at `deadline`; items added later (contract.py SINCE)
+# at the later of `deadline` and the day they shipped + 56 days. Empty or
+# invalid `deadline`: warnings forever.
 #
 # Inputs:
 #   stack              (required)  dotnet-service | dotnet-library | web |
@@ -23,7 +25,7 @@
 # =============================================================================
 name: 'Verify Contract'
 author: 'Simplify9'
-description: 'Report which required tests and scripts of the per-stack Verification Contract a repo lacks (warn before the deadline, error after).'
+description: 'Report which required tests and scripts of the per-stack Verification Contract a repo lacks (each a warning until its own deadline, then an error).'
 
 inputs:
   stack:
@@ -66,12 +68,13 @@ runs:
         missing=$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["missing"]))' "${result}")
         echo "mode=${mode}" >> "$GITHUB_OUTPUT"
         echo "missing=${missing}" >> "$GITHUB_OUTPUT"
-        level=warning
-        [ "${mode}" = "enforce" ] && level=error
-        for id in ${missing}; do
+        errors=0
+        while read -r id level; do
+          [ -n "${id}" ] || continue
           echo "::${level} title=[VERIFY] Contract::missing contract item: ${id}"
-        done
-        if [ "${mode}" = "enforce" ] && [ -n "${missing}" ]; then
+          [ "${level}" = "error" ] && errors=$((errors + 1))
+        done < <(python3 -c 'import json,sys; [print(k, v) for k, v in json.loads(sys.argv[1])["levels"].items()]' "${result}")
+        if [ "${errors}" -gt 0 ]; then
           echo "VERIFY_CONTRACT_CP1_STATUS=FAILED" >> "$GITHUB_ENV"
           exit 1
         fi
