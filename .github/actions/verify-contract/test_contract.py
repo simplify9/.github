@@ -139,7 +139,7 @@ class ItemDeadlines(unittest.TestCase):
                          {"script:test:e2e": "error", "playwright": "error"})
 
     def test_integration_tests_deadline(self):
-        self.assertEqual(c.item_deadline("integration-tests", "2026-12-21"), date(2027, 1, 11))
+        self.assertEqual(c.item_deadline("integration-tests", "2026-12-21"), date(2026, 12, 29))
 
     def test_item_levels_no_repo_deadline_warns_forever(self):
         self.assertEqual(c.item_levels(["playwright", "lockfile"], "", date(2030, 1, 1)),

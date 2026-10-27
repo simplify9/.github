@@ -137,6 +137,7 @@ jobs:
           pr-number: ${{ github.event.pull_request.number }}
           known-failing: ${{ inputs.known-failing }}
           deadline: ${{ inputs.contract-deadline }}
+          stack: ${{ inputs.stack }}
 
       - name: Write summary
         if: always()

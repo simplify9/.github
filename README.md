@@ -898,13 +898,13 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 - **Refused:** a config file in the project (`*.json`, `*.config`, `*.runsettings`, `*.env`, `*.yml`, `*.yaml`) holds a connection string to a non-local host with a password. The project never runs; the `test` step names it and the file:line, never the value. It does not count for the contract until it is converted to Testcontainers or local values.
 - **Everything else** runs in the blocking `test` step as before, from a copy of the solution without the other two kinds; with nothing to drop, from the solution itself.
 
-**Docker smoke (`smoke`).** For `dotnet-service`, `docker-smoke` builds the image, runs it and probes `/health` by default (`smoke-path` overrides the path, `none` turns it off). The image must start without its database: `/health` is liveness only. When on by default it is a new step, tolerated until 2027-01-11 or the repo's later deadline; a repo that set `smoke-path` itself keeps its blocking behaviour.
+**Docker smoke (`smoke`).** For `dotnet-service`, `docker-smoke` builds the image, runs it and probes `/health` by default (`smoke-path` overrides the path, `none` turns it off). The image must start without its database: `/health` is liveness only. When on by default it is a new step, tolerated until 2026-12-29 or the repo's later deadline; a repo that set `smoke-path` itself keeps its blocking behaviour.
 
 `maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
-**New steps start tolerated.** A step id added to the ladder after a repo enrolled is treated as if it were in `known-failing` until the later of `contract-deadline` and the day it shipped + 56 days (forever without a deadline), with no change to the caller. Today that is `network` (web, shipped 2026-11-03: tolerated until 2026-12-29 or the repo's later deadline) and the default-on `smoke` (`dotnet-service`, shipped 2026-11-16: until 2027-01-11).
+**New steps start tolerated.** A step id added to the ladder after a repo enrolled is treated as if it were in `known-failing` until the later of `contract-deadline` and the day it shipped + 56 days (forever without a deadline), with no change to the caller. Each one applies to the stacks it was added for only. Today that is `network` (web, shipped 2026-11-03: tolerated until 2026-12-29 or the repo's later deadline) and the default-on `smoke` (`dotnet-service` only, shipped 2026-11-03: until 2026-12-29).
 
 **Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before its deadline, an error after it (see per-item deadlines below). Item ids per stack:
 
@@ -921,7 +921,7 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 | `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
 | `playwright` | `web` | `@playwright/test` in `devDependencies` and a `playwright.config.{ts,js,mjs,cjs}` in the project directory (since 2026-11-03) |
-| `integration-tests` | `dotnet-service`; `dotnet-library` that uses an outside system | service: a test project referencing `Microsoft.AspNetCore.Mvc.Testing`; library with a non-test project referencing an outside-system client (`StackExchange.Redis`, `Npgsql*`, `Microsoft.Data.SqlClient`, `System.Data.SqlClient`, `MongoDB.Driver`, `RabbitMQ.Client`, `MassTransit*`, `Confluent.Kafka`, `Azure.Storage.*`): a test project referencing `Testcontainers`. A project whose config holds a real connection string never counts (since 2026-11-16) |
+| `integration-tests` | `dotnet-service`; `dotnet-library` that uses an outside system | service: a test project referencing `Microsoft.AspNetCore.Mvc.Testing`; library with a non-test project referencing an outside-system client (`StackExchange.Redis`, `Npgsql*`, `Microsoft.Data.SqlClient`, `System.Data.SqlClient`, `MongoDB.Driver`, `RabbitMQ.Client`, `MassTransit*`, `Confluent.Kafka`, `Azure.Storage.*`): a test project referencing `Testcontainers`. A project whose config holds a real connection string never counts (since 2026-11-03) |
 
 `stack: infra` has no contract items.
 

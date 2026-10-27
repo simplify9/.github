@@ -12,6 +12,7 @@
 #   known-failing      (optional)  Space-separated step ids tolerated until the deadline.
 #                                  New step ids (scope.sh NEW_STEPS) are added until their own deadline.
 #   deadline           (optional)  YYYY-MM-DD; empty means warn mode, known-failing never expires.
+#   stack              (optional)  The verify stack; scopes the tolerated new step ids.
 #   github-token       (optional)  Token with pull-requests: read.
 # Outputs: known_failing, repo_known_failing, deps_changed, contract_mode, strapi_changed.
 # =============================================================================
@@ -38,6 +39,10 @@ inputs:
     default: ''
   deadline:
     description: 'Contract deadline (YYYY-MM-DD). Empty means warn mode and known-failing never expires.'
+    required: false
+    default: ''
+  stack:
+    description: 'The verify stack; scopes which new step ids (scope.sh NEW_STEPS) are tolerated.'
     required: false
     default: ''
   github-token:
@@ -74,6 +79,7 @@ runs:
         REPO: ${{ inputs.repository }}
         PR_NUMBER: ${{ inputs.pr-number }}
         KNOWN_FAILING: ${{ inputs.known-failing }}
+        STACK: ${{ inputs.stack }}
         DEADLINE: ${{ inputs.deadline }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
@@ -82,7 +88,7 @@ runs:
         # shellcheck source=scope.sh
         source "${ACTION_PATH}/scope.sh"
         today="$(date -u +%F)"
-        known="$(effective_known_failing "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
+        known="$(effective_known_failing "${KNOWN_FAILING}" "${DEADLINE}" "${today}" "${STACK}")"
         repo_known="$(known_failing_effective "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
         mode="$(contract_mode "${DEADLINE}" "${today}")"
         deps=true
