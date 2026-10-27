@@ -15,7 +15,7 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 ├── renovate/               <- org Renovate presets (default + per-stack; validate with renovate/validate.sh)
 ├── scripts/fleet/          <- maintainer audits + deps_health.py fleet metrics (run locally, not from CI; read-only gh)
 ├── scripts/strapi-fixture/ <- strapi_fixture.py: sanitized Strapi fixture maker (DevOps, Docker; tested by test_strapi_fixture.py, FIXTURE_DOCKER_TEST=1 for the Postgres cases); cluster-dump.sh streams a read-only dump via a temp pod (test_cluster_dump.sh)
-├── starters/               <- copyable test starters per stack (generic: no client names); web-playwright = verify's web e2e journeys + external-request guard
+├── starters/               <- copyable test starters per stack (generic: no client names); web-playwright = verify's web e2e journeys + external-request guard; dotnet-integration = WebApplicationFactory + Testcontainers Postgres 17 + test-only JWT key
 └── profile/README.md       <- org profile page
 ```
 
