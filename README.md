@@ -926,6 +926,7 @@ The `rehearsal` step fails when any of these happens:
 - **Only the lines the PR adds** (head vs base) count. A file merged once cannot loosen the check on later PRs, and bot PRs, which never change it, fail on any data change.
 - Human PRs into `develop` pass instantly, so a developer's lines are first honoured on the promotion PR into the default branch, whose diff contains them.
 - "Base" is the first parent of the merge commit CI checks out (what the PR actually merges onto), falling back to the event's base SHA.
+- Before any boot, `config/database.*` must read its connection settings from the `DATABASE_*` environment. A fixed `host`, `user`, `password`, `database` or `schema` (other than `localhost` and `public`) fails the step and names the line, never the value. A fixed host could reach a real database from CI, and a fixed schema would leave the restored fixture unread.
 
 On failure the diffs are uploaded as the artifact `strapi-rehearsal-diff` (5 days).
 
