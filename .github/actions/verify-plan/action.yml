@@ -13,7 +13,7 @@
 #                                  New step ids (scope.sh NEW_STEPS) are added until their own deadline.
 #   deadline           (optional)  YYYY-MM-DD; empty means warn mode, known-failing never expires.
 #   github-token       (optional)  Token with pull-requests: read.
-# Outputs: known_failing, deps_changed, contract_mode, strapi_changed.
+# Outputs: known_failing, repo_known_failing, deps_changed, contract_mode, strapi_changed.
 # =============================================================================
 name: 'Verify Plan'
 author: 'Simplify9'
@@ -49,6 +49,9 @@ outputs:
   known_failing:
     description: 'The known-failing list before the deadline (else empty), plus new step ids still within their own grace period.'
     value: ${{ steps.plan.outputs.known_failing }}
+  repo_known_failing:
+    description: "The caller's own known-failing list before its deadline (else empty), without new step ids."
+    value: ${{ steps.plan.outputs.repo_known_failing }}
   deps_changed:
     description: 'true when dependency files changed (always true on workflow_dispatch).'
     value: ${{ steps.plan.outputs.deps_changed }}
@@ -80,6 +83,7 @@ runs:
         source "${ACTION_PATH}/scope.sh"
         today="$(date -u +%F)"
         known="$(effective_known_failing "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
+        repo_known="$(known_failing_effective "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
         mode="$(contract_mode "${DEADLINE}" "${today}")"
         deps=true
         strapi=false
@@ -90,6 +94,7 @@ runs:
         fi
         {
           echo "known_failing=${known}"
+          echo "repo_known_failing=${repo_known}"
           echo "deps_changed=${deps}"
           echo "contract_mode=${mode}"
           echo "strapi_changed=${strapi}"

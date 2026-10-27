@@ -19,7 +19,10 @@ known_failing_effective() {
 # Step ids added after v1 (spec 4.4), as id:own-deadline where own deadline = ship date + 56 days.
 # Each is tolerated (as if listed in known-failing) until the later of its own deadline and the
 # repo's contract-deadline; forever when the repo has no deadline. network: shipped 2026-11-03.
-NEW_STEPS="network:2026-12-29"
+# smoke: default-on docker smoke for dotnet-service, shipped 2026-11-16 (verify.yml applies it only
+# when smoke-path is empty; an explicit opt-in uses repo_known_failing). `integration` is deliberately
+# absent: its projects already ran (and blocked) inside `test`, so it follows `test`'s tolerance.
+NEW_STEPS="network:2026-12-29 smoke:2027-01-11"
 
 # new_steps_tolerated <repo-deadline> <today> -> the new step ids still tolerated
 new_steps_tolerated() {
