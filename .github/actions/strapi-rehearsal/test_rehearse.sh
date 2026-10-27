@@ -133,7 +133,7 @@ test_fixed_db_config_literals_flagged_values_hidden() {
     },
   },
 });'
-  want=$'config/database.ts:5 host\nconfig/database.ts:7 database\nconfig/database.ts:8 user\nconfig/database.ts:9 password\nconfig/database.ts:10 schema'
+  want=$'config/database.ts:5 host\nconfig/database.ts:7 database\nconfig/database.ts:8 user\nconfig/database.ts:9 password'
   if [ "${rc}" -eq 1 ] && [ "${out}" = "${want}" ] && ! printf '%s' "${out}" | grep -q S3cret; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
 }
 test_fixed_db_config_env_localhost_public_ok() {
@@ -155,6 +155,56 @@ test_fixed_db_config_no_file_ok() {
   rm -rf "${tmp}/app"; mkdir -p "${tmp}/app"
   out="$(fixed_db_config "${tmp}/app")"; rc=$?
   if [ "${rc}" -eq 0 ] && [ -z "${out}" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+schema_of() { # <schema line> -> sets out to config_schema of an app whose config holds it
+  rm -rf "${tmp}/app"; mkdir -p "${tmp}/app/config"
+  printf 'export default ({ env }) => ({\n  connection: {\n    connection: {\n      %s\n    },\n  },\n});\n' "$1" > "${tmp}/app/config/database.ts"
+  out="$(config_schema "${tmp}/app")"
+}
+test_config_schema_literal_env_public() {
+  local a b c
+  schema_of 'schema: "cms",'; a="${out}"
+  schema_of 'schema: env("DATABASE_SCHEMA", "cms"),'; b="${out}"
+  schema_of "schema: 'public',"; c="${out}"
+  if [ "${a}" = cms ] && [ -z "${b}" ] && [ -z "${c}" ]; then ok "$1"; else bad "$1" "a=${a} b=${b} c=${c}"; fi
+}
+test_fixed_db_config_ignores_schema() {
+  fixed_run 'export default () => ({ connection: { connection: {
+      schema: "cms",
+  } } });'
+  if [ "${rc}" -eq 0 ] && [ -z "${out}" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+test_fixture_pg_major_header() {
+  printf -- '--\n-- Dumped from database version 18.6\n-- Dumped by pg_dump version 18.1\n' | gzip > "${tmp}/f.gz"
+  out="$(fixture_pg_major "${tmp}/f.gz")"
+  if [ "${out}" = 18 ]; then ok "$1"; else bad "$1" "out=${out}"; fi
+}
+test_fixture_pg_major_no_header() {
+  printf 'SET x;\n' | gzip > "${tmp}/f.gz"
+  out="$(fixture_pg_major "${tmp}/f.gz")"; rc=$?
+  if [ "${rc}" -eq 0 ] && [ -z "${out}" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+test_schema_quoting_pg() {
+  if [ -z "${PG_TEST_URL:-}" ]; then echo "SKIP $1 (PG_TEST_URL unset)"; return; fi
+  prepare_schema "${PG_TEST_URL}" 'My-Cms' false || { bad "$1" "prepare failed"; return; }
+  psql "${PG_TEST_URL}" -q -v ON_ERROR_STOP=1 -c 'create table "My-Cms".a(id int, v text); insert into "My-Cms".a values (1, $$x$$);' || { bad "$1" "setup failed"; return; }
+  local counts cols fp
+  counts="$(REHEARSAL_SCHEMA='My-Cms' table_counts "${PG_TEST_URL}")"
+  REHEARSAL_SCHEMA='My-Cms' table_columns "${PG_TEST_URL}" > "${tmp}/cols"
+  fp="$(REHEARSAL_SCHEMA='My-Cms' column_fingerprints "${PG_TEST_URL}" "${tmp}/cols")"
+  psql "${PG_TEST_URL}" -q -c 'drop schema "My-Cms" cascade;'
+  if [ "${counts}" = "a 1" ] && [ "$(wc -l < "${tmp}/cols")" -eq 2 ] \
+     && [ "$(printf '%s\n' "${fp}" | grep -cE $'^a\t(id|v)\t[0-9a-f]{32}$')" -eq 2 ]; then ok "$1"; else bad "$1" "counts=${counts} fp=${fp}"; fi
+}
+test_prepare_schema_restored_pg() {
+  if [ -z "${PG_TEST_URL:-}" ]; then echo "SKIP $1 (PG_TEST_URL unset)"; return; fi
+  psql "${PG_TEST_URL}" -q -v ON_ERROR_STOP=1 -c 'create table public.t(id int); insert into public.t values (1);' || { bad "$1" "setup failed"; return; }
+  prepare_schema "${PG_TEST_URL}" cms true || { bad "$1" "prepare failed"; return; }
+  local counts left
+  counts="$(REHEARSAL_SCHEMA=cms table_counts "${PG_TEST_URL}")"
+  left="$(table_counts "${PG_TEST_URL}")"
+  psql "${PG_TEST_URL}" -q -c 'drop schema cms cascade;'
+  if [ "${counts}" = "t 1" ] && [ -z "${left}" ]; then ok "$1"; else bad "$1" "counts=${counts} public=${left}"; fi
 }
 # Needs a Postgres: PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres bash test_rehearse.sh
 test_fingerprints_quoting_no_id_and_empty() {
