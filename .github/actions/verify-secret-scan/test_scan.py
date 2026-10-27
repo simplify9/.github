@@ -2,6 +2,7 @@ import gzip
 import io
 import os
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 
@@ -125,6 +126,50 @@ class Secrets(unittest.TestCase):
             self.assertEqual(kinds(line), ["connection-string"], line)
         for line in clean:
             self.assertEqual(kinds(line), [], line)
+
+
+class RecordingsAndMocks(unittest.TestCase):
+    def test_har_authorization_header(self):
+        self.assertEqual(kinds('{"name": "Authorization", "value": "Bearer abcdefgh12345"}'), ["auth-header"])
+
+    def test_mockoon_cookie_header(self):
+        self.assertEqual(kinds('{"key": "set-cookie", "value": "sid=abcdefgh123"}'), ["auth-header"])
+
+    def test_short_header_value_ignored(self):
+        self.assertEqual(kinds('{"name": "Cookie", "value": "x"}'), [])
+
+    def test_har_password_in_post_data(self):
+        line = r'"text": "{\"email\":\"a@example.com\",\"password\":\"Hunter22\"}"'
+        self.assertEqual(kinds(line), ["password-field"])
+
+    def test_form_password(self):
+        self.assertEqual(kinds("username=a&password=Hunter22&x=1"), ["password-field"])
+
+    def test_empty_password_ignored(self):
+        self.assertEqual(kinds('{"password":""}'), [])
+
+    def test_unsigned_jwt_not_flagged(self):
+        self.assertEqual(kinds('"token": "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0."'), [])
+
+    def test_masked_output_never_contains_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "rec.har")
+            with open(p, "w") as f:
+                f.write('{"name": "authorization", "value": "Bearer abcdefgh12345"}\n')
+                f.write('{"postData": {"text": "password=Hunter22"}}\n')
+            rc, out = run_main([p])
+        self.assertEqual(rc, 1)
+        self.assertIn("auth-header", out)
+        self.assertIn("password-field", out)
+        self.assertNotIn("abcdefgh", out)
+        self.assertNotIn("Hunter22", out)
+
+    def test_big_single_line_is_linear(self):
+        line = '{"a":"b"},' * 500000 + '{"name": "X-Api-Key", "value": "k3y-abcdefgh"}'
+        t = time.monotonic()
+        found = kinds(line)
+        self.assertLess(time.monotonic() - t, 5)
+        self.assertEqual(found, ["auth-header"])
 
 
 class StrapiDump(unittest.TestCase):

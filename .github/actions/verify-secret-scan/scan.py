@@ -54,6 +54,14 @@ PATTERNS = [
         r"(?i)(?:host|server|data source)=(?!" + LOCAL_HOSTS + r"\b)[^;\"']+;.*?password=[^;\"'\s]+")),
     ("connection-string", re.compile(
         r"(?i)(?:postgres(?:ql)?|amqps?|mongodb(?:\+srv)?|redis)://[^:/@\s\"']*:[^@\s\"']+@(?!" + LOCAL_HOSTS + r"\b)")),
+    # Recorded (HAR {"name","value"}) or mocked (Mockoon {"key","value"}) credential headers.
+    ("auth-header", re.compile(
+        r'(?i)"(?:name|key)"\s*:\s*"(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key'
+        r'|x-auth-token)"\s*,\s*"value"\s*:\s*"[^"]{8,}"')),
+    # A non-empty password in JSON, in JSON escaped inside a HAR postData string, or form-encoded.
+    ("password-field", re.compile(r'(?i)(?<![a-z])pass(?:word|wd)\\*"\s*:\s*\\*"[^"\\]+')),
+    # Form-encoded only: after & ? a quote or whitespace (a `;Password=` connection string is reported above).
+    ("password-field", re.compile(r'(?i)(?:^|(?<=[&?"\s]))pass(?:word|wd)=[^&\s"]+')),
 ]
 COPY = re.compile(r"^COPY public\.\"?([A-Za-z0-9_]+)\"? \((.*)\) FROM stdin;$")
 INSERT = re.compile(r"^INSERT INTO (?:public\.)?\"?([A-Za-z0-9_]+)\"?[ (]")
@@ -162,6 +170,8 @@ def main(argv):
             hint = ""
             if fd.kind == "email" and fd.masked[4:] in FREE_MAIL:
                 hint = " (a personal mailbox: list the column in ci/fixture-pii.txt and regenerate the fixture)"
+            elif fd.kind == "jwt":
+                hint = ' (for a mock, use an unsigned token: header {"alg":"none"} and an empty signature)'
             elif fd.kind == "email":
                 hint = ' (if this is public business content, add "@%s" or the address to ci/fixture-allow.txt)' % fd.masked[4:]
             at = " in " + fd.where if fd.where else ""
