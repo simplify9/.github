@@ -1055,7 +1055,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 27 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 28 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
