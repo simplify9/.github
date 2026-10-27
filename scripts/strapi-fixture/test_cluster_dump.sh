@@ -8,18 +8,17 @@ trap 'rm -rf "${tmp}"' EXIT
 ok() { echo "PASS $1"; }
 bad() { echo "FAIL $1: $2"; fails=$((fails + 1)); }
 
-# Stub kubectl: logs each call (one arg per line, calls separated by ---), prints a fake dump on exec,
-# and fails the exec when STUB_EXEC_FAIL is set.
+# Stub kubectl: logs each call (one arg per line, calls separated by ---). exec answers the version probe
+# (STUB_VERSION), printenv DATABASE_SCHEMA (STUB_SCHEMA) and pg_dump (fails when STUB_EXEC_FAIL is set).
 mkdir -p "${tmp}/bin"
 cat > "${tmp}/bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >> "${STUB_LOG}"; echo --- >> "${STUB_LOG}"
-for a in "$@"; do
-  if [ "${a}" = exec ]; then
-    [ -n "${STUB_EXEC_FAIL:-}" ] && exit 3
-    echo "dump body"
-  fi
-done
+case " $* " in
+  *" exec "*" psql "*) echo "${STUB_VERSION:-170004}" ;;
+  *" exec "*" printenv "*) [ -n "${STUB_SCHEMA:-}" ] && echo "${STUB_SCHEMA}" || exit 1 ;;
+  *" exec "*" pg_dump "*) [ -n "${STUB_EXEC_FAIL:-}" ] && exit 3; echo "dump body" ;;
+esac
 exit 0
 EOF
 chmod +x "${tmp}/bin/kubectl"
@@ -62,6 +61,20 @@ test_pod_deleted_even_when_dump_fails() {
 test_pg_image_matches_the_server() {
   PG_IMAGE=postgres:18 run ctx ns sec
   if printf '%s\n' "${log}" | grep -qx -- '--image=postgres:18' && printf '%s\n' "${log}" | grep -q '"image":"postgres:18"'; then ok "$1"; else bad "$1" "log=${log}"; fi
+}
+test_schema_from_secret() {
+  STUB_SCHEMA=my-cms run ctx ns sec
+  overrides="$(printf '%s\n' "${log}" | sed -n 's/^--overrides=//p' | head -n 1)"
+  if printf '%s\n' "${log}" | grep -qx -- '--schema="my-cms"' \
+     && printf '%s' "${overrides}" | grep -q '"name":"DATABASE_SCHEMA","valueFrom":{"secretKeyRef":{"name":"sec","key":"DATABASE_SCHEMA","optional":true}}'; then
+    ok "$1"; else bad "$1" "log=${log}"; fi
+}
+test_probe_recreates_pod_for_newer_server() {
+  STUB_VERSION=180006 run ctx ns sec
+  runs="$(printf '%s\n' "${log}" | grep -c -x run)"
+  if [ "${runs}" -eq 2 ] && printf '%s\n' "${log}" | grep -qx -- '--image=postgres:18' \
+     && [ "$(printf '%s\n' "${log}" | grep -n -x -e delete -e run | sed -n 2p | cut -d: -f2)" = delete ]; then
+    ok "$1"; else bad "$1" "log=${log}"; fi
 }
 test_usage_without_secret() {
   run ctx ns
