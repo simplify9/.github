@@ -204,7 +204,11 @@ runs:
           boot "${base_dir}" base
           if [ "${mode}" != "ci/fixture.sql.gz" ]; then
             python3 "${ACTION_PATH}/seed.py" --app "${base_dir}" --base-url "${health}" --db-url "${db_url}" \
-              --schema "${REHEARSAL_SCHEMA}"
+              --schema "${REHEARSAL_SCHEMA}" | tee "${tmp}/seed.txt"
+            # How much was generated goes into the notice and the summary: types with no entry compare empty.
+            seeded="$(sed -n 's/^\[VERIFY\] generated: \([0-9]* entries in [0-9]* of [0-9]* types\)$/\1/p' "${tmp}/seed.txt" | tail -n 1)"
+            mode="generated data (no ci/fixture.sql.gz; ${seeded:-entry count unknown})"
+            echo "Generated: ${seeded:-entry count unknown}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           fi
           table_counts "${db_url}" > "${tmp}/before.txt"
           has_content_tables "${tmp}/before.txt"

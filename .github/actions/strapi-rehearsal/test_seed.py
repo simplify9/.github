@@ -105,6 +105,18 @@ class Values(unittest.TestCase):
         self.assertEqual(s.entry(attrs, 1, COMPONENTS, 7), {"title": "title 1"})
 
 
+class ReviewFixes(unittest.TestCase):
+    def test_bounds_given_as_strings(self):
+        # Strapi 5's content-type builder stores biginteger min/max as strings.
+        self.assertEqual(s.value("n", {"type": "biginteger", "min": "5"}, 0, COMPONENTS, 7), 5)
+        self.assertEqual(s.value("n", {"type": "integer", "max": "3"}, 9, COMPONENTS, 7), 3)
+        self.assertEqual(s.value("n", {"type": "decimal", "min": "2.5"}, 0, COMPONENTS, 7), 2.5)
+
+    def test_reason_tolerates_odd_details(self):
+        self.assertEqual(s._reason({"error": {"message": "boom", "details": "text"}}), "boom")
+        self.assertEqual(s._reason("not json"), "no error message")
+
+
 class Sql(unittest.TestCase):
     ADMIN = {"id", "document_id", "firstname", "lastname", "email", "password", "is_active", "blocked",
              "created_at", "updated_at", "published_at"}
@@ -224,6 +236,33 @@ class Cli(unittest.TestCase):
         rc, out, _ = self.run_cli(routes)
         self.assertEqual(rc, 1)
         self.assertIn("::error title=[VERIFY] Rehearsal::generated data: no entry could be created (see the rejections above)", out)
+
+    def test_cli_transport_error_reported_and_continues(self):
+        app(self.app)
+        real = s.api_check._request
+        calls = []
+
+        def flaky(method, url, token=None, body=None):
+            if "/api/articles" in url:
+                calls.append(1)
+                if len(calls) == 1:
+                    raise OSError("connection reset")
+            return real(method, url, token=token, body=body)
+        s.api_check._request = flaky
+        try:
+            rc, out, _ = self.run_cli(self.routes((201, {"data": {"id": 1}})))
+        finally:
+            s.api_check._request = real
+        self.assertEqual(rc, 0, out)
+        self.assertIn("[VERIFY] generated: articles #0 failed: connection reset", out)
+        self.assertIn("[VERIFY] generated: articles: 2/3 created", out)
+
+    def test_cli_warns_types_with_no_entries_and_summarizes(self):
+        app(self.app)
+        rc, out, _ = self.run_cli(self.routes((400, {"error": {"message": "title must be unique"}})))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("::warning title=[VERIFY] Rehearsal::generated data: articles 0/3 created (title must be unique)", out)
+        self.assertIn("[VERIFY] generated: 1 entries in 1 of 2 types", out)
 
     def test_cli_refuses_strapi4(self):
         app(self.app, strapi="4.25.0")

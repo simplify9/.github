@@ -44,11 +44,12 @@ def load_schemas(app_dir):
     return types, components
 
 
-def _clamp(v, attr):
-    if "min" in attr:
-        v = max(v, attr["min"])
-    if "max" in attr:
-        v = min(v, attr["max"])
+def _clamp(v, attr, cast):
+    """v within the attribute's min/max; Strapi stores biginteger bounds as strings, so they are cast."""
+    if attr.get("min") not in (None, ""):
+        v = max(v, cast(attr["min"]))
+    if attr.get("max") not in (None, ""):
+        v = min(v, cast(attr["max"]))
     return v
 
 
@@ -73,9 +74,9 @@ def value(name, attr, i, components, media_id, depth=0):
     if t == "enumeration":
         return attr["enum"][0] if attr.get("enum") else None
     if t in ("integer", "biginteger"):
-        return _clamp(i + 1, attr)
+        return _clamp(i + 1, attr, int)
     if t in ("float", "decimal"):
-        return _clamp(i + 0.5, attr)
+        return _clamp(i + 0.5, attr, float)
     if t == "boolean":
         return True
     if t == "date":
@@ -94,7 +95,7 @@ def value(name, attr, i, components, media_id, depth=0):
             return None
         one = lambda k: entry(comp.get("attributes", {}), k, components, media_id, depth + 1)  # noqa: E731
         if attr.get("repeatable"):
-            return [one(k) for k in range(_clamp(2, attr))]
+            return [one(k) for k in range(_clamp(2, attr, int))]
         return one(i)
     if t == "dynamiczone":
         if depth >= MAX_DEPTH + 1:
@@ -178,8 +179,10 @@ def _reason(body):
     if not isinstance(err, dict):
         return "no error message"
     msg = str(err.get("message", ""))
+    raw = err.get("details")
+    errors = raw.get("errors", []) if isinstance(raw, dict) else []
     details = [("%s: %s" % (".".join(map(str, e.get("path", []))), e.get("message", "")))
-               for e in (err.get("details") or {}).get("errors", []) if isinstance(e, dict)]
+               for e in (errors if isinstance(errors, list) else []) if isinstance(e, dict)]
     return ("%s (%s)" % (msg, "; ".join(details)) if details else msg)[:300]
 
 
@@ -190,7 +193,7 @@ def main(argv):
     ap.add_argument("--schema", default="public")
     a = ap.parse_args(argv)
     if strapi_major(a.app) < 5:
-        print("::error title=[VERIFY] Rehearsal::generated data needs Strapi 5; add ci/fixture.sql.gz", file=sys.stderr)
+        print("::error title=[VERIFY] Rehearsal::generated data needs Strapi 5; add ci/fixture.sql.gz")
         return 1
     try:
         types, components = load_schemas(a.app)
@@ -210,29 +213,41 @@ def main(argv):
         if status not in (200, 201) or not key:
             raise RuntimeError("creating a full-access API token failed (HTTP %s)" % status)
     except (subprocess.CalledProcessError, OSError, ValueError, RuntimeError, IndexError) as e:
-        print("::error title=[VERIFY] Rehearsal::generated data: %s" % e, file=sys.stderr)
+        print("::error title=[VERIFY] Rehearsal::generated data: %s" % e)
         return 1
-    created = 0
+    created = types_with_data = 0
     for t in types:
         info, single = t["info"], t.get("kind") == "singleType"
-        n, ok = (1 if single else 3), 0
+        n, ok, first_reason = (1 if single else 3), 0, ""
         for i in range(n):
-            data = entry(t.get("attributes", {}), i, components, media_id)
-            if single:
-                status, body = api_check._request("PUT", "%s/api/%s?status=published" % (a.base_url, info["singularName"]),
-                                                  token=key, body={"data": data})
-            else:
-                status, body = api_check._request("POST", "%s/api/%s?status=published" % (a.base_url, info["pluralName"]),
-                                                  token=key, body={"data": data})
+            # One entry's failure (a rejection, a schema the generator mishandles, a dropped connection) is
+            # reported and the run moves on: only a run that creates nothing at all fails here.
+            try:
+                data = entry(t.get("attributes", {}), i, components, media_id)
+                if single:
+                    status, body = api_check._request("PUT", "%s/api/%s?status=published" % (a.base_url, info["singularName"]),
+                                                      token=key, body={"data": data})
+                else:
+                    status, body = api_check._request("POST", "%s/api/%s?status=published" % (a.base_url, info["pluralName"]),
+                                                      token=key, body={"data": data})
+            except (OSError, ValueError, TypeError, KeyError) as e:
+                first_reason = first_reason or str(e)
+                print("[VERIFY] generated: %s #%d failed: %s" % (info["pluralName"], i, e))
+                continue
             if status in (200, 201):
                 ok += 1
             else:
+                first_reason = first_reason or _reason(body)
                 print("[VERIFY] generated: %s #%d rejected (HTTP %s): %s" % (info["pluralName"], i, status, _reason(body)))
         print("[VERIFY] generated: %s: %d/%d created" % (info["pluralName"], ok, n))
+        if not ok:
+            # The type's tables and API compare empty on both sides: say so where a reader sees it.
+            print("::warning title=[VERIFY] Rehearsal::generated data: %s 0/%d created (%s)" % (info["pluralName"], n, first_reason))
         created += ok
+        types_with_data += bool(ok)
+    print("[VERIFY] generated: %d entries in %d of %d types" % (created, types_with_data, len(types)))
     if not created:
-        print("::error title=[VERIFY] Rehearsal::generated data: no entry could be created (see the rejections above)",
-              file=sys.stderr)
+        print("::error title=[VERIFY] Rehearsal::generated data: no entry could be created (see the rejections above)")
         return 1
     return 0
 

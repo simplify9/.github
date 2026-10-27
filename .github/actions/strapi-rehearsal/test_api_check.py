@@ -172,6 +172,16 @@ class ReviewFixes(unittest.TestCase):
         os.makedirs(self.after)
         self.assertEqual(a.compare_snapshots(self.before, self.after, set()), ([], []))
 
+    def test_token_creation_failure_message(self):
+        stub = Stub({("POST", "/admin/login"): (200, {"data": {"token": "jwt"}}),
+                     ("POST", "/admin/api-tokens"): (400, {"data": None, "error": {"message": "Name already taken"}})})
+        try:
+            rc, _, err = run(["token", "--base-url", stub.url])
+        finally:
+            stub.close()
+        self.assertEqual(rc, 1)
+        self.assertIn("creating a read-only API token failed (HTTP 400)", err)
+
     def test_token_body_has_no_lifespan(self):
         stub = Stub({("POST", "/admin/login"): (200, {"data": {"token": "jwt"}}),
                      ("POST", "/admin/api-tokens"): (201, {"data": {"accessKey": "k"}})})
