@@ -95,7 +95,7 @@ on:
         description: PostgreSQL version for jobs that need a database.
         required: false
         type: string
-        default: "16"
+        default: "17"
     secrets:
       dependabot-alerts-token:
         description: Token able to read Dependabot alerts (critical-vulnerability gate).

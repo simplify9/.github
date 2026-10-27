@@ -862,7 +862,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `flutter-version` | | `3.x` | Flutter (flutter stack) |
 | `smoke-path` | | `''` | HTTP path probed by `docker-smoke` (dotnet stacks); empty skips the job |
 | `docker-build-github-token` | | `false` | Boolean, opt-in. Mounts the job's `GITHUB_TOKEN` into the docker build as the BuildKit secret `GITHUB_TOKEN` (`RUN --mount=type=secret,id=GITHUB_TOKEN`) for GitHub Packages installs; never in the image. Applies to the docker rung and `docker-smoke` |
-| `postgres-version` | | `16` | PostgreSQL for jobs that need a database (strapi) |
+| `postgres-version` | | `17` | PostgreSQL for jobs that need a database (strapi). Our DigitalOcean databases run 17; a newer version restores dumps from older servers, never the reverse. |
 
 **Secrets** (all optional): `dependabot-alerts-token` (informational `vuln-report`), `nuget-restore-token` (private NuGet feed).
 
@@ -944,7 +944,7 @@ SRC_DB='postgres://readonly_user:...@host:5432/db' \
   - blanks secret-looking keys in the core store (OAuth provider secrets, email-provider keys)
   - replaces personal-data columns (names containing email, phone, mobile, msisdn, national id or ip, plus the repo's `ci/fixture-pii.txt`)
 - It then scans the dump with `verify-secret-scan` and writes the fixture only if the scan is clean and the file is under 50 MB gzipped.
-- `--postgres-image` (default `postgres:16`) must match the repo's verify `postgres-version` and be at least the source server's major version.
+- `--postgres-image` (default `postgres:17`) must match the repo's verify `postgres-version` and be at least the source server's major version.
 - Repo files, all one entry per line with `#` comments:
   - `ci/fixture-pii.txt`: `table.column` to scrub. An entry matching no column stops the tool, so typos can't pass silently.
   - `ci/fixture-allow.txt`: public business addresses that are real content, as an address or `@domain`. Never allow-list a personal mailbox domain (gmail.com and similar); scrub that column instead, and the scan says so.

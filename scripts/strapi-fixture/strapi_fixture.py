@@ -204,7 +204,7 @@ def main(argv):
     ap.add_argument("--source-env", required=True, help="name of the environment variable holding the source Postgres URL")
     ap.add_argument("--repo", required=True, help="the Strapi repository checkout to write ci/fixture.sql.gz into")
     ap.add_argument("--truncate", action="append", default=[], help="empty this table (repeatable), e.g. form submissions")
-    ap.add_argument("--postgres-image", default="postgres:16",
+    ap.add_argument("--postgres-image", default="postgres:17",
                     help="must match the repo's verify postgres-version and be >= the source server's major version")
     a = ap.parse_args(argv)
     if not os.environ.get(a.source_env):
