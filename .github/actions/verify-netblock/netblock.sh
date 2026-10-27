@@ -9,6 +9,7 @@
 #   netblock_hosts FILE       validated hosts of an allowed-hosts file, one per line
 #   netblock_on [FILE]        (re)build the rules; allowed hosts are resolved once and pinned in /etc/hosts
 #   netblock_run CMD...       run CMD blocked (same uid and env, group verify-offline)
+#   netblock_off              lift the block for the group (rules kept; netblock_on restores it)
 #   netblock_count            packets rejected since the last netblock_on
 #   netblock_blocked          rejected destinations as ip:port (best effort, from the kernel log)
 
@@ -95,6 +96,14 @@ netblock_run() {
   else
     sudo -E env "PATH=${PATH}" setpriv --reuid "$(id -u)" --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
   fi
+}
+
+netblock_off() {
+  local sudo ipt
+  sudo="$(_nb_sudo)"
+  for ipt in iptables ip6tables; do
+    ${sudo} "${ipt}" -w -D OUTPUT -m owner --gid-owner "${NETBLOCK_GROUP}" -j "${NETBLOCK_CHAIN}" 2>/dev/null || true
+  done
 }
 
 netblock_count() {

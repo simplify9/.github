@@ -52,6 +52,14 @@ inner() {
   eq unresolvable_host_rc 1 "${rc}"
   eq unresolvable_host_named 1 "$(grep -c 'cannot resolve allowed host no-such-host.invalid' <<< "${out}")"
 
+  # netblock_off lifts the block for the group without restarting anything (mobile network check).
+  netblock_on >/dev/null
+  eq before_off_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"
+  netblock_off
+  eq after_off_reachable 0 "$(failed netblock_run curl -sS -m 10 https://example.org)"
+  eq after_off_no_jump 0 "$(iptables -S OUTPUT | grep -c VERIFY_NETBLOCK)"
+  eq after_off_no_jump_v6 0 "$(ip6tables -S OUTPUT | grep -c VERIFY_NETBLOCK)"
+
   useradd -m -s /bin/bash runner && echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner
   netblock_on >/dev/null
   su runner -c "bash ${here}/test_netblock_docker.sh --as-runner" > /tmp/runner.out

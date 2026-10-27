@@ -40,10 +40,11 @@ e2e_after_retry() {
 set -euo pipefail
 # shellcheck source=../verify-netblock/netblock.sh
 source "${ACTION_PATH}/../verify-netblock/netblock.sh"
-MOCK_PORT=3901
+# shellcheck source=../verify-mocks/mockoon.sh
+source "${ACTION_PATH}/../verify-mocks/mockoon.sh"
 log="${RUNNER_TEMP}/e2e.log"
-mock_pid=""
-trap '[ -z "${mock_pid}" ] || kill "${mock_pid}" 2>/dev/null || true' EXIT
+MOCKOON_PID=""
+trap '[ -z "${MOCKOON_PID}" ] || kill "${MOCKOON_PID}" 2>/dev/null || true' EXIT
 
 mapfile -t zips < <(e2e_zip_recordings .)
 if [ "${#zips[@]}" -gt 0 ]; then
@@ -63,24 +64,13 @@ netblock_hosts e2e/allowed-hosts.txt >/dev/null
 # Everything that needs the internet happens before the block.
 npx playwright install --with-deps chromium
 if [ -f e2e/mocks.json ]; then
-  npm i --no-save --no-audit --no-fund --prefix "${RUNNER_TEMP}/mockoon" @mockoon/cli@9.9.0 >/dev/null
+  mockoon_install
 fi
 
 netblock_on e2e/allowed-hosts.txt
 if [ -f e2e/mocks.json ]; then
-  netblock_run "${RUNNER_TEMP}/mockoon/node_modules/.bin/mockoon-cli" start -d e2e/mocks.json -p "${MOCK_PORT}" \
-    -l 127.0.0.1 --proxy disabled --disable-admin-api -X -r > "${RUNNER_TEMP}/mockoon.log" 2>&1 &
-  mock_pid=$!
-  for _ in $(seq 1 30); do
-    (echo > "/dev/tcp/127.0.0.1/${MOCK_PORT}") 2>/dev/null && break
-    sleep 1
-  done
-  if ! (echo > "/dev/tcp/127.0.0.1/${MOCK_PORT}") 2>/dev/null; then
-    cat "${RUNNER_TEMP}/mockoon.log"
-    echo "::error title=[VERIFY] e2e::Mockoon did not serve e2e/mocks.json on port ${MOCK_PORT} within 30 s (log above)"
-    exit 1
-  fi
-  export E2E_API_URL="http://127.0.0.1:${MOCK_PORT}"
+  mockoon_start e2e/mocks.json netblock_run || exit 1
+  export E2E_API_URL="http://127.0.0.1:${MOCKOON_PORT}"
   echo "::notice title=[VERIFY] e2e::Mockoon serves e2e/mocks.json at ${E2E_API_URL}"
 fi
 
