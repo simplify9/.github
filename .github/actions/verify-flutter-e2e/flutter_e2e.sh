@@ -15,6 +15,16 @@ flutter_e2e_failed() {
   sed -n 's#^[0-9:]* +[0-9]* -[0-9]*: .*/\([^/]*\.dart\): \(.*\) \[E\]$#\1: \2#p' "$1" | LC_ALL=C sort -u
 }
 
+# flutter_e2e_verdict <first-rc> <blocked-rerun-rc|-> <blocked-count>: pass | flaky | network-check | fail.
+# A failure is re-run once under the block first, so a flake is never taken for a network need.
+flutter_e2e_verdict() {
+  if [ "$1" -eq 0 ]; then echo pass
+  elif [ "$2" != "-" ] && [ "$2" -eq 0 ]; then echo flaky
+  elif [ "$3" -gt 0 ]; then echo network-check
+  else echo fail
+  fi
+}
+
 [ "${FLUTTER_E2E_SH_LIB:-}" = 1 ] && return 0
 
 set -euo pipefail
@@ -73,21 +83,25 @@ flutter_run() {
   set -e
 }
 flutter_run netblock_run
+first=${rc} rerun=-
+if [ "${first}" -ne 0 ]; then
+  echo "[VERIFY] e2e: failed; re-running once with the block still on"
+  flutter_run netblock_run
+  rerun=${rc}
+fi
 blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
 dests="${dests% }"
-case "$(e2e_verdict "${rc}" "${blocked}")" in
-  pass)
-    if [ "${blocked}" -gt 0 ]; then
-      echo "::notice title=[VERIFY] network::e2e passed; the block rejected ${blocked} packet(s) to: ${dests:-unknown}"
-    fi
+case "$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}")" in
+  flaky)
+    echo "::warning title=[VERIFY] e2e::flaky: failed, then passed on a re-run (log above); fix it"
     ;;
-  retry)
-    echo "::notice title=[VERIFY] network::e2e failed while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running once with network access to tell the two apart"
+  network-check)
+    echo "::notice title=[VERIFY] network::e2e failed twice while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running once with network access to tell the two apart"
     netblock_off
     flutter_run
     if [ "$(e2e_after_retry "${rc}")" = network ]; then
-      echo "::warning title=[VERIFY] network::e2e passed only with network access; blocked: ${dests:-unknown}. Mock these calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+      echo "::warning title=[VERIFY] network::e2e passed only with network access; blocked: ${dests:-unknown} (Android's own background traffic may be listed too). Mock the app's calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
       echo "network=needed" >> "${GITHUB_OUTPUT}"
     else
       echo "::notice title=[VERIFY] network::e2e failed with network access too: a real failure"

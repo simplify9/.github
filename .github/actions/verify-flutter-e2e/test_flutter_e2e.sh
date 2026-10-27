@@ -28,5 +28,9 @@ test_failed_names() {
   eq "${FUNCNAME[0]}" $'app_test.dart: user signs in\npartner_test.dart: partner reachable' "$(flutter_e2e_failed "${tmp}/log")"
 }
 test_failed_none() { printf '00:30 +3: All tests passed!\n' > "${tmp}/ok"; eq "${FUNCNAME[0]}" "" "$(flutter_e2e_failed "${tmp}/ok")"; }
+test_verdict_pass() { eq "${FUNCNAME[0]}" pass "$(flutter_e2e_verdict 0 - 9)"; }
+test_verdict_flaky() { eq "${FUNCNAME[0]}" flaky "$(flutter_e2e_verdict 1 0 9)"; }
+test_verdict_network_check() { eq "${FUNCNAME[0]}" network-check "$(flutter_e2e_verdict 1 1 3)"; }
+test_verdict_fail() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 1 1 0)"; }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
