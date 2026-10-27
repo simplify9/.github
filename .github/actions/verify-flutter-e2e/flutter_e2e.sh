@@ -61,6 +61,9 @@ fi
 emulator_boot netblock_run || exit 2
 [ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
 device="$(adb devices | awk 'NR > 1 && $2 == "device" {print $1; exit}')"
+# Only what happens from here (the app and its tests) counts as blocked traffic.
+sleep 5
+netblock_reset
 
 # flutter_run [PREFIX...]: the integration tests on the emulator; the log keeps the last run.
 flutter_run() {
