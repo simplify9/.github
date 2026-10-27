@@ -1113,7 +1113,7 @@ All 28 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 
 | Action | Purpose | Key inputs | Key outputs |
 |---|---|---|---|
-| `verify-plan` | Scope helper (`scope.sh`, tested by `test_scope.sh`): effective known-failing list, whether dependency files changed, contract mode | `event-name`, `repository`, `pr-number`, `known-failing`, `deadline`, `github-token` | `known_failing`, `deps_changed`, `contract_mode`, `strapi_changed` |
+| `verify-plan` | Scope helper (`scope.sh`, tested by `test_scope.sh`): effective known-failing list (the caller's list before its deadline plus the stack's tolerated new steps, `NEW_STEPS` entries `<stack>:<id>:<deadline>`, `*` = every stack), whether dependency files changed, contract mode | `event-name`, `repository`, `pr-number`, `known-failing`, `deadline`, `stack`, `github-token` | `known_failing`, `repo_known_failing`, `deps_changed`, `contract_mode`, `strapi_changed` |
 | `verify-contract` | Report which Verification Contract items a repo lacks (`contract.py`); warn before the deadline, error after | `stack` (required), `working-directory`, `deadline` | `missing`, `mode` |
 | `verify-web-install` | Detect the package manager from the lockfile (`detect_pm.sh`), set up Node, install from the lockfile without modifying it | `working-directory`, `node-version` | `package-manager` (`npm`/`yarn`/`yarn-berry`/`pnpm`), `runner` |
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |

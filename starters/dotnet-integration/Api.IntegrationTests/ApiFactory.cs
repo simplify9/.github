@@ -15,7 +15,7 @@ namespace Api.IntegrationTests;
 // the database is a container started for the test run, and tokens are signed with a test-only key.
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    // Pinned to production's major version (our DigitalOcean Postgres is 17).
+    // Pinned to production's Postgres major (17).
     private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:17").Build();
 
     // Valid only inside this test host. Never a key from a real identity provider.
