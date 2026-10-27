@@ -46,6 +46,12 @@ inner() {
   eq single_output_jump 1 "$(iptables -S OUTPUT | grep -c VERIFY_NETBLOCK)"
   eq single_output_jump_v6 1 "$(ip6tables -S OUTPUT | grep -c VERIFY_NETBLOCK)"
 
+  # Under errexit + pipefail, as e2e.sh runs it: an unresolvable allowed host must say so, not exit silently.
+  printf 'no-such-host.invalid\n' > /tmp/bad
+  out="$(bash -c "set -euo pipefail; source ${here}/netblock.sh; netblock_on /tmp/bad" 2>&1)"; rc=$?
+  eq unresolvable_host_rc 1 "${rc}"
+  eq unresolvable_host_named 1 "$(grep -c 'cannot resolve allowed host no-such-host.invalid' <<< "${out}")"
+
   useradd -m -s /bin/bash runner && echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner
   netblock_on >/dev/null
   su runner -c "bash ${here}/test_netblock_docker.sh --as-runner" > /tmp/runner.out

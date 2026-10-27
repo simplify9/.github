@@ -63,7 +63,8 @@ netblock_on() {
       ips="${host}"
     else
       # Resolved once; pinned in /etc/hosts so the app connects to exactly the addresses allowed here.
-      ips="$(getent ahosts "${host}" | awk '{print $1}' | sort -u)"
+      # `|| true`: getent exits 2 for an unknown host, which errexit callers would die on silently.
+      ips="$(getent ahosts "${host}" | awk '{print $1}' | sort -u || true)"
       if [ -z "${ips}" ]; then
         echo "::error title=[VERIFY] network::cannot resolve allowed host ${host}"
         return 1

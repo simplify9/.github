@@ -352,7 +352,7 @@ All four mobile workflows have a `build` job that `needs: critical-vuln-gate` (a
 
 ## Composite Action Reference
 
-All 26 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
+All 27 actions are composite. Call them in job steps with `uses: simplify9/.github/.github/actions/<name>@main`.
 
 ### Versioning & Tagging
 - `determine-semver` — Computes the next `major.minor.patch` from git tags. Inputs: `major`, `minor`, `release-branch`, `current-ref`, `build-id`. Outputs: `version`, `git-tag`, `is-release`.

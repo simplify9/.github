@@ -16,8 +16,10 @@ your repo, then replace the selectors and routes with your app's.
 - **No real environment.** During `test:e2e` the CI machine blocks all outbound traffic except
   localhost. Mock every API call:
   - browser calls: `page.route(...)` (see `sign-in.spec.ts`), or replay a recording with
-    `page.routeFromHAR('e2e/recordings/x.har')`. Record once against dev with a test account, then
-    scrub tokens, cookies, passwords and personal data;
+    `page.routeFromHAR('e2e/recordings/x.har')`. Record once against dev with a test account using
+    `{ update: true, updateContent: 'embed' }` (zipped or `attach` recordings put bodies where they
+    are harder to scrub; `verify` refuses `.zip`), then scrub tokens, cookies, passwords and
+    personal data;
   - server-side calls (Next.js server components, route handlers, `getServerSideProps`): put a
     Mockoon environment in `e2e/mocks.json` (design or record it in the Mockoon desktop app).
     `verify` serves it and sets `E2E_API_URL` (and `VERIFY_E2E=1`); read the API base URL from

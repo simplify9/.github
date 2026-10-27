@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import json
 import re
 import sys
 from collections import namedtuple
@@ -51,7 +52,7 @@ PATTERNS = [
     ("token", re.compile(r"ghp_[A-Za-z0-9]{36}|github_pat_\w{50,}|AKIA[0-9A-Z]{16}"
                          r"|sk_live_[0-9A-Za-z]{16,}|xox[abpr]-[0-9A-Za-z-]{10,}")),
     ("connection-string", re.compile(
-        r"(?i)(?:host|server|data source)=(?!" + LOCAL_HOSTS + r"\b)[^;\"']+;.*?password=[^;\"'\s]+")),
+        r"(?i)(?:host|server|data source)=(?!" + LOCAL_HOSTS + r"\b)[^;\"']{1,200};[^\"'\n]{0,300}?password=[^;\"'\s]+")),
     ("connection-string", re.compile(
         r"(?i)(?:postgres(?:ql)?|amqps?|mongodb(?:\+srv)?|redis)://[^:/@\s\"']*:[^@\s\"']+@(?!" + LOCAL_HOSTS + r"\b)")),
     # Recorded (HAR {"name","value"}) or mocked (Mockoon {"key","value"}) credential headers.
@@ -63,6 +64,9 @@ PATTERNS = [
     # Form-encoded only: after & ? a quote or whitespace (a `;Password=` connection string is reported above).
     ("password-field", re.compile(r'(?i)(?:^|(?<=[&?"\s]))pass(?:word|wd)=[^&\s"]+')),
 ]
+# Credential headers and cookies, also found by walking parsed HAR/Mockoon JSON (pretty-printed files put
+# "name" and "value" on separate lines, which the line patterns cannot see).
+CRED_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key", "x-auth-token"}
 COPY = re.compile(r"^COPY public\.\"?([A-Za-z0-9_]+)\"? \((.*)\) FROM stdin;$")
 INSERT = re.compile(r"^INSERT INTO (?:public\.)?\"?([A-Za-z0-9_]+)\"?[ (]")
 
@@ -142,6 +146,39 @@ def scan_lines(lines, allow, strapi_dump):
     return findings
 
 
+def json_findings(obj, path="$"):
+    """Credential headers ({"name"|"key": <header>, "value": >= 8 chars}) and HAR cookies in parsed JSON."""
+    out = []
+    if isinstance(obj, dict):
+        name = obj.get("name", obj.get("key"))
+        value = obj.get("value")
+        cookie = path.rsplit(".", 1)[-1].startswith("cookies[")
+        if isinstance(name, str) and isinstance(value, str) and len(value) >= 8 and (
+                cookie or name.lower() in CRED_HEADERS):
+            out.append(Finding(1, "auth-header", ("cookie " if cookie else "") + name, path))
+        for k, v in obj.items():
+            out.extend(json_findings(v, "%s.%s" % (path, k)))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            out.extend(json_findings(v, "%s[%d]" % (path, i)))
+    return out
+
+
+def scan_path(path, allow, strapi_dump):
+    """Line scan; for .har/.json that parse, credential headers come from the JSON walk instead."""
+    if path.endswith((".har", ".json")):
+        try:
+            with _open(path) as f:
+                found = json_findings(json.load(f))
+        except ValueError:
+            found = None
+        if found is not None:
+            with _open(path) as f:
+                return found + [x for x in scan_lines(f, allow, strapi_dump) if x.kind != "auth-header"]
+    with _open(path) as f:
+        return scan_lines(f, allow, strapi_dump)
+
+
 def _open(path):
     if path.endswith(".gz"):
         return gzip.open(path, "rt", encoding="utf-8", errors="replace")
@@ -161,14 +198,18 @@ def main(argv):
     total = 0
     for path in a.paths:
         try:
-            with _open(path) as f:
-                found = scan_lines(f, allow, a.strapi_dump)
+            found = scan_path(path, allow, a.strapi_dump)
         except (OSError, EOFError) as e:
             print("::error title=[VERIFY] secret-scan::cannot read %s: %s" % (path, e))
             return 2
+        recording = not path.endswith((".sql", ".sql.gz"))  # HAR, its body files, Mockoon mocks
         for fd in found:
             hint = ""
-            if fd.kind == "email" and fd.masked[4:] in FREE_MAIL:
+            if recording and fd.kind == "email":
+                hint = " (recordings and mocks must not hold real addresses: replace it with an example.com address)"
+            elif recording and fd.kind in ("auth-header", "password-field"):
+                hint = " (remove it from the recording or mock, or use a placeholder under 8 characters)"
+            elif fd.kind == "email" and fd.masked[4:] in FREE_MAIL:
                 hint = " (a personal mailbox: list the column in ci/fixture-pii.txt and regenerate the fixture)"
             elif fd.kind == "jwt":
                 hint = ' (for a mock, use an unsigned token: header {"alg":"none"} and an empty signature)'

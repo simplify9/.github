@@ -2,10 +2,27 @@
 # The web `e2e` step (see action.yml). Run from the project directory with RUNNER (yarn/npm/pnpm),
 # ACTION_PATH and RUNNER_TEMP set. Sourced with E2E_SH_LIB=1 by test_e2e.sh for the helpers only.
 
-# e2e_scan_targets <dir>: committed recordings and mocks to scan, relative to <dir>, sorted.
+# e2e_scan_targets <dir>: committed recordings and mocks to scan, relative to <dir>, sorted: every
+# e2e/**/*.har, e2e/mocks.json, and every other file next to a .har (Playwright's default
+# updateContent "attach" writes response bodies there), except source code and binary media.
 e2e_scan_targets() {
   [ -d "$1/e2e" ] || return 0
-  (cd "$1" && { find e2e -type f -name '*.har'; [ -f e2e/mocks.json ] && echo e2e/mocks.json; } | LC_ALL=C sort)
+  (
+    cd "$1" || exit 1
+    {
+      [ -f e2e/mocks.json ] && echo e2e/mocks.json
+      find e2e -type f -name '*.har' -exec dirname {} \; | LC_ALL=C sort -u | while IFS= read -r dir; do
+        find "${dir}" -maxdepth 1 -type f \
+          | grep -Ev '\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|png|jpe?g|gif|webp|ico|svg|woff2?|ttf|otf|pdf|mp4|webm|zip)$' || true
+      done
+    } | LC_ALL=C sort -u
+  )
+}
+
+# e2e_zip_recordings <dir>: zipped HAR recordings, which the scanner cannot read.
+e2e_zip_recordings() {
+  [ -d "$1/e2e" ] || return 0
+  (cd "$1" && find e2e -type f -name '*.zip' | LC_ALL=C sort)
 }
 
 # e2e_verdict <rc> <blocked-count>: pass | fail (a real failure) | retry (the block may be the cause)
@@ -28,6 +45,11 @@ log="${RUNNER_TEMP}/e2e.log"
 mock_pid=""
 trap '[ -z "${mock_pid}" ] || kill "${mock_pid}" 2>/dev/null || true' EXIT
 
+mapfile -t zips < <(e2e_zip_recordings .)
+if [ "${#zips[@]}" -gt 0 ]; then
+  echo "::error title=[VERIFY] e2e::${zips[*]}: zipped recordings cannot be scanned for personal data; record with routeFromHAR(..., { update: true, updateContent: 'embed' }) and commit the .har"
+  exit 1
+fi
 mapfile -t targets < <(e2e_scan_targets .)
 if [ "${#targets[@]}" -gt 0 ]; then
   echo "[VERIFY] e2e: scanning ${targets[*]}"

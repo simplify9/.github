@@ -880,7 +880,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
 
 **Web end-to-end (`e2e`).** When `package.json` has a `test:e2e` script (Playwright; starter in `starters/web-playwright/`):
-1. Committed `e2e/**/*.har` and `e2e/mocks.json` are scanned with `verify-secret-scan`; personal data, real tokens, credential headers or passwords fail the step.
+1. Committed `e2e/**/*.har`, the files next to each `.har` (response bodies of an `attach` recording; source code and media excepted) and `e2e/mocks.json` are scanned with `verify-secret-scan`; personal data, real tokens, credential headers or cookies (pretty-printed or not) and passwords fail the step. Zipped recordings (`e2e/**/*.zip`) are refused, because they cannot be scanned.
 2. Chromium is installed (the repo's Playwright version), then **outbound network is blocked** for everything `test:e2e` starts, the app server included. Allowed:
    - loopback (the app, Mockoon)
    - the hosts listed in `e2e/allowed-hosts.txt`: third-party SDKs only, one host name or IP per line, `#` comments; no scheme, port, path or wildcard. Each is resolved once and pinned in `/etc/hosts`.
@@ -1043,7 +1043,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 27 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 

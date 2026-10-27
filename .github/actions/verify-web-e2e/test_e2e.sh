@@ -19,8 +19,21 @@ test_scan_targets_none() {
 }
 test_scan_targets_har_and_mocks() {
   mkdir -p "${tmp}/r/e2e/rec"
-  touch "${tmp}/r/e2e/a.har" "${tmp}/r/e2e/rec/b.har" "${tmp}/r/e2e/mocks.json" "${tmp}/r/e2e/x.json"
-  eq "${FUNCNAME[0]}" $'e2e/a.har\ne2e/mocks.json\ne2e/rec/b.har' "$(e2e_scan_targets "${tmp}/r")"
+  touch "${tmp}/r/e2e/rec/b.har" "${tmp}/r/e2e/mocks.json" "${tmp}/r/e2e/x.json"
+  eq "${FUNCNAME[0]}" $'e2e/mocks.json\ne2e/rec/b.har' "$(e2e_scan_targets "${tmp}/r")"
+}
+test_scan_targets_har_body_files() {
+  # routeFromHAR(..., { update: true }) defaults to updateContent "attach": bodies sit next to the .har.
+  mkdir -p "${tmp}/b/e2e/rec"
+  touch "${tmp}/b/e2e/home.spec.ts" "${tmp}/b/e2e/rec/items.har" "${tmp}/b/e2e/rec/0a1b.json" \
+    "${tmp}/b/e2e/rec/2c3d.txt" "${tmp}/b/e2e/rec/4e5f.png" "${tmp}/b/e2e/rec/helper.ts"
+  eq "${FUNCNAME[0]}" $'e2e/rec/0a1b.json\ne2e/rec/2c3d.txt\ne2e/rec/items.har' "$(e2e_scan_targets "${tmp}/b")"
+}
+test_zip_recordings() {
+  mkdir -p "${tmp}/z/e2e/rec"
+  touch "${tmp}/z/e2e/rec/items.zip" "${tmp}/z/e2e/ok.har"
+  eq "${FUNCNAME[0]}" "e2e/rec/items.zip" "$(e2e_zip_recordings "${tmp}/z")"
+  eq "${FUNCNAME[0]}_none" "" "$(e2e_zip_recordings "${tmp}/r")"
 }
 test_verdict_pass_with_blocked() { eq "${FUNCNAME[0]}" pass "$(e2e_verdict 0 5)"; }
 test_verdict_fail_nothing_blocked() { eq "${FUNCNAME[0]}" fail "$(e2e_verdict 1 0)"; }

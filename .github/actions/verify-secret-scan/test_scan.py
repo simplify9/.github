@@ -1,5 +1,6 @@
 import gzip
 import io
+import json
 import os
 import tempfile
 import time
@@ -170,6 +171,58 @@ class RecordingsAndMocks(unittest.TestCase):
         found = kinds(line)
         self.assertLess(time.monotonic() - t, 5)
         self.assertEqual(found, ["auth-header"])
+
+
+def har(headers=(), cookies=(), indent=2):
+    entry = {"request": {"url": "http://localhost/api", "headers": [{"name": n, "value": v} for n, v in headers],
+                         "cookies": [{"name": n, "value": v} for n, v in cookies]}}
+    return json.dumps({"log": {"entries": [entry]}}, indent=indent)
+
+
+def scan_file(name, text):
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, name)
+        with open(p, "w") as f:
+            f.write(text)
+        return run_main([p])
+
+
+class StructuredRecordings(unittest.TestCase):
+    def test_pretty_printed_har_headers_and_cookies_found(self):
+        rc, out = scan_file("rec.har", har([("Authorization", "Bearer realtokenvalue123456"),
+                                           ("Set-Cookie", "sid=abcdefgh1234")], [("session", "abcdefgh5678")]))
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.count("auth-header"), 3, out)
+        self.assertIn("$.log.entries[0].request.headers[0]", out)
+        self.assertNotIn("realtoken", out)
+        self.assertNotIn("abcdefgh", out)
+
+    def test_pretty_printed_mockoon_header_found(self):
+        mock = json.dumps({"routes": [{"responses": [{"headers": [{"key": "X-Api-Key", "value": "k3y-abcdefgh"}]}]}]},
+                          indent=2)
+        rc, out = scan_file("mocks.json", mock)
+        self.assertEqual(rc, 1)
+        self.assertEqual(out.count("auth-header"), 1, out)
+
+    def test_compact_har_not_double_counted(self):
+        rc, out = scan_file("rec.har", har([("Authorization", "Bearer realtokenvalue123456")], indent=None))
+        self.assertEqual(out.count("auth-header"), 1, out)
+
+    def test_invalid_json_falls_back_to_lines(self):
+        rc, out = scan_file("rec.har", '{"name": "Cookie", "value": "abcdefgh123"} not json')
+        self.assertEqual(out.count("auth-header"), 1, out)
+
+    def test_recording_email_hint_says_replace(self):
+        rc, out = scan_file("rec.har", '{"text": "jane@client.example.co"}')
+        self.assertEqual(rc, 1)
+        self.assertIn("example.com", out)
+        self.assertNotIn("fixture-allow", out)
+
+    def test_many_host_tokens_is_fast(self):
+        line = ("this.host=e;" + "x" * 10000) * 300
+        t = time.monotonic()
+        self.assertEqual(kinds(line), [])
+        self.assertLess(time.monotonic() - t, 2)
 
 
 class StrapiDump(unittest.TestCase):
