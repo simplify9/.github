@@ -43,7 +43,7 @@ def content_types(dirs):
 
 
 def _request(method, url, token=None, body=None):
-    """-> (status, parsed JSON or None)."""
+    """-> (status, parsed JSON or None); an HTTP error returns its JSON body when it has one."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
     if token:
@@ -52,7 +52,10 @@ def _request(method, url, token=None, body=None):
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.status, json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
-        return e.code, None
+        try:
+            return e.code, json.loads(e.read() or b"null")
+        except ValueError:
+            return e.code, None
 
 
 def api_token(base_url):

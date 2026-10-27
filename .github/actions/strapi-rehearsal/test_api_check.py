@@ -35,7 +35,8 @@ class Stub:
                 n = int(self.headers.get("Content-Length") or 0)
                 sent = json.loads(self.rfile.read(n)) if n else None
                 seen.append((self.command, self.path, self.headers.get("Authorization"), sent))
-                status, body = routes.get((self.command, path), (404, {"error": "nope"}))
+                route = routes.get((self.command, path), (404, {"error": "nope"}))
+                status, body = route(sent) if callable(route) else route
                 data = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -43,7 +44,7 @@ class Stub:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = _reply
+            do_GET = do_POST = do_PUT = _reply
 
             def log_message(self, *args):
                 pass
