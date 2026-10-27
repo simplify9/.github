@@ -25,13 +25,30 @@ test_contract_mode() {
   eq "${FUNCNAME[0]}_none" warn "$(contract_mode '' 2027-01-01)"
 }
 test_new_step_tolerated_before_own_deadline() { eq "${FUNCNAME[0]}" network "$(new_steps_tolerated 2026-11-10 2026-12-01)"; }
-test_new_step_enforced_on_own_deadline() { eq "${FUNCNAME[0]}" "" "$(new_steps_tolerated 2026-11-10 2026-12-29)"; }
+test_new_step_enforced_on_own_deadline() { eq "${FUNCNAME[0]}" "" "$(new_steps_tolerated 2026-11-10 2026-12-29 dotnet-service)"; }
 test_new_step_later_repo_deadline_wins() { eq "${FUNCNAME[0]}" network "$(new_steps_tolerated 2027-02-01 2027-01-15)"; }
 test_new_step_no_repo_deadline_forever() { eq "${FUNCNAME[0]}" network "$(new_steps_tolerated '' 2030-01-01)"; }
 test_effective_known_failing_merges() {
   eq "${FUNCNAME[0]}_before" "lint network" "$(effective_known_failing "lint network" 2026-11-10 2026-11-01)"
   eq "${FUNCNAME[0]}_repo_passed" "network" "$(effective_known_failing "lint network" 2026-11-10 2026-11-10)"
   eq "${FUNCNAME[0]}_all_passed" "" "$(effective_known_failing "lint" 2026-11-10 2027-01-01)"
+}
+test_smoke_scoped_to_dotnet_service() {
+  eq "${FUNCNAME[0]}_service" "network smoke" "$(new_steps_tolerated 2026-11-20 2026-12-01 dotnet-service)"
+  eq "${FUNCNAME[0]}_library" "network" "$(new_steps_tolerated 2026-11-20 2026-12-01 dotnet-library)"
+  eq "${FUNCNAME[0]}_web" "network" "$(new_steps_tolerated 2026-11-20 2026-12-01 web)"
+  eq "${FUNCNAME[0]}_on_deadline" "" "$(new_steps_tolerated 2026-11-20 2026-12-29 dotnet-service)"
+  eq "${FUNCNAME[0]}_effective" "docker network smoke" "$(effective_known_failing docker 2026-12-21 2026-12-01 dotnet-service)"
+}
+test_stack_entry_does_not_leak_to_other_stacks() {
+  local NEW_STEPS="flutter:e2e:2026-12-29 *:network:2026-12-29"
+  eq "${FUNCNAME[0]}_web" "network" "$(new_steps_tolerated '' 2026-12-01 web)"
+  eq "${FUNCNAME[0]}_flutter" "e2e network" "$(new_steps_tolerated '' 2026-12-01 flutter)"
+  eq "${FUNCNAME[0]}_no_stack" "network" "$(new_steps_tolerated '' 2026-12-01)"
+}
+test_repo_known_failing_excludes_new_steps() { eq "${FUNCNAME[0]}" "test" "$(known_failing_effective "test" 2027-02-01 2026-12-01)"; }
+test_integration_is_not_a_new_step() {
+  case " $(new_steps_tolerated '' 2026-12-01) " in *" integration "*) eq "${FUNCNAME[0]}" absent present ;; *) eq "${FUNCNAME[0]}" absent absent ;; esac
 }
 test_deps_changed_manifest() { eq "${FUNCNAME[0]}" true "$(deps_changed_from_list $'src/a.cs\nweb/package.json')"; }
 test_deps_changed_none() { eq "${FUNCNAME[0]}" false "$(deps_changed_from_list $'src/a.cs\nREADME.md')"; }
