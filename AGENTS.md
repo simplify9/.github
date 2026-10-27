@@ -15,12 +15,13 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 ├── renovate/               <- org Renovate presets (default + per-stack; validate with renovate/validate.sh)
 ├── scripts/fleet/          <- maintainer audits + deps_health.py fleet metrics (run locally, not from CI; read-only gh)
 ├── scripts/strapi-fixture/ <- strapi_fixture.py: sanitized Strapi fixture maker (DevOps, Docker; tested by test_strapi_fixture.py, FIXTURE_DOCKER_TEST=1 for the Postgres cases); cluster-dump.sh streams a read-only dump via a temp pod (test_cluster_dump.sh)
+├── starters/               <- copyable test starters per stack (generic: no client names); web-playwright = verify's web e2e journeys + external-request guard
 └── profile/README.md       <- org profile page
 ```
 
 `scripts/fleet/audit_template_permissions.py` (offline) checks that every template grants what its reusable workflow requests; `scripts/fleet/audit_caller_permissions.py <workflow>` (needs `gh`) checks that every org caller still starts after a `permissions:` change. Both exit 1 on any failure.
 
-Every file in `.github/workflows/` is a **reusable workflow** — it has `on: workflow_call:` (and occasionally `on: workflow_dispatch:`) and is never run standalone. Every directory in `.github/actions/` is a **composite action** with its own `action.yml`. Every file in `workflow-templates/` is a thin starter caller (paired with a `.properties.json` metadata sidecar) that GitHub offers when a user clicks "New workflow" in an org repo.
+Every file in `.github/workflows/` is a **reusable workflow** — it has `on: workflow_call:` (and occasionally `on: workflow_dispatch:`) and is never run standalone. Every directory in `.github/actions/` is a **composite action** with its own `action.yml`, except the script-only helpers `verify-secret-scan` and `verify-netblock`, which other actions call by path. Every file in `workflow-templates/` is a thin starter caller (paired with a `.properties.json` metadata sidecar) that GitHub offers when a user clicks "New workflow" in an org repo.
 
 ---
 
