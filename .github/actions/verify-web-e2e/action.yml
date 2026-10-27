@@ -1,0 +1,58 @@
+# =============================================================================
+# Verify Web E2E
+# =============================================================================
+# The web `e2e` step of verify: runs the repo's `test:e2e` (Playwright) with
+# no outbound network except loopback and e2e/allowed-hosts.txt.
+#   1. Scans committed e2e/**/*.har and e2e/mocks.json with verify-secret-scan.
+#   2. Installs Chromium (the repo's Playwright), and @mockoon/cli when
+#      e2e/mocks.json exists; then turns the network block on (verify-netblock).
+#   3. With e2e/mocks.json: serves it with Mockoon (proxy off) on 127.0.0.1:3901
+#      and exports E2E_API_URL=http://127.0.0.1:3901.
+#   4. Runs `<runner> run test:e2e` blocked, with CI=true, VERIFY_E2E=1 and
+#      NEXT_TELEMETRY_DISABLED=1. If it fails while the block rejected traffic,
+#      re-runs it once with network access: passing then sets output
+#      network=needed (the workflow's `network` step reports it) and the step
+#      passes; failing again is a real failure.
+#   5. Names failed and flaky tests in the job summary (e2e_report.py).
+# Needs root network control (a GitHub-hosted runner). Logic: e2e.sh (helpers
+# tested by test_e2e.sh), e2e_report.py (test_e2e_report.py).
+#
+# Inputs:
+#   working-directory  (optional)  Project directory. Default ".".
+#   runner             (required)  Package-manager command (verify-web-install's `runner` output).
+# Outputs:
+#   network  "needed" when the tests passed only with network access, else empty.
+# =============================================================================
+name: 'Verify Web E2E'
+author: 'Simplify9'
+description: 'Run the repo test:e2e (Playwright) with outbound network blocked, mocks served, recordings scanned and failed or flaky tests named.'
+
+inputs:
+  working-directory:
+    description: 'Project directory (contains package.json).'
+    required: false
+    default: '.'
+  runner:
+    description: 'Package-manager command used to run scripts (yarn, npm or pnpm).'
+    required: true
+
+outputs:
+  network:
+    description: '"needed" when the tests passed only with network access, else empty.'
+    value: ${{ steps.e2e.outputs.network }}
+
+runs:
+  using: composite
+  steps:
+    - name: E2E
+      id: e2e
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        RUNNER: ${{ inputs.runner }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${ACTION_PATH}/e2e.sh"
+
+branding:
+  icon: 'play-circle'
+  color: 'blue'
