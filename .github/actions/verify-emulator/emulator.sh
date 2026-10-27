@@ -79,6 +79,16 @@ emulator_boot() {
         adb shell settings put global captive_portal_mode 0 >/dev/null 2>&1 || true
         adb shell settings put global captive_portal_detection_enabled 0 >/dev/null 2>&1 || true
         adb shell settings put global auto_time 0 >/dev/null 2>&1 || true
+        # Network validation probes Google (generate_204) and keeps retrying while blocked: point the
+        # probes at the emulator's own loopback, then reconnect so the network monitor reads them.
+        for k in captive_portal_http_url captive_portal_https_url captive_portal_fallback_url \
+          captive_portal_other_fallback_urls; do
+          adb shell settings put global "${k}" http://127.0.0.1:9/generate_204 >/dev/null 2>&1 || true
+        done
+        adb shell cmd connectivity airplane-mode enable >/dev/null 2>&1 || true
+        sleep 3
+        adb shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
+        sleep 5
         echo "[VERIFY] emulator: booted (attempt ${attempt})"
         return 0
         ;;
