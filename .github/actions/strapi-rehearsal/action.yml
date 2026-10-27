@@ -4,11 +4,15 @@
 # Boot smoke and data-upgrade rehearsal for Strapi repos. Needs a Postgres
 # service on localhost:5432 (db/user/password strapi), psql and curl, Node with
 # the HEAD dependencies installed and built.
-#   strapi-changed=true  restore ci/fixture.sql.gz, boot the BASE commit (creates
-#                        the schema at the old version) and record table counts,
-#                        boot HEAD on the same database (migrations run), require
-#                        /_health 204 and unchanged content-table counts.
+#   strapi-changed=true  restore ci/fixture.sql.gz (or, without one, boot BASE on the
+#                        empty database and generate published entries with seed.py),
+#                        boot the BASE commit, record counts, columns, values and
+#                        content-API responses, boot HEAD on the same database
+#                        (migrations run) and require them unchanged, /_health 204
+#                        and /admin 200.
 #   strapi-changed=false boot HEAD on the empty database and require /_health 204.
+# A schema fixed in config/database.* is created (and the fixture moved into it);
+# a fixed host, user, password or database name is refused.
 # The repo is responsible for a local upload provider and no external services
 # under NODE_ENV=ci. Secrets are generated per run; no real secrets are used.
 #
@@ -20,7 +24,7 @@
 # =============================================================================
 name: 'Strapi Rehearsal'
 author: 'Simplify9'
-description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove on a scanned fixture that the upgrade keeps content-table row counts, columns, values and content-API responses.'
+description: 'Boot Strapi against Postgres and, when dependencies or data definitions changed, prove on a scanned fixture (or generated data) that the upgrade keeps content-table row counts, columns, values and content-API responses.'
 
 inputs:
   base-sha:
@@ -58,6 +62,8 @@ runs:
         DATABASE_NAME: strapi
         DATABASE_USERNAME: strapi
         DATABASE_PASSWORD: strapi
+        # A config like env('DATABASE_SCHEMA', 'cms') reads public; a schema fixed in config is handled below.
+        DATABASE_SCHEMA: public
       run: |
         set -euo pipefail
         echo "VERIFY_STRAPI_REHEARSAL_CP1_STATUS=PENDING" >> "$GITHUB_ENV"
@@ -79,6 +85,9 @@ runs:
         tmp="${RUNNER_TEMP:-/tmp}/strapi-rehearsal"
         mkdir -p "${tmp}"
         server_pid=""
+        # The schema config/database.* fixes, if any, else public. Strapi does not create it itself.
+        schema="$(config_schema "${head_dir}")"
+        export REHEARSAL_SCHEMA="${schema:-public}"
 
         stop_server() {
           if [ -n "${server_pid}" ]; then
@@ -118,18 +127,23 @@ runs:
 
         if [ "${STRAPI_CHANGED}" = "true" ] && [ -n "${BASE_SHA}" ]; then
           fixture="${head_dir}/ci/fixture.sql.gz"
-          if [ ! -f "${fixture}" ]; then
-            echo "::error title=[VERIFY] Rehearsal::dependencies or data definitions changed but ci/fixture.sql.gz is missing; add a sanitized dump of the production schema and data"
-            exit 1
+          if [ -f "${fixture}" ]; then
+            mode="ci/fixture.sql.gz"
+            # Refuse a fixture that still holds personal data or secrets (values are never printed).
+            allow=()
+            [ -f "${head_dir}/ci/fixture-allow.txt" ] && allow=(--allow "${head_dir}/ci/fixture-allow.txt")
+            if ! python3 "${ACTION_PATH}/../verify-secret-scan/scan.py" --strapi-dump "${allow[@]}" "${fixture}"; then
+              echo "::error title=[VERIFY] Rehearsal::ci/fixture.sql.gz failed the personal-data/secret scan (see lines above); regenerate it with scripts/strapi-fixture"
+              exit 1
+            fi
+            gunzip -c "${fixture}" | psql "${db_url}" -v ON_ERROR_STOP=1 -q > /dev/null
+            prepare_schema "${db_url}" "${REHEARSAL_SCHEMA}" true
+          else
+            # No data copy: seed.py fills the base version with generated entries after it boots.
+            mode="generated data (no ci/fixture.sql.gz)"
+            prepare_schema "${db_url}" "${REHEARSAL_SCHEMA}" false
           fi
-          # Refuse a fixture that still holds personal data or secrets (values are never printed).
-          allow=()
-          [ -f "${head_dir}/ci/fixture-allow.txt" ] && allow=(--allow "${head_dir}/ci/fixture-allow.txt")
-          if ! python3 "${ACTION_PATH}/../verify-secret-scan/scan.py" --strapi-dump "${allow[@]}" "${fixture}"; then
-            echo "::error title=[VERIFY] Rehearsal::ci/fixture.sql.gz failed the personal-data/secret scan (see lines above); regenerate it with scripts/strapi-fixture"
-            exit 1
-          fi
-          gunzip -c "${fixture}" | psql "${db_url}" -v ON_ERROR_STOP=1 -q > /dev/null
+          echo "Strapi rehearsal: ${mode}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
           # The commit the PR merges onto (merge commit's first parent; else the event's base SHA).
           base_ref="$(rehearsal_base "${repo_root}" "${BASE_SHA}")"
@@ -142,6 +156,11 @@ runs:
 
           git -C "${repo_root}" worktree add --detach "${tmp}/base" "${base_ref}"
           base_dir="${tmp}/base${rel}"
+          base_schema="$(config_schema "${base_dir}")"
+          if [ "${base_schema:-public}" != "${REHEARSAL_SCHEMA}" ]; then
+            echo "::error title=[VERIFY] Rehearsal::config/database fixes schema \"${base_schema:-public}\" at base and \"${REHEARSAL_SCHEMA}\" at head; change it in a PR of its own"
+            exit 1
+          fi
           pm="$(detect_pm "${base_dir}")"
           (
             cd "${base_dir}"
@@ -154,6 +173,10 @@ runs:
             "${RUNNER_PM}" run build
           )
           boot "${base_dir}" base
+          if [ "${mode}" != "ci/fixture.sql.gz" ]; then
+            python3 "${ACTION_PATH}/seed.py" --app "${base_dir}" --base-url "${health}" --db-url "${db_url}" \
+              --schema "${REHEARSAL_SCHEMA}"
+          fi
           table_counts "${db_url}" > "${tmp}/before.txt"
           has_content_tables "${tmp}/before.txt"
           table_columns "${db_url}" > "${tmp}/before-cols.txt"
@@ -192,7 +215,7 @@ runs:
           if [ "${#failed[@]}" -gt 0 ]; then
             failed_list="$(printf '%s, ' "${failed[@]}")"
             {
-              echo "### Strapi rehearsal: ${failed_list%, }"
+              echo "### Strapi rehearsal (${mode}): ${failed_list%, }"
               echo '```'
               cat "${tmp}"/diff/*.txt
               echo '```'
@@ -202,8 +225,9 @@ runs:
             exit 1
           fi
           declared_n="$(cat "${tmp}"/diff/*.txt | grep -c ' (declared)$' || true)"
-          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${base_ref:0:7} kept content-table row counts, columns, values and content-API responses (${declared_n} declared change(s) reported); /_health 204 and /admin 200"
+          echo "::notice title=[VERIFY] Rehearsal::upgrade from ${base_ref:0:7} on ${mode} kept content-table row counts, columns, values and content-API responses (${declared_n} declared change(s) reported); /_health 204 and /admin 200"
         else
+          prepare_schema "${db_url}" "${REHEARSAL_SCHEMA}" false
           boot "${head_dir}" head
           stop_server
           echo "::notice title=[VERIFY] Rehearsal::boot smoke passed (/_health returned 204 on an empty database)"
