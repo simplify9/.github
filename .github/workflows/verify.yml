@@ -92,10 +92,10 @@ on:
         type: boolean
         default: false
       postgres-version:
-        description: PostgreSQL version for jobs that need a database.
+        description: "PostgreSQL major for the strapi job. Empty: the data copy's version (ci/fixture.sql.gz header), else 17."
         required: false
         type: string
-        default: "17"
+        default: ""
     secrets:
       dependabot-alerts-token:
         description: Token able to read Dependabot alerts (critical-vulnerability gate).
@@ -1123,21 +1123,6 @@ jobs:
       packages: read
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    # Throwaway database for the boot smoke and the data-upgrade rehearsal.
-    services:
-      postgres:
-        image: postgres:${{ inputs.postgres-version }}
-        env:
-          POSTGRES_USER: strapi
-          POSTGRES_PASSWORD: strapi
-          POSTGRES_DB: strapi
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U strapi"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -1178,6 +1163,7 @@ jobs:
           base-sha: ${{ github.event.pull_request.base.sha }}
           strapi-changed: ${{ needs.plan.outputs.strapi_changed }}
           working-directory: ${{ inputs.working-directory }}
+          postgres-version: ${{ inputs.postgres-version }}
           package-runner: ${{ steps.install.outputs.runner }}
 
       - name: Collect outcomes

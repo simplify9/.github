@@ -862,7 +862,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `flutter-version` | | `3.x` | Flutter (flutter stack) |
 | `smoke-path` | | `''` | HTTP path probed by `docker-smoke` (dotnet stacks); empty skips the job |
 | `docker-build-github-token` | | `false` | Boolean, opt-in. Mounts the job's `GITHUB_TOKEN` into the docker build as the BuildKit secret `GITHUB_TOKEN` (`RUN --mount=type=secret,id=GITHUB_TOKEN`) for GitHub Packages installs; never in the image. Applies to the docker rung and `docker-smoke` |
-| `postgres-version` | | `17` | PostgreSQL for jobs that need a database (strapi). Our DigitalOcean databases run 17; a newer version restores dumps from older servers, never the reverse. |
+| `postgres-version` | | (empty) | PostgreSQL major for the strapi job. Empty: the version in `ci/fixture.sql.gz`'s header, else 17. A newer version restores dumps from older servers, never the reverse. |
 
 **Secrets** (all optional): `dependabot-alerts-token` (informational `vuln-report`), `nuget-restore-token` (private NuGet feed).
 

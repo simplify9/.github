@@ -1,9 +1,10 @@
 # =============================================================================
 # Strapi Rehearsal
 # =============================================================================
-# Boot smoke and data-upgrade rehearsal for Strapi repos. Needs a Postgres
-# service on localhost:5432 (db/user/password strapi), psql and curl, Node with
-# the HEAD dependencies installed and built.
+# Boot smoke and data-upgrade rehearsal for Strapi repos. Starts Postgres itself
+# (docker, localhost:5432, db/user/password strapi) at the caller's version, else
+# the data copy's, else 17. Needs Docker, psql and curl, Node with the HEAD
+# dependencies installed and built.
 #   strapi-changed=true  restore ci/fixture.sql.gz (or, without one, boot BASE on the
 #                        empty database and generate published entries with seed.py),
 #                        boot the BASE commit, record counts, columns, values and
@@ -21,6 +22,7 @@
 #   strapi-changed     (optional)  'true' to run the rehearsal.
 #   working-directory  (optional)  Directory with package.json.
 #   package-runner     (optional)  npm, yarn or pnpm (verify-web-install output `runner`).
+#   postgres-version   (optional)  Postgres major; empty = the data copy's, else 17.
 # =============================================================================
 name: 'Strapi Rehearsal'
 author: 'Simplify9'
@@ -43,6 +45,10 @@ inputs:
     description: 'Tool that runs package scripts: npm, yarn or pnpm.'
     required: false
     default: 'npm'
+  postgres-version:
+    description: "Postgres major to run. Empty: the version in ci/fixture.sql.gz's header, else 17."
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -54,6 +60,7 @@ runs:
         STRAPI_CHANGED: ${{ inputs.strapi-changed }}
         WORKDIR: ${{ inputs.working-directory }}
         RUNNER_PM: ${{ inputs.package-runner }}
+        PG_INPUT: ${{ inputs.postgres-version }}
         ACTION_PATH: ${{ github.action_path }}
         NODE_ENV: ci
         DATABASE_CLIENT: postgres
@@ -89,6 +96,27 @@ runs:
         schema="$(config_schema "${head_dir}")"
         export REHEARSAL_SCHEMA="${schema:-public}"
 
+        # Postgres for this run: the caller's version, else the data copy's, else 17.
+        pg_v="${PG_INPUT}"; pg_from="input"
+        if [ -z "${pg_v}" ]; then pg_v="$(fixture_pg_major "${head_dir}/ci/fixture.sql.gz")"; pg_from="data copy"; fi
+        if [ -z "${pg_v}" ]; then pg_v=17; pg_from="default"; fi
+        if pg_isready -q -h localhost -p 5432 2> /dev/null; then
+          echo "::notice title=[VERIFY] Rehearsal::Postgres already running on localhost:5432; using it"
+        else
+          docker run -d --name verify-postgres -e POSTGRES_USER=strapi -e POSTGRES_PASSWORD=strapi \
+            -e POSTGRES_DB=strapi -p 5432:5432 "postgres:${pg_v}" > /dev/null
+          # TCP, not the socket: the image's init server listens on the socket only, then restarts.
+          for ((i = 0; i < 90; i++)); do
+            docker exec verify-postgres pg_isready -q -h 127.0.0.1 -U strapi -d strapi && break
+            sleep 1
+          done
+          if ! docker exec verify-postgres pg_isready -q -h 127.0.0.1 -U strapi -d strapi; then
+            echo "::error title=[VERIFY] Rehearsal::Postgres ${pg_v} did not start"
+            exit 1
+          fi
+          echo "::notice title=[VERIFY] Rehearsal::Postgres ${pg_v} (${pg_from})"
+        fi
+
         stop_server() {
           if [ -n "${server_pid}" ]; then
             # setsid made the server a group leader: kill the whole group (node child included).
@@ -111,6 +139,7 @@ runs:
         cleanup() {
           stop_server || true
           git -C "${repo_root}" worktree remove --force "${tmp}/base" 2>/dev/null || true
+          docker rm -f verify-postgres > /dev/null 2>&1 || true
         }
         trap cleanup EXIT
         boot() { # <dir> <label>: start, require health, leave running
