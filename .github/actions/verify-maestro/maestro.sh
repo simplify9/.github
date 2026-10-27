@@ -132,7 +132,7 @@ fi
 for flow in "${flaky[@]+"${flaky[@]}"}"; do echo "::warning title=[VERIFY] maestro::flaky (passed on re-run): ${flow}"; done
 for flow in "${failed[@]+"${failed[@]}"}"; do echo "::error title=[VERIFY] maestro::failed: ${flow}"; done
 if [ "${#network[@]}" -gt 0 ]; then
-  echo "::warning title=[VERIFY] network::${network[*]} passed only with network access; blocked: ${dests:-unknown}. Mock these calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+  echo "::warning title=[VERIFY] network::${network[*]} passed only with network access; blocked: ${dests:-unknown} (Android's own background traffic may be listed too). Mock the app's calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
   echo "network=needed" >> "${GITHUB_OUTPUT}"
 fi
 [ "${#failed[@]}" -eq 0 ]
