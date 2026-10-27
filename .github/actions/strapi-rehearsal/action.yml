@@ -105,6 +105,10 @@ runs:
         }
         trap cleanup EXIT
         boot() { # <dir> <label>: start, require health, leave running
+          if ! fixed_db_config "$1"; then
+            echo "::error title=[VERIFY] Rehearsal::config/database sets the connection settings listed above as fixed values, so Strapi would ignore verify's throwaway database (and could reach a real one). Read them with env('DATABASE_HOST'), env('DATABASE_SCHEMA', 'public') and so on; a password belongs in a secret, not the repo"
+            return 1
+          fi
           start_server "$1" "${tmp}/$2.log"
           if ! wait_health "${health}"; then
             echo "::group::Strapi ($2) log tail"; tail -n 80 "${tmp}/$2.log"; echo "::endgroup::"

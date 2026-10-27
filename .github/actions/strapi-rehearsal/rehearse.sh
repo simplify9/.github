@@ -141,6 +141,25 @@ compare_fingerprints() {
   return "${PIPESTATUS[0]}"
 }
 
+# fixed_db_config <app-dir> -> "file:line key" for each connection setting that config/database.* gives as a
+# fixed string (never the value), exit 1 if any. verify boots Strapi on its throwaway Postgres through the
+# DATABASE_* environment variables; a fixed host or password would send it to a real database instead, and a
+# fixed schema would leave the restored fixture unread. localhost and the public schema are fine.
+fixed_db_config() {
+  local f rc=0
+  for f in "$1"/config/database.ts "$1"/config/database.js "$1"/config/database.mjs "$1"/config/database.cjs; do
+    [ -f "${f}" ] || continue
+    awk -v f="${f#"$1"/}" -v q="[\"'\`]" '
+      $0 ~ "^[ \t]*(host|user|username|password|database|schema|connectionString)[ \t]*:[ \t]*" q {
+        key = $0; sub(/^[ \t]*/, "", key); sub(/[ \t]*:.*/, "", key)
+        val = $0; sub("^[^:]*:[ \t]*" q, "", val); sub(q ".*", "", val)
+        if ((key == "host" && (val == "localhost" || val == "127.0.0.1")) || (key == "schema" && val == "public")) next
+        print f ":" NR " " key
+      }' "${f}" | grep . && rc=1
+  done
+  return "${rc}"
+}
+
 # wait_health <base-url>: poll <base-url>/_health until it returns 204, up to 120 s.
 wait_health() {
   local i code

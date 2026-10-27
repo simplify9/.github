@@ -114,6 +114,48 @@ test_rehearsal_base_prefers_merge_first_parent() {
   cd - > /dev/null || true
   if [ "${out}" = "${c}" ] && [ "${plain}" = "${a}" ]; then ok "$1"; else bad "$1" "merge=${out} want ${c}; plain=${plain} want ${a}"; fi
 }
+fixed_run() { # <config-file-content> -> sets rc and out for fixed_db_config on an app dir holding it
+  rm -rf "${tmp}/app"; mkdir -p "${tmp}/app/config"
+  printf '%s\n' "$1" > "${tmp}/app/config/database.ts"
+  out="$(fixed_db_config "${tmp}/app")"; rc=$?
+}
+test_fixed_db_config_literals_flagged_values_hidden() {
+  fixed_run 'export default ({ env }) => ({
+  connection: {
+    client: "postgres",
+    connection: {
+      host: "db.example.co",
+      port: 25060,
+      database: '"'"'cms-stg'"'"',
+      user: "cms",
+      password: `S3cretPass`,
+      schema: "cms",
+    },
+  },
+});'
+  want=$'config/database.ts:5 host\nconfig/database.ts:7 database\nconfig/database.ts:8 user\nconfig/database.ts:9 password\nconfig/database.ts:10 schema'
+  if [ "${rc}" -eq 1 ] && [ "${out}" = "${want}" ] && ! printf '%s' "${out}" | grep -q S3cret; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+test_fixed_db_config_env_localhost_public_ok() {
+  fixed_run 'export default ({ env }) => ({
+  connection: {
+    client: env("DATABASE_CLIENT", "sqlite"),
+    connection: {
+      host: env("DATABASE_HOST", "db.example.co"),
+      password: process.env.DATABASE_PASSWORD,
+      schema: env("DATABASE_SCHEMA", "public"),
+    },
+    sqlite: { filename: path.join(__dirname, "..", ".tmp/data.db") },
+  },
+});
+const local = { host: "localhost", other: { host: '"'"'127.0.0.1'"'"', schema: "public" } };'
+  if [ "${rc}" -eq 0 ] && [ -z "${out}" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
+test_fixed_db_config_no_file_ok() {
+  rm -rf "${tmp}/app"; mkdir -p "${tmp}/app"
+  out="$(fixed_db_config "${tmp}/app")"; rc=$?
+  if [ "${rc}" -eq 0 ] && [ -z "${out}" ]; then ok "$1"; else bad "$1" "rc=${rc} out=${out}"; fi
+}
 # Needs a Postgres: PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres bash test_rehearse.sh
 test_fingerprints_quoting_no_id_and_empty() {
   if [ -z "${PG_TEST_URL:-}" ]; then echo "SKIP $1 (PG_TEST_URL unset)"; return; fi
