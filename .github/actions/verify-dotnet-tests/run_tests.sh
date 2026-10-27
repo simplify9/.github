@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # verify-dotnet-tests (see action.yml): run the unit or the integration test projects of an already
-# built solution, as sorted by classify.py. Env: KIND (unit|integration), BUILD_TARGET, WORKDIR,
+# built solution, as sorted by classify.py. Env: KIND (unit|integration), BUILD_TARGET (empty: only
+# report has=true|false for KIND, before any build), WORKDIR,
 # RESULTS_DIR (empty: no TRX), GITHUB_OUTPUT. Sourced with RUN_TESTS_LIB=1 for the helpers
 # (test_run_tests_docker.sh).
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,6 +39,11 @@ tmp="$(mktemp -d)"
 cls() { python3 "${here}/classify.py" --dir "${WORKDIR}" "$@"; }
 cls --kind integration > "${tmp}/integration"
 cls --kind unit > "${tmp}/unit"
+# Detection only (no build yet): does the working directory hold projects of this kind?
+if [ -z "${BUILD_TARGET}" ]; then
+  if [ -s "${tmp}/${KIND}" ]; then echo "has=true"; else echo "has=false"; fi >> "${GITHUB_OUTPUT}"
+  exit 0
+fi
 case "${KIND}" in
   unit)
     cls --kind refused --warn > "${tmp}/refused"

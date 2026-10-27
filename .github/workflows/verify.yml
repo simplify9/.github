@@ -17,8 +17,11 @@
 #   contract  per-stack verification contract (verify-contract action)
 #   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke,
 #             network (web on the hosted runner; strapi: install and consistency only)
-#   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test, docker build
-#   docker-smoke  opt-in (smoke-path): run the image and probe an HTTP path
+#   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test (unit projects:
+#             not Testcontainers, never a config with a real connection string), docker build
+#   integration  hosted: test projects referencing Testcontainers (verify-dotnet-tests kind integration)
+#   docker-smoke  on by default for dotnet-service (smoke-path empty = /health; 'none' = off):
+#             run the image and probe an HTTP path
 #   react-native, android, maestro, flutter, strapi
 #             per-stack ladders (see each job)
 #   vuln-report  informational, default-branch PRs only: critical Dependabot alerts
@@ -44,7 +47,7 @@ on:
         type: string
         default: "."
       known-failing:
-        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later (network) are tolerated until their own deadline without being listed."
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test integration build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later (network) are tolerated until their own deadline without being listed."
         required: false
         type: string
         default: ""
@@ -79,7 +82,7 @@ on:
         type: string
         default: "3.x"
       smoke-path:
-        description: HTTP path probed by the docker smoke test (empty skips the HTTP probe).
+        description: "HTTP path the docker smoke test probes. Empty: /health for dotnet-service (on by default), off for dotnet-library. 'none' turns it off."
         required: false
         type: string
         default: ""
@@ -119,6 +122,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       known_failing: ${{ steps.plan.outputs.known_failing }}
+      repo_known_failing: ${{ steps.plan.outputs.repo_known_failing }}
       deps_changed: ${{ steps.plan.outputs.deps_changed }}
       contract_mode: ${{ steps.plan.outputs.contract_mode }}
       strapi_changed: ${{ steps.plan.outputs.strapi_changed }}
@@ -439,16 +443,17 @@ jobs:
           set -euo pipefail
           dotnet restore "$BUILD_TARGET" --force-evaluate -p:WarningsAsErrors=NU1605%3BNU1608%3BNU1107%3BNU1603
 
+      # Unit tests: every test project except Testcontainers ones (the `integration` job) and
+      # refused ones (a config holding a real connection string: never run, named in a warning).
       - name: Test
         id: test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.build.outputs.build-target != '' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') }}
-        shell: bash
-        env:
-          BUILD_TARGET: ${{ steps.build.outputs.build-target }}
-        run: |
-          set -euo pipefail
-          dotnet test "$BUILD_TARGET" --no-build -c Release
+        uses: simplify9/.github/.github/actions/verify-dotnet-tests@main
+        with:
+          kind: unit
+          build-target: ${{ steps.build.outputs.build-target }}
+          working-directory: ${{ inputs.working-directory }}
 
       - name: Detect Dockerfile
         id: dockerfile
@@ -513,11 +518,105 @@ jobs:
             | Failed | `${{ steps.collect.outputs.failed }}` |
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
 
-  # Opt-in (smoke-path set): needs a local Docker daemon, so GitHub-hosted only.
+  # Test projects referencing Testcontainers, on the hosted runner (Docker). They used to run
+  # inside `test`, so they keep `test`'s tolerance (or an explicit `integration` entry); they
+  # are deliberately not a tolerated new step. TRX uploaded on failure.
+  integration:
+    name: integration
+    needs: plan
+    if: startsWith(inputs.stack, 'dotnet-')
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Cheap check first: no Testcontainers project means no .NET setup or build here.
+      - name: Detect integration projects
+        id: detect
+        uses: simplify9/.github/.github/actions/verify-dotnet-tests@main
+        with:
+          kind: integration
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Restore and build
+        id: build
+        if: ${{ steps.detect.outputs.has == 'true' }}
+        uses: simplify9/.github/.github/actions/dotnet-build@main
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
+        with:
+          projects: ${{ inputs.working-directory }}/**/*.csproj
+          run-tests: 'false'
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Integration tests
+        id: integration
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.build.outputs.build-target != '' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' test ') || contains(format(' {0} ', needs.plan.outputs.known_failing), ' integration ') }}
+        uses: simplify9/.github/.github/actions/verify-dotnet-tests@main
+        with:
+          kind: integration
+          build-target: ${{ steps.build.outputs.build-target }}
+          working-directory: ${{ inputs.working-directory }}
+          results-directory: ${{ runner.temp }}/verify-integration
+
+      - name: Upload integration results
+        if: ${{ !cancelled() && steps.integration.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-results
+          path: ${{ runner.temp }}/verify-integration
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          OUTCOME: ${{ steps.integration.outcome }}
+          CONCLUSION: ${{ steps.integration.conclusion }}
+        run: |
+          failed="" warned=""
+          # A build failure here is already reported by the dotnet job's `build`.
+          if [ "$OUTCOME" = "failure" ]; then
+            if [ "$CONCLUSION" = "success" ]; then warned="integration"; else failed="integration"; fi
+          fi
+          {
+            echo "failed=$failed"
+            echo "warned=$warned"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify integration
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Ran | `${{ steps.integration.outputs.ran }}` |
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  # Docker smoke, GitHub-hosted (needs a Docker daemon). On by default for dotnet-service
+  # (smoke-path empty = /health, tolerated as a new step until its own deadline); an explicit
+  # smoke-path keeps its old blocking behaviour; smoke-path: none turns it off.
   docker-smoke:
     name: docker-smoke
     needs: plan
-    if: inputs.smoke-path != '' && startsWith(inputs.stack, 'dotnet-')
+    if: startsWith(inputs.stack, 'dotnet-') && inputs.smoke-path != 'none' && (inputs.smoke-path != '' || inputs.stack == 'dotnet-service')
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     outputs:
@@ -537,14 +636,19 @@ jobs:
 
       - name: Docker smoke
         id: smoke
-        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' smoke ') }}
+        continue-on-error: ${{ contains(format(' {0} ', inputs.smoke-path == '' && needs.plan.outputs.known_failing || needs.plan.outputs.repo_known_failing), ' smoke ') }}
         shell: bash
         env:
-          SMOKE_PATH: ${{ inputs.smoke-path }}
+          SMOKE_PATH: ${{ inputs.smoke-path || '/health' }}
+          DEFAULT_RUN: ${{ inputs.smoke-path == '' }}
           GITHUB_TOKEN: ${{ inputs.docker-build-github-token && github.token || '' }}
           WITH_TOKEN: ${{ inputs.docker-build-github-token }}
         run: |
           set -euo pipefail
+          if [ "$DEFAULT_RUN" = "true" ] && [ ! -f Dockerfile ]; then
+            echo "::notice title=[VERIFY] smoke::no Dockerfile, default smoke skipped"
+            exit 0
+          fi
           if [ "$WITH_TOKEN" = "true" ]; then
             DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t verify .
           else
@@ -587,7 +691,7 @@ jobs:
           details: |
             | Field | Value |
             |-------|-------|
-            | Probe | `${{ inputs.smoke-path }}` |
+            | Probe | `${{ inputs.smoke-path || '/health' }}` |
             | Failed | `${{ steps.collect.outputs.failed }}` |
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
   # React Native ladder (yarn classic). Untrusted PR code runs here: read-only
@@ -1274,7 +1378,7 @@ jobs:
     name: result
     # `if: always()` is essential: a job whose needs were skipped is skipped, and
     # a skipped required check never reports. Verdict is computed from needs results.
-    needs: [plan, contract, node, dotnet, docker-smoke, react-native, android, maestro, flutter, strapi]
+    needs: [plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, strapi]
     if: always()
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5

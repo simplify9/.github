@@ -13,11 +13,13 @@
 #
 # Inputs:
 #   kind               (required)  unit | integration
-#   build-target       (required)  The built solution (dotnet-build's build-target output).
+#   build-target       (optional)  The built solution (dotnet-build's build-target output). Empty:
+#                                  only report `has` (projects of this kind exist), run nothing.
 #   working-directory  (optional)  Directory whose projects are classified. Default ".".
 #   results-directory  (optional)  Write TRX results there. Default: none.
 # Outputs:
 #   ran  "false" when kind integration found no Testcontainers project, else "true".
+#   has  with an empty build-target: "true" when projects of this kind exist.
 # =============================================================================
 name: 'Verify .NET Tests'
 author: 'Simplify9'
@@ -28,8 +30,9 @@ inputs:
     description: 'unit or integration.'
     required: true
   build-target:
-    description: 'The built solution (dotnet-build build-target output).'
-    required: true
+    description: 'The built solution (dotnet-build build-target output). Empty: only report has.'
+    required: false
+    default: ''
   working-directory:
     description: 'Directory whose projects are classified.'
     required: false
@@ -43,6 +46,9 @@ outputs:
   ran:
     description: '"false" when kind integration found no Testcontainers project, else "true".'
     value: ${{ steps.run.outputs.ran }}
+  has:
+    description: 'With an empty build-target: "true" when projects of this kind exist.'
+    value: ${{ steps.run.outputs.has }}
 
 runs:
   using: composite

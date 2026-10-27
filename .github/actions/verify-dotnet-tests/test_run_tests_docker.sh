@@ -45,6 +45,8 @@ inner() {
     eq "${fmt}_integration_fails_on_db_only" "1 0 0" "$(grep -c 'Db.Tests ran' <<< "${out}") $(grep -c 'Real.Tests ran' <<< "${out}") $(grep -c 'Unit.Tests.dll' <<< "${out}")"
     eq "${fmt}_trx_written" 1 "$(find /tmp/trx-$fmt -name '*.trx' | wc -l | tr -d ' ')"
     eq "${fmt}_no_copy_left_dirty" "App.$fmt" "$(filtered_solution "App.$fmt" /dev/null unit)"
+    KIND=integration BUILD_TARGET="" WORKDIR=. RESULTS_DIR="" GITHUB_OUTPUT=/tmp/out-d-$fmt bash "${here}/run_tests.sh" >/dev/null 2>&1
+    eq "${fmt}_detect_has" "has=true" "$(cat /tmp/out-d-$fmt)"
     cd / || exit 1
   done
   mkdir -p /tmp/none && cd /tmp/none && dotnet new classlib -n Only -o src/Only >/dev/null && dotnet new sln -n N --format sln >/dev/null \
@@ -53,6 +55,8 @@ inner() {
   eq none_integration_rc 0 $?
   eq none_integration_ran "ran=false" "$(cat /tmp/out-n)"
   eq none_integration_notice 1 "$(grep -c 'no integration test projects' <<< "${out}")"
+  KIND=integration BUILD_TARGET="" WORKDIR=. RESULTS_DIR="" GITHUB_OUTPUT=/tmp/out-nd bash "${here}/run_tests.sh" >/dev/null 2>&1
+  eq none_detect_has "has=false" "$(cat /tmp/out-nd)"
 }
 
 case "${1:-}" in
