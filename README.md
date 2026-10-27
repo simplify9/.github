@@ -912,6 +912,8 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 | `script:<name>` | `web`: `lint`, `typecheck`, `test`, `build`, `test:e2e`; `react-native`: `lint`, `typecheck`, `test`; `strapi`: `build` | that script in `package.json` |
 | `align-deps` | `react-native` | `@rnx-kit/align-deps` in `devDependencies` |
 | `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
+| `maestro-journeys` | `react-native` | at least 3 flow files directly in `.maestro/` (`smoke.yaml` counts; `config.yaml` and subfolders don't) (since 2026-11-03) |
+| `e2e-mocks` | `react-native` | `e2e/mocks.json`, a Mockoon environment file the app's API calls are served from in CI (since 2026-11-03) |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
 | `playwright` | `web` | `@playwright/test` in `devDependencies` and a `playwright.config.{ts,js,mjs,cjs}` in the project directory (since 2026-11-03) |
 

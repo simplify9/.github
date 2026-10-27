@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 
@@ -26,7 +27,7 @@ SCRIPTS = {
 SKIP_DIRS = {".git", "node_modules", "bin", "obj", "build", ".dart_tool", ".yarn", "Pods"}
 STACKS = set(NODE) | {"dotnet-service", "dotnet-library", "flutter", "infra"}
 # Items added after v1, with the day they shipped (spec 4.3). Their deadline is never before since + GRACE_DAYS.
-SINCE = {"playwright": "2026-11-03"}
+SINCE = {"playwright": "2026-11-03", "maestro-journeys": "2026-11-03", "e2e-mocks": "2026-11-03"}
 GRACE_DAYS = 56
 PLAYWRIGHT_CONFIGS = {"playwright.config." + e for e in ("ts", "js", "mjs", "cjs")}
 
@@ -74,6 +75,9 @@ def missing_items(stack, files, package_json, csproj_count, has_health_mapping):
     if stack == "react-native":
         need("@rnx-kit/align-deps" in pkg.get("devDependencies", {}), "align-deps")
         need(".maestro/smoke.yaml" in files, "maestro-smoke")
+        flows = [f for f in files if re.fullmatch(r"\.maestro/[^/]+\.ya?ml", f) and f not in (".maestro/config.yaml", ".maestro/config.yml")]
+        need(len(flows) >= 3, "maestro-journeys")
+        need("e2e/mocks.json" in files, "e2e-mocks")
     elif stack == "flutter":
         need(any(f.startswith("test/") and f.endswith("_test.dart") for f in files), "widget-test")
     return out
