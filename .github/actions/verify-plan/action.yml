@@ -10,6 +10,7 @@
 #   repository         (optional)  owner/repo for the PR files API.
 #   pr-number          (optional)  Pull request number (ignored on workflow_dispatch).
 #   known-failing      (optional)  Space-separated step ids tolerated until the deadline.
+#                                  New step ids (scope.sh NEW_STEPS) are added until their own deadline.
 #   deadline           (optional)  YYYY-MM-DD; empty means warn mode, known-failing never expires.
 #   github-token       (optional)  Token with pull-requests: read.
 # Outputs: known_failing, deps_changed, contract_mode, strapi_changed.
@@ -46,7 +47,7 @@ inputs:
 
 outputs:
   known_failing:
-    description: 'The known-failing list before the deadline, else empty.'
+    description: 'The known-failing list before the deadline (else empty), plus new step ids still within their own grace period.'
     value: ${{ steps.plan.outputs.known_failing }}
   deps_changed:
     description: 'true when dependency files changed (always true on workflow_dispatch).'
@@ -78,7 +79,7 @@ runs:
         # shellcheck source=scope.sh
         source "${ACTION_PATH}/scope.sh"
         today="$(date -u +%F)"
-        known="$(known_failing_effective "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
+        known="$(effective_known_failing "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
         mode="$(contract_mode "${DEADLINE}" "${today}")"
         deps=true
         strapi=false

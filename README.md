@@ -217,9 +217,11 @@ for every repository.
 │   │   ├── xcode-export/
 │   │   ├── verify-plan/ verify-contract/ verify-web-install/
 │   │   ├── verify-node-deps/ verify-web-smoke/ strapi-rehearsal/
+│   │   ├── verify-web-e2e/ verify-netblock/ verify-secret-scan/
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
 │   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
+├── starters/                    <- copyable test starters per stack (web-playwright: verify's web e2e journeys)
 ├── workflow-templates/          <- org starter templates (*.yml + *.properties.json)
 └── dependabot-templates/        <- ready-made per-category `dependabot.yml` configs for consumer repos to copy
 ```
@@ -870,18 +872,34 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 | Stack | Steps |
 |---|---|
-| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` (`e2e`) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`) |
+| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` under the network block (`e2e`, see below) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`, not blocked); `network` when the journeys passed only with network access. Runs on the GitHub-hosted runner |
 | `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
 | `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test`, `docker` (no-push build when a `Dockerfile` exists); opt-in `smoke` (`docker-smoke`, .NET only, needs `smoke-path`) |
 | `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (emulator smoke) |
 | `flutter` | `install`, `analyze`, `test`, `build` (debug APK) |
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
 
+**Web end-to-end (`e2e`).** When `package.json` has a `test:e2e` script (Playwright; starter in `starters/web-playwright/`):
+1. Committed `e2e/**/*.har`, the files next to each `.har` (response bodies of an `attach` recording; source code and media excepted) and `e2e/mocks.json` are scanned with `verify-secret-scan`; personal data, real tokens, credential headers or cookies (pretty-printed or not) and passwords fail the step. Zipped recordings (`e2e/**/*.zip`) are refused, because they cannot be scanned.
+2. Chromium is installed (the repo's Playwright version), then **outbound network is blocked** for everything `test:e2e` starts, the app server included. Allowed:
+   - loopback (the app, Mockoon)
+   - the hosts listed in `e2e/allowed-hosts.txt`: third-party SDKs only, one host name or IP per line, `#` comments; no scheme, port, path or wildcard. Each is resolved once and pinned in `/etc/hosts`.
+3. With `e2e/mocks.json` (a Mockoon environment file), Mockoon serves it on `127.0.0.1:3901` with proxying off, and `E2E_API_URL=http://127.0.0.1:3901` is exported for the app's server-side calls (for example, under `next start`).
+4. `test:e2e` runs with `CI=true`, `VERIFY_E2E=1` and `NEXT_TELEMETRY_DISABLED=1`.
+   - If it fails while the block rejected traffic, it re-runs once with network access.
+   - Passing then means the app needs a host that is neither mocked nor allowed: `e2e` passes and the `network` step fails, naming the blocked destinations. Until `network`'s own deadline (see "New steps start tolerated") that failure is a warning.
+   - Failing again is a real `e2e` failure.
+5. The job summary names failed and flaky (passed on retry) tests, read from the `list` reporter's output. On failure, `playwright-report/` and `test-results/` are uploaded as the artifact `e2e-report` (5 days).
+
+The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with its real API calls until the contract deadline. The web job runs on the GitHub-hosted runner because the block needs root network control.
+
 `maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
-**Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before the deadline, an error after it. Item ids per stack:
+**New steps start tolerated.** A step id added to the ladder after a repo enrolled is treated as if it were in `known-failing` until the later of `contract-deadline` and the day it shipped + 56 days (forever without a deadline), with no change to the caller. Today that is `network` (web, shipped 2026-11-03: tolerated until 2026-12-29 or the repo's later deadline).
+
+**Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before its deadline, an error after it (see per-item deadlines below). Item ids per stack:
 
 | Item id | Stacks | Requires |
 |---|---|---|
@@ -895,8 +913,11 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `align-deps` | `react-native` | `@rnx-kit/align-deps` in `devDependencies` |
 | `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
+| `playwright` | `web` | `@playwright/test` in `devDependencies` and a `playwright.config.{ts,js,mjs,cjs}` in the project directory (since 2026-11-03) |
 
 `stack: infra` has no contract items.
+
+**Per-item deadlines.** Items added after the first contract version carry the day they shipped (above). Each one turns from a warning into an error at the later of the repo's `contract-deadline` and its ship date + 56 days, so a new requirement never fails a repo sooner than 8 weeks after it appears. Every other item uses `contract-deadline` itself. Without a valid `contract-deadline`, all items stay warnings.
 
 **Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. It works out each repo's set-up on every run:
 - **Postgres version:** the caller's `postgres-version` if set, else the version in `ci/fixture.sql.gz`'s header, else 17. The job starts it itself.
@@ -1022,7 +1043,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 27 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -1089,7 +1110,9 @@ All 26 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-web-install` | Detect the package manager from the lockfile (`detect_pm.sh`), set up Node, install from the lockfile without modifying it | `working-directory`, `node-version` | `package-manager` (`npm`/`yarn`/`yarn-berry`/`pnpm`), `runner` |
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
-| `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures; later HAR and mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), JWTs, private keys, common tokens, connection strings with a password and a non-local host; `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
+| `verify-web-e2e` | The web `e2e` step: scan `e2e/**/*.har` and `e2e/mocks.json`, serve the mocks with Mockoon (`E2E_API_URL`), run `test:e2e` with outbound network blocked (one re-run with network access when blocked traffic may explain a failure), name failed and flaky tests in the summary. Needs a GitHub-hosted runner | `working-directory`, `runner` (required) | `network` (`needed` when the tests passed only with network access) |
+| `verify-netblock` | Script, no `action.yml`: `netblock.sh` (sourced) blocks outbound traffic for the commands it runs (group `verify-offline`, iptables owner match) except loopback and the hosts of an allowed-hosts file, resolved once and pinned in `/etc/hosts`. Needs `sudo` and iptables | - | - |
+| `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures, Playwright HAR recordings, Mockoon mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), signed JWTs (an unsigned mock token, `{"alg":"none"}` with an empty signature, passes), private keys, common tokens, connection strings with a password and a non-local host, credential headers with a value (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `Api-Key`, `X-Auth-Token`, as HAR `name`/`value` or Mockoon `key`/`value`) and non-empty password fields (JSON, escaped JSON in a HAR `postData`, form-encoded); `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
 | `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, scan and restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts, columns, column values and content-API responses plus `/admin` 200, except lines the PR adds to `ci/rehearsal-expected-changes.txt` (`rehearse.sh`, `api_check.py`); diffs in artifact `strapi-rehearsal-diff` | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |
 
 ### Shared

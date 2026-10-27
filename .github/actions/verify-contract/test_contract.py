@@ -6,17 +6,27 @@ from datetime import date
 import contract as c
 
 WEB_PKG = {"scripts": {k: "x" for k in ("lint", "typecheck", "test", "build", "test:e2e")},
-           "engines": {"node": ">=20"}}
+           "engines": {"node": ">=20"}, "devDependencies": {"@playwright/test": "1"}}
+WEB_FILES = {"yarn.lock", "playwright.config.ts"}
 
 
 class MissingItems(unittest.TestCase):
     def test_web_complete_has_nothing_missing(self):
-        self.assertEqual(c.missing_items("web", {"yarn.lock"}, WEB_PKG, 0, False), [])
+        self.assertEqual(c.missing_items("web", WEB_FILES, WEB_PKG, 0, False), [])
+
+    def test_web_missing_playwright(self):
+        pkg = dict(WEB_PKG, devDependencies={})
+        self.assertEqual(c.missing_items("web", WEB_FILES, pkg, 0, False), ["playwright"])
+
+    def test_web_playwright_needs_root_config(self):
+        files = {"yarn.lock", "e2e/playwright.config.ts"}
+        self.assertEqual(c.missing_items("web", files, WEB_PKG, 0, False), ["playwright"])
 
     def test_web_missing_e2e(self):
         pkg = {"scripts": {k: "x" for k in ("lint", "typecheck", "test", "build")},
-               "packageManager": "yarn@4"}
-        self.assertEqual(c.missing_items("web", {"yarn.lock"}, pkg, 0, False), ["script:test:e2e"])
+               "packageManager": "yarn@4", "devDependencies": {"@playwright/test": "1"}}
+        self.assertEqual(c.missing_items("web", {"yarn.lock", "playwright.config.mjs"}, pkg, 0, False),
+                         ["script:test:e2e"])
 
     def test_dotnet_single_project_does_not_need_cpm(self):
         files = {"packages.lock.json", "global.json", "Api/Api.csproj", "Api.Tests/Api.Tests.csproj", "Dockerfile"}
@@ -78,6 +88,31 @@ class Mode(unittest.TestCase):
 
     def test_mode_garbage_deadline_is_warn(self):
         self.assertEqual(c.mode_for("soon", self.today), "warn")
+
+
+class ItemDeadlines(unittest.TestCase):
+    def test_item_deadline_v1_uses_repo_deadline(self):
+        self.assertEqual(c.item_deadline("script:test:e2e", "2026-11-10"), date(2026, 11, 10))
+
+    def test_item_deadline_new_item_is_later_of_repo_and_grace(self):
+        self.assertEqual(c.item_deadline("playwright", "2026-11-10"), date(2026, 12, 29))
+        self.assertEqual(c.item_deadline("playwright", "2027-02-01"), date(2027, 2, 1))
+
+    def test_item_deadline_empty_or_invalid_repo_is_never(self):
+        for repo in ("", "soon"):
+            self.assertIsNone(c.item_deadline("playwright", repo))
+            self.assertIsNone(c.item_deadline("lockfile", repo))
+
+    def test_item_levels_mixed(self):
+        missing = ["script:test:e2e", "playwright"]
+        self.assertEqual(c.item_levels(missing, "2026-11-10", date(2026, 12, 1)),
+                         {"script:test:e2e": "error", "playwright": "warning"})
+        self.assertEqual(c.item_levels(missing, "2026-11-10", date(2026, 12, 29)),
+                         {"script:test:e2e": "error", "playwright": "error"})
+
+    def test_item_levels_no_repo_deadline_warns_forever(self):
+        self.assertEqual(c.item_levels(["playwright", "lockfile"], "", date(2030, 1, 1)),
+                         {"playwright": "warning", "lockfile": "warning"})
 
 
 if __name__ == "__main__":

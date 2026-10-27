@@ -15,8 +15,8 @@
 # Jobs:
 #   plan      scope gate: effective known-failing list, deps_changed, contract_mode
 #   contract  per-stack verification contract (verify-contract action)
-#   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke
-#             (strapi: install and consistency only)
+#   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke,
+#             network (web on the hosted runner; strapi: install and consistency only)
 #   dotnet    .NET ladder: build, consistency (NU1605/NU1608/NU1107/NU1603), test, docker build
 #   docker-smoke  opt-in (smoke-path): run the image and probe an HTTP path
 #   react-native, android, maestro, flutter, strapi
@@ -44,7 +44,7 @@ on:
         type: string
         default: "."
       known-failing:
-        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e bundle android maestro analyze docker smoke rehearsal)."
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later (network) are tolerated until their own deadline without being listed."
         required: false
         type: string
         default: ""
@@ -186,7 +186,9 @@ jobs:
     name: node
     needs: plan
     if: inputs.stack == 'web' || inputs.stack == 'strapi'
-    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    # web always runs hosted: the e2e network block needs root network control (iptables),
+    # which the office runner pods do not have by design (CapEff 0).
+    runs-on: ${{ inputs.stack == 'web' && (vars.S9_HOSTED_RUNNER || 'ubuntu-24.04') || vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     outputs:
       failed: ${{ steps.collect.outputs.failed }}
@@ -310,17 +312,38 @@ jobs:
             echo "has=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Hermetic: outbound network blocked except loopback and e2e/allowed-hosts.txt;
+      # e2e/mocks.json served by Mockoon as E2E_API_URL; HAR/mocks scanned first.
       - name: E2E (repo Playwright script)
         id: e2e
         if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.stack == 'web' && steps.e2e-probe.outputs.has == 'true' && (steps.build.outcome == 'success' || steps.build.outcome == 'skipped') }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        uses: simplify9/.github/.github/actions/verify-web-e2e@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          runner: ${{ steps.install.outputs.runner }}
+
+      # The journeys passed only after a re-run with network access: the app calls a
+      # host that is neither mocked nor in e2e/allowed-hosts.txt.
+      - name: Network block
+        id: network
+        if: ${{ !cancelled() && steps.e2e.outputs.network == 'needed' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' network ') }}
         shell: bash
-        env:
-          RUNNER: ${{ steps.install.outputs.runner }}
         run: |
-          set -euo pipefail
-          npx playwright install --with-deps chromium
-          "${RUNNER}" run test:e2e
+          echo "::error title=[VERIFY] network::e2e passed only with network access (blocked destinations in the e2e step). Mock those calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+          exit 1
+
+      - name: Upload e2e evidence
+        if: ${{ !cancelled() && steps.e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: |
+            ${{ inputs.working-directory }}/playwright-report
+            ${{ inputs.working-directory }}/test-results
+          retention-days: 5
+          if-no-files-found: ignore
 
       # No e2e script: fallback smoke test until the contract deadline (after it
       # the contract job already fails). Reported under the canonical id `e2e`.
@@ -342,7 +365,7 @@ jobs:
           python3 - <<'PY'
           import json, os
           steps = json.loads(os.environ["STEPS"])
-          ids = ["install", "consistency", "lint", "typecheck", "test", "build", "worker-dry-run", "e2e", "smoke"]
+          ids = ["install", "consistency", "lint", "typecheck", "test", "build", "worker-dry-run", "e2e", "smoke", "network"]
           failed, warned = [], []
           for i in ids:
               s = steps.get(i)
