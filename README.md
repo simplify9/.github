@@ -876,7 +876,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
 | `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test`, `docker` (no-push build when a `Dockerfile` exists); opt-in `smoke` (`docker-smoke`, .NET only, needs `smoke-path`) |
 | `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (emulator smoke) |
-| `flutter` | `install`, `analyze`, `test`, `build` (debug APK) |
+| `flutter` | `install`, `analyze`, `test`, `build` (debug APK; on GitHub-hosted runners the job first frees ~20 GB of unused toolchains, as the android job does) |
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
 
 **Web end-to-end (`e2e`).** When `package.json` has a `test:e2e` script (Playwright; starter in `starters/web-playwright/`):

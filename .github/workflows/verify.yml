@@ -1043,6 +1043,23 @@ jobs:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
+      # Hosted runners have ~14 GB free; a Flutter app's debug APK build ran out ("No space
+      # left on device"). Same reclaim as the android job, hosted runners only.
+      - name: Free disk space
+        if: ${{ runner.environment == 'github-hosted' }}
+        shell: bash
+        working-directory: .
+        run: |
+          set -uo pipefail
+          sudo rm -rf /usr/share/dotnet            || true
+          sudo rm -rf /opt/ghc /usr/local/.ghcup   || true
+          sudo rm -rf /usr/share/swift             || true
+          sudo rm -rf /usr/local/share/powershell  || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL  || true
+          sudo rm -rf /usr/local/share/boost       || true
+          docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | sed 's/^/    /'
+
       - name: Checkout PR
         uses: actions/checkout@v7
         with:
