@@ -6,6 +6,11 @@ Run by DevOps on a machine with Docker, never in CI:
   SRC_DB='postgres://readonly_user:...@host:5432/db' \\
     python3 scripts/strapi-fixture/strapi_fixture.py --source-env SRC_DB --repo ../some-cms
 
+A database that only accepts connections from inside its cluster is streamed out by cluster-dump.sh instead:
+
+  scripts/strapi-fixture/cluster-dump.sh CONTEXT NAMESPACE SECRET [SCHEMA] \\
+    | python3 scripts/strapi-fixture/strapi_fixture.py --source-dump - [--schema SCHEMA] --repo ../some-cms
+
 The source database is only read (pg_dump). Everything else happens in a throwaway local Postgres
 container: personal data and secrets are replaced, the result is scanned with
 .github/actions/verify-secret-scan/scan.py, and only a clean dump is written to <repo>/ci/fixture.sql.gz.
@@ -19,6 +24,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -36,6 +42,7 @@ PII_NAME = re.compile(r"(?i)(^|_)(e_?mail|phone|mobile|msisdn|national_?id|ip|ip
 EMAIL_NAME = re.compile(r"(?i)(^|_)e_?mail(_|$)")
 SECRET_KEY = re.compile(r"(?i)^(secret|client_?secret|password|api_?key|access_?token|private_?key|key)$")
 HANDLED = {("admin_users", "email"), ("up_users", "email")}
+DUMP_COMPLETE = b"-- PostgreSQL database dump complete"
 # Content history stores full entry snapshots, so it would carry copies of the personal data scrubbed below.
 EMPTIED = scan.STRAPI_SECRET_TABLES | {"strapi_history_versions"}
 
@@ -159,6 +166,55 @@ def sanitize_sql(columns, pii, truncate):
     return "\n".join(out) + "\n"
 
 
+def source_dump_cmd(schema):
+    """pg_dump of the source: the whole database for public (pg_dump --schema=public emits CREATE SCHEMA public,
+    which does not restore into a fresh database), only the CMS's own schema otherwise."""
+    cmd = "pg_dump --no-owner --no-privileges"
+    return cmd if schema == "public" else cmd + " --schema=" + shlex.quote(q(schema))
+
+
+def dump_server_major(head):
+    """The source server's major version from a plain pg_dump's header, or None."""
+    m = re.search(rb"^-- Dumped from database version (\d+)", head, re.M)
+    return int(m.group(1)) if m else None
+
+
+def image_major(image):
+    """17 for postgres:17, postgres:17-alpine or postgres:17.4; None when the tag has no version."""
+    m = re.search(r":(\d+)", image)
+    return int(m.group(1)) if m else None
+
+
+def keep_schema_sql(schema):
+    """SQL for the throwaway database after the restore: drop every other schema (an API sharing the database
+    never reaches the fixture), then move the CMS's tables and sequences from `schema` into public, where
+    verify's Strapi boots (DATABASE_SCHEMA is unset in CI)."""
+    return r"""DO $$
+DECLARE target text := """ + lit(schema) + r"""; r record;
+BEGIN
+  FOR r IN SELECT nspname FROM pg_namespace
+           WHERE nspname NOT IN ('public', 'information_schema', target) AND nspname NOT LIKE 'pg\_%' LOOP
+    EXECUTE format('DROP SCHEMA %I CASCADE', r.nspname);
+  END LOOP;
+  IF target = 'public' THEN RETURN; END IF;
+  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public') THEN
+    RAISE EXCEPTION 'the dump has tables in public as well as in %: dump only the CMS schema', target;
+  END IF;
+  FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = target AND c.relkind IN ('r', 'p') LOOP
+    EXECUTE format('ALTER TABLE %I.%I SET SCHEMA public', target, r.relname);
+  END LOOP;
+  -- Sequences owned by a column moved with their table; this moves the rest.
+  FOR r IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = target AND c.relkind = 'S' LOOP
+    EXECUTE format('ALTER SEQUENCE %I.%I SET SCHEMA public', target, r.relname);
+  END LOOP;
+  -- No CASCADE: anything else left in the schema (a view, a function) must fail loudly.
+  EXECUTE format('DROP SCHEMA %I', target);
+END $$;
+"""
+
+
 def blank_secrets(value):
     """Recursively replace string values under secret-looking keys with ""."""
     if isinstance(value, dict):
@@ -199,23 +255,43 @@ def _core_store_updates(name):
     return out
 
 
-def main(argv):
+def parse_args(argv):
     ap = argparse.ArgumentParser(description="Make a sanitized Strapi fixture (ci/fixture.sql.gz).")
-    ap.add_argument("--source-env", required=True, help="name of the environment variable holding the source Postgres URL")
+    source = ap.add_mutually_exclusive_group(required=True)
+    source.add_argument("--source-env", help="name of the environment variable holding the source Postgres URL")
+    source.add_argument("--source-dump", help="a plain-SQL pg_dump of the source ('-' for stdin), e.g. from cluster-dump.sh")
+    ap.add_argument("--schema", default="public", help="the CMS's schema in the source (its DATABASE_SCHEMA)")
     ap.add_argument("--repo", required=True, help="the Strapi repository checkout to write ci/fixture.sql.gz into")
     ap.add_argument("--truncate", action="append", default=[], help="empty this table (repeatable), e.g. form submissions")
     ap.add_argument("--postgres-image", default="postgres:17",
                     help="must match the repo's verify postgres-version and be >= the source server's major version")
-    a = ap.parse_args(argv)
-    if not os.environ.get(a.source_env):
+    return ap.parse_args(argv)
+
+
+def _restore_stream(name, fh, restore, first):
+    """Feed a dump (its first chunk already read) from fh into the throwaway's psql; True when the dump ran to
+    pg_dump's closing line."""
+    p = subprocess.Popen(["docker", "exec", "-i", name, "bash", "-c", restore], stdin=subprocess.PIPE)
+    p.stdin.write(first)
+    tail = first[-4096:]
+    for chunk in iter(lambda: fh.read(1 << 16), b""):
+        p.stdin.write(chunk)
+        tail = (tail + chunk)[-4096:]
+    p.stdin.close()
+    if p.wait() != 0:
+        raise subprocess.CalledProcessError(p.returncode, p.args)
+    return DUMP_COMPLETE in tail
+
+
+def main(argv):
+    a = parse_args(argv)
+    if a.source_env and not os.environ.get(a.source_env):
         print("environment variable %s is empty" % a.source_env, file=sys.stderr)
         return 2
     ci_dir = os.path.join(a.repo, "ci")
     pii_entries = parse_list_file(os.path.join(ci_dir, "fixture-pii.txt"))
     pii_extra = {tuple(e.split(".", 1)) for e in pii_entries if "." in e}
     name = "strapi-fixture-%d" % os.getpid()
-    src = pg_env(os.environ[a.source_env])
-    env = dict(os.environ, **src)
     try:
         _run(["docker", "run", "-d", "--rm", "--name", name, "-e", "POSTGRES_PASSWORD=fixture",
               "-e", "POSTGRES_DB=fixture", a.postgres_image], capture_output=True)
@@ -227,14 +303,31 @@ def main(argv):
         else:
             print("throwaway Postgres did not become ready", file=sys.stderr)
             return 1
-        print("copying the source database into the throwaway container (read-only on the source)")
-        # libpq reads the source from PG* variables copied from this process's environment (`-e NAME`
-        # without a value), so the password is in no argv, on the host or in the container.
-        pass_env = [x for k in sorted(src) for x in ("-e", k)]
-        _run(["docker", "exec"] + pass_env + [name, "bash", "-o", "pipefail", "-c",
-              "pg_dump --no-owner --no-privileges | PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=postgres PGDATABASE=fixture "
-              "PGPASSWORD= PGSSLMODE=disable psql -v ON_ERROR_STOP=1 -q > /dev/null"],
-             env=env)
+        restore = ("PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=postgres PGDATABASE=fixture PGPASSWORD= PGSSLMODE=disable "
+                   "psql -v ON_ERROR_STOP=1 -q > /dev/null")
+        if a.source_env:
+            print("copying the source database into the throwaway container (read-only on the source)", flush=True)
+            # libpq reads the source from PG* variables copied from this process's environment (`-e NAME`
+            # without a value), so the password is in no argv, on the host or in the container.
+            src = pg_env(os.environ[a.source_env])
+            pass_env = [x for k in sorted(src) for x in ("-e", k)]
+            _run(["docker", "exec"] + pass_env + [name, "bash", "-o", "pipefail", "-c",
+                  source_dump_cmd(a.schema) + " | " + restore], env=dict(os.environ, **src))
+        else:
+            fh = sys.stdin.buffer if a.source_dump == "-" else open(a.source_dump, "rb")
+            first = fh.read(1 << 16)
+            src_major, img_major = dump_server_major(first), image_major(a.postgres_image)
+            if src_major and img_major and src_major > img_major:
+                print("the source is Postgres %d: run again with PG_IMAGE=postgres:%d for cluster-dump.sh and "
+                      "--postgres-image postgres:%d, and set postgres-version: '%d' in the repo's verify caller"
+                      % ((src_major,) * 4), file=sys.stderr)
+                return 1
+            print("restoring the dump into the throwaway container", flush=True)
+            complete = _restore_stream(name, fh, restore, first)
+            if not complete:
+                print("the dump ended early (no pg_dump closing line): check cluster-dump.sh's errors above", file=sys.stderr)
+                return 1
+        _psql(name, sql=keep_schema_sql(a.schema))
         columns = [tuple(l.split("\t")) for l in _psql(name, query=(
             "SELECT table_name, column_name, data_type FROM information_schema.columns "
             "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position")).splitlines()]

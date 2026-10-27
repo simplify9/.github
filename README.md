@@ -936,6 +936,20 @@ SRC_DB='postgres://readonly_user:...@host:5432/db' \
   python3 scripts/strapi-fixture/strapi_fixture.py --source-env SRC_DB --repo ../some-cms [--truncate form_submissions]
 ```
 
+**A database only reachable from its cluster** (most DigitalOcean databases restrict trusted sources) is streamed out by a temporary pod that logs in with the CMS's own Kubernetes secret, read-only:
+
+```bash
+scripts/strapi-fixture/cluster-dump.sh <context> <namespace> <cms-secret> [<schema>] \
+  | python3 scripts/strapi-fixture/strapi_fixture.py --source-dump - [--schema <schema>] --repo ../some-cms
+```
+
+- The secret must hold `DATABASE_HOST`, `_PORT`, `_NAME`, `_USERNAME` and `_PASSWORD`. The pod is deleted on exit.
+- The raw dump goes straight into the throwaway container, never to disk. A dump that ends early stops the tool.
+
+Either way:
+- `--schema` is the CMS's `DATABASE_SCHEMA` when it isn't `public`.
+  - Only that schema is copied, and it moves into `public`, where verify boots Strapi.
+  - Every other schema is dropped, such as an API that shares the database.
 - The source URL is read from the named environment variable, never from the command line. The source is only read (`pg_dump`); use **staging**. A production source needs approval and a read-only role.
 - In a throwaway local Postgres it:
   - anonymizes admin users; the lowest-id Super Admin becomes the **CI admin** `ci-admin@example.invalid`, password `VerifyCiOnly-1`, created if missing
