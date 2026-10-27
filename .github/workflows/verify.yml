@@ -916,15 +916,6 @@ jobs:
             echo "::notice title=[VERIFY] maestro::no .maestro/smoke.yaml - smoke skipped (the contract job reports maestro-smoke)"
           fi
 
-      # udev rule from GitHub's 2024-04-02 changelog (KVM on hosted Linux runners).
-      - name: Enable KVM
-        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
-        shell: bash
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
       - name: Download APK
         id: apk
         if: ${{ !cancelled() && steps.flow.outputs.present == 'true' }}
@@ -957,38 +948,37 @@ jobs:
         shell: bash
         run: yarn install --frozen-lockfile
 
-      # A debug APK loads its JS from Metro (adb reverse below).
-      - name: Start Metro
-        id: metro
-        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
-        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
-        shell: bash
-        run: |
-          nohup npx react-native start --port 8081 > "$RUNNER_TEMP/metro.log" 2>&1 &
-          echo "Metro started in background"
-
-      - name: Install Maestro
-        id: maestro-cli
-        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
-        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
-        shell: bash
-        env:
-          MAESTRO_VERSION: 2.11.0
-        run: |
-          set -euo pipefail
-          curl -fsSL "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-
-      - name: Smoke flow (emulator)
+      # Hermetic journeys: the emulator, Metro and Maestro run with outbound network blocked
+      # except loopback and e2e/allowed-hosts.txt; e2e/mocks.json is served by Mockoon and
+      # forwarded into the emulator as E2E_API_URL=http://localhost:3901.
+      - name: Maestro journeys (emulator)
         id: smoke
-        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' && steps.metro.outcome == 'success' && steps.maestro-cli.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: simplify9/.github/.github/actions/verify-maestro@main
         with:
-          api-level: 34
-          arch: x86_64
           working-directory: ${{ inputs.working-directory }}
-          script: adb install -r ${{ runner.temp }}/apk/*.apk && adb reverse tcp:8081 tcp:8081 && maestro test .maestro/smoke.yaml
+          apk: ${{ runner.temp }}/apk/*.apk
+
+      # The flows passed only after a re-run with network access: the app calls a host that
+      # is neither mocked nor in e2e/allowed-hosts.txt.
+      - name: Network block
+        id: network
+        if: ${{ !cancelled() && steps.smoke.outputs.network == 'needed' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' network ') }}
+        shell: bash
+        run: |
+          echo "::error title=[VERIFY] network::flows passed only with network access (blocked destinations in the Maestro step). Mock those calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+          exit 1
+
+      - name: Upload Maestro evidence
+        if: ${{ !cancelled() && steps.smoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-report
+          path: ${{ runner.temp }}/maestro-report
+          retention-days: 5
+          if-no-files-found: ignore
 
       - name: Collect outcomes
         id: collect
@@ -1001,14 +991,15 @@ jobs:
           import json, os
           steps = json.loads(os.environ["STEPS"])
           failed, warned = [], []
-          # Any rung failing here means the smoke flow could not run: one canonical id.
-          for i in ("apk", "install", "metro", "maestro-cli", "smoke"):
+          # Any rung failing before or in the journeys reports as `maestro`; `network` is its own id.
+          for i in ("apk", "install", "smoke", "network"):
               s = steps.get(i)
               if not s or s.get("outcome") != "failure":
                   continue
+              name = "network" if i == "network" else "maestro"
               lst = warned if s.get("conclusion") == "success" else failed
-              if "maestro" not in lst:
-                  lst.append("maestro")
+              if name not in lst:
+                  lst.append(name)
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write("failed=" + " ".join(failed) + "\n")
               f.write("warned=" + " ".join(warned) + "\n")

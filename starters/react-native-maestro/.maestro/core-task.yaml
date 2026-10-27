@@ -1,0 +1,19 @@
+# Journey 3: the main screen shows data from the API (GET /items in e2e/mocks.json).
+# Replace with this app's core task: the one thing users open it for.
+appId: com.example.app
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 180000
+- tapOn:
+    id: "email"
+- inputText: "user@example.com"
+- tapOn:
+    id: "password"
+- inputText: "not-a-real-password"
+- tapOn: "Sign in"
+- extendedWaitUntil:
+    visible: "First item"
+    timeout: 30000
+- assertVisible: "Second item"

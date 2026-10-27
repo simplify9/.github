@@ -222,7 +222,7 @@ for every repository.
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
 │   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
-├── starters/                    <- copyable test starters per stack (web-playwright: verify's web e2e journeys)
+├── starters/                    <- copyable test starters per stack (web-playwright, react-native-maestro)
 ├── workflow-templates/          <- org starter templates (*.yml + *.properties.json)
 └── dependabot-templates/        <- ready-made per-category `dependabot.yml` configs for consumer repos to copy
 ```
@@ -876,7 +876,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` under the network block (`e2e`, see below) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`, not blocked); `network` when the journeys passed only with network access. Runs on the GitHub-hosted runner |
 | `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
 | `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test`, `docker` (no-push build when a `Dockerfile` exists); opt-in `smoke` (`docker-smoke`, .NET only, needs `smoke-path`) |
-| `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (emulator smoke) |
+| `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (every `.maestro/` flow on an emulator, network-blocked, see below); `network` when flows passed only with network access |
 | `flutter` | `install`, `analyze`, `test`, `build` (debug APK; on GitHub-hosted runners the job first frees ~20 GB of unused toolchains, as the android job does) |
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
 
@@ -895,6 +895,15 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with its real API calls until the contract deadline. The web job runs on the GitHub-hosted runner because the block needs root network control.
 
 `maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
+
+**React Native journeys (`maestro`).** Starter in `starters/react-native-maestro/`.
+1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
+2. An API 34 x86_64 emulator boots with **outbound network blocked** (the emulator, Metro and Maestro run under the block; allowed: loopback and `e2e/allowed-hosts.txt`). If it doesn't boot in 2 attempts, the step fails with "did not boot (infrastructure)", not as a journey failure.
+3. With `e2e/mocks.json`, Mockoon serves it on port 3901, forwarded into the emulator with `adb reverse`. Metro starts with `VERIFY_E2E=1` and `E2E_API_URL=http://localhost:3901`; the app must read them (for example with `babel-plugin-transform-inline-environment-variables`).
+4. Every flow file directly in `.maestro/` runs, `smoke.yaml` first (`config.yaml` and subfolders are not flows).
+   - A failed flow re-runs once; passing then is reported as flaky.
+   - A flow that still fails while the block rejected traffic re-runs once with network access. Passing then means the app needs an unmocked host: `maestro` passes and the `network` step fails, a warning until its deadline.
+5. The summary names passed, flaky, network-only and failed flows. On failure, JUnit files, screenshots, Maestro logs and the Metro and emulator logs are uploaded as `maestro-report` (5 days).
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
