@@ -38,6 +38,16 @@ class ProjectInfo(unittest.TestCase):
     def test_mvc_testing_detected(self):
         self.assertTrue(c.project_info(TEST_SDK % ref("Microsoft.AspNetCore.Mvc.Testing"))["mvc_testing"])
 
+    def test_reference_any_attribute_order_and_quotes(self):
+        text = "<Project><ItemGroup><PackageReference Version=\"4.16.0\" Include='Testcontainers.PostgreSql' />" \
+               "<PackageReference\n    Include = \"Microsoft.NET.Test.Sdk\"\n    Version=\"18.10.0\" /></ItemGroup></Project>"
+        info = c.project_info(text)
+        self.assertTrue(info["testcontainers"])
+        self.assertTrue(info["test"])
+
+    def test_update_is_not_a_reference(self):
+        self.assertFalse(c.project_info('<Project><PackageReference Update="Testcontainers" Version="1" /></Project>')["testcontainers"])
+
     def test_clients_exact_and_prefix(self):
         text = "<Project>%s%s%s</Project>" % (ref("Npgsql.EntityFrameworkCore.PostgreSQL"), ref("StackExchange.Redis"),
                                               ref("Newtonsoft.Json"))
@@ -81,6 +91,20 @@ class Classify(unittest.TestCase):
         write(self.d, "U.Tests/bin/Release/appsettings.json", '{"Db": "Host=db.example.co;Password=s3cr3tvalue"}')
         write(self.d, "U.Tests/obj/x/X.csproj", TEST_SDK % "")
         self.assertEqual(self.kinds(), {"U.Tests/U.Tests.csproj": "unit"})
+
+    def test_directory_build_props_test_project(self):
+        write(self.d, "tests/Directory.Build.props",
+              '<Project><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0" /></ItemGroup></Project>')
+        write(self.d, "tests/Real.Tests/Real.Tests.csproj", '<Project Sdk="Microsoft.NET.Sdk"></Project>')
+        write(self.d, "tests/Real.Tests/appsettings.json", '{"Db": "Host=db.example.co;Password=x"}')
+        write(self.d, "src/Api/Api.csproj", '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>')
+        self.assertEqual(self.kinds(), {"tests/Real.Tests/Real.Tests.csproj": "refused", "src/Api/Api.csproj": None})
+
+    def test_directory_build_targets_adds_testcontainers(self):
+        write(self.d, "Directory.Build.targets",
+              '<Project><ItemGroup Condition="\'$(IsTestProject)\' == \'true\'"><PackageReference Include="Testcontainers" Version="4.16.0" /></ItemGroup></Project>')
+        write(self.d, "I.Tests/I.Tests.csproj", TEST_SDK % "")
+        self.assertEqual(self.kinds(), {"I.Tests/I.Tests.csproj": "integration"})
 
     def test_non_test_project_has_no_kind(self):
         write(self.d, "Api/Api.csproj", '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>')
