@@ -1,0 +1,6 @@
+
+[2mRunning [22m1[2m test using [22m1[2m worker[22m
+
+  [32m✓[39m  [2m1 [22m[chromium] › e2e/green.spec.ts:2:5 › stays green[2m (2ms)[22m
+
+[32m  1 passed[39m[2m (357ms)[22m

@@ -1,0 +1,67 @@
+
+[2mRunning [22m3[2m tests using [22m1[2m worker[22m
+
+  [32m✓[39m  [2m1 [22m[chromium] › e2e/journeys.spec.ts:2:5 › home loads[2m (2ms)[22m
+  [31m✘[39m  [2m2 [22m[31m[chromium] › e2e/journeys.spec.ts:3:5 › sign in works[39m[2m (5ms)[22m
+  [32m✓[39m  [2m3 [22m[chromium] › e2e/journeys.spec.ts:3:5 › sign in works[33m (retry #1)[39m[2m (3ms)[22m
+  [31m✘[39m  [2m4 [22m[31m[chromium] › e2e/journeys.spec.ts:5:7 › orders › list shows items[39m[2m (4ms)[22m
+  [31m✘[39m  [2m5 [22m[31m[chromium] › e2e/journeys.spec.ts:5:7 › orders › list shows items[39m[33m (retry #1)[39m[2m (3ms)[22m
+
+
+[31m  1) [chromium] › e2e/journeys.spec.ts:5:7 › orders › list shows items [2m─────────────────────────────[22m[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"b"[39m
+    Received: [31m"a"[39m
+
+    [0m [90m 3 |[39m test([32m'sign in works'[39m[33m,[39m [36masync[39m ({}[33m,[39m info) [33m=>[39m { expect(info[33m.[39mretry)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m
+     [90m 4 |[39m test[33m.[39mdescribe([32m'orders'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 5 |[39m   test([32m'list shows items'[39m[33m,[39m [36masync[39m () [33m=>[39m { expect([32m'a'[39m)[33m.[39mtoBe([32m'b'[39m)[33m;[39m })[33m;[39m
+     [90m   |[39m                                                      [31m[1m^[22m[39m
+     [90m 6 |[39m })[33m;[39m
+     [90m 7 |[39m[0m
+    [2m    at /work/app/e2e/journeys.spec.ts:5:54[22m
+
+[2m    Error Context: test-results/journeys-orders-list-shows-items-chromium/error-context.md[22m
+
+[90m    Retry #1 [2m───────────────────────────────────────────────────────────────────────────────────────[22m[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"b"[39m
+    Received: [31m"a"[39m
+
+    [0m [90m 3 |[39m test([32m'sign in works'[39m[33m,[39m [36masync[39m ({}[33m,[39m info) [33m=>[39m { expect(info[33m.[39mretry)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m
+     [90m 4 |[39m test[33m.[39mdescribe([32m'orders'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 5 |[39m   test([32m'list shows items'[39m[33m,[39m [36masync[39m () [33m=>[39m { expect([32m'a'[39m)[33m.[39mtoBe([32m'b'[39m)[33m;[39m })[33m;[39m
+     [90m   |[39m                                                      [31m[1m^[22m[39m
+     [90m 6 |[39m })[33m;[39m
+     [90m 7 |[39m[0m
+    [2m    at /work/app/e2e/journeys.spec.ts:5:54[22m
+
+[2m    Error Context: test-results/journeys-orders-list-shows-items-chromium-retry1/error-context.md[22m
+
+[31m  2) [chromium] › e2e/journeys.spec.ts:3:5 › sign in works [2m─────────────────────────────────────────[22m[39m
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m1[39m
+    Received: [31m0[39m
+
+    [0m [90m 1 |[39m [36mimport[39m { test[33m,[39m expect } [36mfrom[39m [32m'@playwright/test'[39m[33m;[39m
+     [90m 2 |[39m test([32m'home loads'[39m[33m,[39m [36masync[39m () [33m=>[39m { expect([35m1[39m)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m
+    [31m[1m>[22m[39m[90m 3 |[39m test([32m'sign in works'[39m[33m,[39m [36masync[39m ({}[33m,[39m info) [33m=>[39m { expect(info[33m.[39mretry)[33m.[39mtoBe([35m1[39m)[33m;[39m })[33m;[39m
+     [90m   |[39m                                                                [31m[1m^[22m[39m
+     [90m 4 |[39m test[33m.[39mdescribe([32m'orders'[39m[33m,[39m () [33m=>[39m {
+     [90m 5 |[39m   test([32m'list shows items'[39m[33m,[39m [36masync[39m () [33m=>[39m { expect([32m'a'[39m)[33m.[39mtoBe([32m'b'[39m)[33m;[39m })[33m;[39m
+     [90m 6 |[39m })[33m;[39m[0m
+    [2m    at /work/app/e2e/journeys.spec.ts:3:64[22m
+
+[2m    Error Context: test-results/journeys-sign-in-works-chromium/error-context.md[22m
+
+[31m  1 failed[39m
+[31m    [chromium] › e2e/journeys.spec.ts:5:7 › orders › list shows items [2m──────────────────────────────[22m[39m
+[33m  1 flaky[39m
+[33m    [chromium] › e2e/journeys.spec.ts:3:5 › sign in works [2m──────────────────────────────────────────[22m[39m
+[32m  1 passed[39m[2m (945ms)[22m
