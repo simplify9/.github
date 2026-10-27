@@ -895,13 +895,22 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `align-deps` | `react-native` | `@rnx-kit/align-deps` in `devDependencies` |
 | `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
-| `strapi-fixture` | `strapi` | `ci/fixture.sql.gz` |
 
 `stack: infra` has no contract items.
 
-**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also does the following:
+**Strapi data-upgrade rehearsal.** The `strapi` job always builds and boots HEAD against an empty Postgres and waits for `/_health` to answer 204. It works out each repo's set-up on every run:
+- **Postgres version:** the caller's `postgres-version` if set, else the version in `ci/fixture.sql.gz`'s header, else 17. The job starts it itself.
+- **Schema:** `DATABASE_SCHEMA=public` is set, so a config like `env('DATABASE_SCHEMA', 'cms')` uses `public`.
+  - A schema fixed in `config/database.*` (`schema: 'cms'`) is created, the data copy is moved into it, and every check reads it.
+  - Base and head must fix the same schema.
+- **Data:** `ci/fixture.sql.gz` when the repo has one.
+  - Otherwise **generated data:** after the base boots on the empty database, `seed.py` inserts the CI admin and one media file row, then creates published entries from the repo's schemas. That is 3 per collection type and 1 per single type, every field filled to its type and rules, components and dynamic zones included.
+  - Relations, passwords and custom fields are left out.
+  - An entry Strapi rejects is reported with its message; no entry at all fails the step.
+  - Generated data needs Strapi 5; a Strapi 4 repo needs a data copy.
+  - The summary and the notice name the mode. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also does the following:
 1. Scans `ci/fixture.sql.gz` with `verify-secret-scan --strapi-dump` and refuses a fixture that holds personal data or secrets.
-2. Restores the fixture into Postgres.
+2. Restores the fixture into Postgres (or, without one, generates data after step 3).
 3. Boots the base commit from a git worktree, so it migrates the fixture.
 4. Boots HEAD on the same database.
 5. Compares, for content tables (Strapi bookkeeping tables `strapi_*`, `admin_*`, `up_*` and `i18n_locale` are excluded):
@@ -916,7 +925,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 The `rehearsal` step fails when any of these happens:
 - either boot is unhealthy
-- the fixture is missing, empty or fails the scan
+- the fixture is empty or fails the scan, or generated data created no entry
 - a table or column was dropped, or a column's type changed
 - any content-table row count or column value changed
 - a content-API response lost or changed something (additions are fine), or a type disappeared
@@ -926,7 +935,7 @@ The `rehearsal` step fails when any of these happens:
 - **Only the lines the PR adds** (head vs base) count. A file merged once cannot loosen the check on later PRs, and bot PRs, which never change it, fail on any data change.
 - Human PRs into `develop` pass instantly, so a developer's lines are first honoured on the promotion PR into the default branch, whose diff contains them.
 - "Base" is the first parent of the merge commit CI checks out (what the PR actually merges onto), falling back to the event's base SHA.
-- Before any boot, `config/database.*` must read its connection settings from the `DATABASE_*` environment. A fixed `host`, `user`, `password`, `database` or `schema` (other than `localhost` and `public`) fails the step and names the line, never the value. A fixed host could reach a real database from CI, and a fixed schema would leave the restored fixture unread.
+- Before any boot, `config/database.*` must read its connection settings from the `DATABASE_*` environment. A fixed `host`, `user`, `password` or `database` (other than `localhost`) fails the step and names the line, never the value: a fixed host could reach a real database from CI. A fixed `schema` is handled (above).
 
 On failure the diffs are uploaded as the artifact `strapi-rehearsal-diff` (5 days).
 
@@ -940,17 +949,19 @@ SRC_DB='postgres://readonly_user:...@host:5432/db' \
 **A database only reachable from its cluster** (most DigitalOcean databases restrict trusted sources) is streamed out by a temporary pod that logs in with the CMS's own Kubernetes secret, read-only:
 
 ```bash
-scripts/strapi-fixture/cluster-dump.sh <context> <namespace> <cms-secret> [<schema>] \
-  | python3 scripts/strapi-fixture/strapi_fixture.py --source-dump - [--schema <schema>] --repo ../some-cms
+scripts/strapi-fixture/cluster-dump.sh <context> <namespace> <cms-secret> \
+  | python3 scripts/strapi-fixture/strapi_fixture.py --source-dump - --repo ../some-cms
 ```
 
-- The secret must hold `DATABASE_HOST`, `_PORT`, `_NAME`, `_USERNAME` and `_PASSWORD`. The pod is deleted on exit.
+- The secret must hold `DATABASE_HOST`, `_PORT`, `_NAME`, `_USERNAME` and `_PASSWORD`, and may hold `DATABASE_SCHEMA`.
+- The pod runs the server's own Postgres major (probed; `PG_IMAGE` overrides) and is deleted on exit.
 - The raw dump goes straight into the throwaway container, never to disk. A dump that ends early stops the tool.
 
 Either way:
-- `--schema` is the CMS's `DATABASE_SCHEMA` when it isn't `public`.
-  - Only that schema is copied, and it moves into `public`, where verify boots Strapi.
+- **Schema:** the tool finds the CMS's schema itself: the one schema in the dump that holds tables.
+  - It moves into `public`, where verify boots Strapi.
   - Every other schema is dropped, such as an API that shares the database.
+  - If tables sit in several schemas, it stops and asks for `--schema` (the CMS's `DATABASE_SCHEMA`).
 - The source URL is read from the named environment variable, never from the command line. The source is only read (`pg_dump`); use **staging**. A production source needs approval and a read-only role.
 - In a throwaway local Postgres it:
   - anonymizes admin users; the lowest-id Super Admin becomes the **CI admin** `ci-admin@example.invalid`, password `VerifyCiOnly-1`, created if missing
@@ -959,7 +970,7 @@ Either way:
   - blanks secret-looking keys in the core store (OAuth provider secrets, email-provider keys)
   - replaces personal-data columns (names containing email, phone, mobile, msisdn, national id or ip, plus the repo's `ci/fixture-pii.txt`)
 - It then scans the dump with `verify-secret-scan` and writes the fixture only if the scan is clean and the file is under 50 MB gzipped.
-- `--postgres-image` (default `postgres:17`) must match the repo's verify `postgres-version` and be at least the source server's major version.
+- **Postgres version:** the throwaway runs the source server's major version (`--postgres-image auto`), read from the dump's header or asked of the server. The fixture's header then tells verify which Postgres to start. An explicit `--postgres-image` must be at least the source's version.
 - Repo files, all one entry per line with `#` comments:
   - `ci/fixture-pii.txt`: `table.column` to scrub. An entry matching no column stops the tool, so typos can't pass silently.
   - `ci/fixture-allow.txt`: public business addresses that are real content, as an address or `@domain`. Never allow-list a personal mailbox domain (gmail.com and similar); scrub that column instead, and the scan says so.

@@ -35,9 +35,10 @@ class MissingItems(unittest.TestCase):
         self.assertEqual(c.missing_items("react-native", {"yarn.lock"}, pkg, 0, False),
                          ["align-deps", "maestro-smoke"])
 
-    def test_strapi_needs_fixture(self):
+    def test_strapi_needs_no_fixture(self):
+        # Generated data covers a repo without ci/fixture.sql.gz, and DevOps (not the repo) makes the copy.
         pkg = {"scripts": {"build": "x"}, "engines": {"node": "20"}}
-        self.assertEqual(c.missing_items("strapi", {"package-lock.json"}, pkg, 0, False), ["strapi-fixture"])
+        self.assertEqual(c.missing_items("strapi", {"package-lock.json"}, pkg, 0, False), [])
 
     def test_flutter_widget_test(self):
         self.assertEqual(c.missing_items("flutter", {"pubspec.lock"}, None, 0, False), ["widget-test"])

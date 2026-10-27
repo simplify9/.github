@@ -67,8 +67,6 @@ def missing_items(stack, files, package_json, csproj_count, has_health_mapping):
         need(".maestro/smoke.yaml" in files, "maestro-smoke")
     elif stack == "flutter":
         need(any(f.startswith("test/") and f.endswith("_test.dart") for f in files), "widget-test")
-    elif stack == "strapi":
-        need("ci/fixture.sql.gz" in files, "strapi-fixture")
     return out
 
 
