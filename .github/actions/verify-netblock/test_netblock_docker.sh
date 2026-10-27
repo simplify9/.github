@@ -55,6 +55,14 @@ inner() {
   eq unresolvable_host_rc 1 "${rc}"
   eq unresolvable_host_named 1 "$(grep -c 'cannot resolve allowed host no-such-host.invalid' <<< "${out}")"
 
+  # netblock_reset forgets traffic rejected so far (an emulator's own boot chatter), keeping the block.
+  netblock_on >/dev/null
+  netblock_run curl -sS -m 5 https://example.org >/dev/null 2>&1
+  eq before_reset_counted 1 "$([ "$(netblock_count)" -gt 0 ] && echo 1 || echo 0)"
+  netblock_reset
+  eq after_reset_zero 0 "$(netblock_count)"
+  eq after_reset_still_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"
+
   # netblock_off lifts the block for the group without restarting anything (mobile network check).
   netblock_on >/dev/null
   eq before_off_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"

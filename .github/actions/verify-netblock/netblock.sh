@@ -10,6 +10,7 @@
 #   netblock_on [FILE]        (re)build the rules; allowed hosts are resolved once and pinned in /etc/hosts
 #   netblock_run CMD...       run CMD blocked (same uid and env, group verify-offline)
 #   netblock_off              lift the block for the group (rules kept; netblock_on restores it)
+#   netblock_reset            forget what was rejected so far (counters and kernel log), block kept
 #   netblock_count            packets rejected since the last netblock_on
 #   netblock_blocked          rejected destinations as ip:port (best effort, from the kernel log)
 
@@ -107,6 +108,16 @@ netblock_off() {
   for ipt in iptables ip6tables; do
     ${sudo} "${ipt}" -w -D OUTPUT -m owner --gid-owner "${NETBLOCK_GROUP}" -j "${NETBLOCK_CHAIN}" 2>/dev/null || true
   done
+}
+
+# Used after an emulator boots: its own system traffic must not count as the app's.
+netblock_reset() {
+  local sudo ipt
+  sudo="$(_nb_sudo)"
+  for ipt in iptables ip6tables; do
+    ${sudo} "${ipt}" -w -Z "${NETBLOCK_CHAIN}" 2>/dev/null || true
+  done
+  ${sudo} dmesg -C 2>/dev/null || true
 }
 
 netblock_count() {

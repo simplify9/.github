@@ -73,6 +73,12 @@ emulator_boot() {
         for k in window_animation_scale transition_animation_scale animator_duration_scale; do
           adb shell settings put global "${k}" 0 >/dev/null 2>&1 || true
         done
+        # Android's own background traffic (private DNS, captive-portal checks, network time) would
+        # otherwise be blocked and counted as the app's. The caller resets the block's counters next.
+        adb shell settings put global private_dns_mode off >/dev/null 2>&1 || true
+        adb shell settings put global captive_portal_mode 0 >/dev/null 2>&1 || true
+        adb shell settings put global captive_portal_detection_enabled 0 >/dev/null 2>&1 || true
+        adb shell settings put global auto_time 0 >/dev/null 2>&1 || true
         echo "[VERIFY] emulator: booted (attempt ${attempt})"
         return 0
         ;;

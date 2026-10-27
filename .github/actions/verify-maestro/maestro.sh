@@ -74,6 +74,9 @@ emulator_boot netblock_run || exit 2
 adb install -r "${apks[0]}" >/dev/null
 adb reverse tcp:8081 tcp:8081 >/dev/null
 [ -f e2e/mocks.json ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
+# Only what happens from here (the app and its flows) counts as blocked traffic.
+sleep 5
+netblock_reset
 
 # run_flow <flow> <attempt> [PREFIX...]: one Maestro run, JUnit and artifacts under ${out}.
 run_flow() {
