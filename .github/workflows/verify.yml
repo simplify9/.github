@@ -44,7 +44,7 @@ on:
         type: string
         default: "."
       known-failing:
-        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e bundle android maestro analyze docker smoke rehearsal)."
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later (network) are tolerated until their own deadline without being listed."
         required: false
         type: string
         default: ""

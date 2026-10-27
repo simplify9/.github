@@ -881,6 +881,8 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
+**New steps start tolerated.** A step id added to the ladder after a repo enrolled is treated as if it were in `known-failing` until the later of `contract-deadline` and the day it shipped + 56 days (forever without a deadline), with no change to the caller. Today that is `network` (web, shipped 2026-11-03: tolerated until 2026-12-29 or the repo's later deadline).
+
 **Verification Contract.** The `contract` job (`verify-contract`) reports which required items a repo lacks: a warning annotation per item before its deadline, an error after it (see per-item deadlines below). Item ids per stack:
 
 | Item id | Stacks | Requires |

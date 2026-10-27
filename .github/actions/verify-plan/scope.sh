@@ -16,6 +16,30 @@ known_failing_effective() {
   if [ -z "$2" ] || [[ "$3" < "$2" ]]; then echo "$1"; else echo ""; fi
 }
 
+# Step ids added after v1 (spec 4.4), as id:own-deadline where own deadline = ship date + 56 days.
+# Each is tolerated (as if listed in known-failing) until the later of its own deadline and the
+# repo's contract-deadline; forever when the repo has no deadline. network: shipped 2026-11-03.
+NEW_STEPS="network:2026-12-29"
+
+# new_steps_tolerated <repo-deadline> <today> -> the new step ids still tolerated
+new_steps_tolerated() {
+  local out="" entry
+  for entry in ${NEW_STEPS}; do
+    if [ -z "$1" ] || [[ "$2" < "${entry#*:}" ]] || [[ "$2" < "$1" ]]; then out="${out} ${entry%%:*}"; fi
+  done
+  echo "${out# }"
+}
+
+# effective_known_failing <list> <repo-deadline> <today> -> known_failing_effective plus the
+# tolerated new steps, without duplicates
+effective_known_failing() {
+  local out="" id
+  for id in $(known_failing_effective "$1" "$2" "$3") $(new_steps_tolerated "$2" "$3"); do
+    case " ${out} " in *" ${id} "*) ;; *) out="${out} ${id}" ;; esac
+  done
+  echo "${out# }"
+}
+
 # contract_mode <deadline> <today> -> warn|enforce (mirrors verify-contract)
 contract_mode() {
   if [ -z "$1" ] || [[ "$2" < "$1" ]]; then echo warn; else echo enforce; fi
