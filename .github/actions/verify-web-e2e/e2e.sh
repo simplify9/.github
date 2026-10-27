@@ -25,6 +25,24 @@ e2e_zip_recordings() {
   (cd "$1" && find e2e -type f -name '*.zip' | LC_ALL=C sort)
 }
 
+# e2e_scan_committed <scan.py>: refuse zipped recordings, scan recordings and mocks (run from the
+# project directory). Shared with verify-maestro.
+e2e_scan_committed() {
+  local -a zips targets
+  mapfile -t zips < <(e2e_zip_recordings .)
+  if [ "${#zips[@]}" -gt 0 ]; then
+    echo "::error title=[VERIFY] e2e::${zips[*]}: zipped recordings cannot be scanned for personal data; record with routeFromHAR(..., { update: true, updateContent: 'embed' }) and commit the .har"
+    return 1
+  fi
+  mapfile -t targets < <(e2e_scan_targets .)
+  [ "${#targets[@]}" -gt 0 ] || return 0
+  echo "[VERIFY] e2e: scanning ${targets[*]}"
+  if ! python3 "$1" "${targets[@]}"; then
+    echo "::error title=[VERIFY] e2e::e2e recordings or mocks hold personal data or secrets (see above); remove or scrub the recording"
+    return 1
+  fi
+}
+
 # e2e_verdict <rc> <blocked-count>: pass | fail (a real failure) | retry (the block may be the cause)
 e2e_verdict() {
   if [ "$1" -eq 0 ]; then echo pass; elif [ "$2" -eq 0 ]; then echo fail; else echo retry; fi
@@ -46,19 +64,7 @@ log="${RUNNER_TEMP}/e2e.log"
 MOCKOON_PID=""
 trap '[ -z "${MOCKOON_PID}" ] || kill "${MOCKOON_PID}" 2>/dev/null || true' EXIT
 
-mapfile -t zips < <(e2e_zip_recordings .)
-if [ "${#zips[@]}" -gt 0 ]; then
-  echo "::error title=[VERIFY] e2e::${zips[*]}: zipped recordings cannot be scanned for personal data; record with routeFromHAR(..., { update: true, updateContent: 'embed' }) and commit the .har"
-  exit 1
-fi
-mapfile -t targets < <(e2e_scan_targets .)
-if [ "${#targets[@]}" -gt 0 ]; then
-  echo "[VERIFY] e2e: scanning ${targets[*]}"
-  if ! python3 "${ACTION_PATH}/../verify-secret-scan/scan.py" "${targets[@]}"; then
-    echo "::error title=[VERIFY] e2e::e2e recordings or mocks hold personal data or secrets (see above); remove or scrub the recording"
-    exit 1
-  fi
-fi
+e2e_scan_committed "${ACTION_PATH}/../verify-secret-scan/scan.py" || exit 1
 netblock_hosts e2e/allowed-hosts.txt >/dev/null
 
 # Everything that needs the internet happens before the block.
