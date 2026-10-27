@@ -13,6 +13,9 @@ import argparse
 import json
 import os
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "verify-dotnet-tests"))
+import classify  # noqa: E402
 from datetime import date, datetime, timedelta
 
 LOCKFILES = {"yarn.lock", "package-lock.json", "pnpm-lock.yaml", "pubspec.lock",
@@ -26,12 +29,12 @@ SCRIPTS = {
 SKIP_DIRS = {".git", "node_modules", "bin", "obj", "build", ".dart_tool", ".yarn", "Pods"}
 STACKS = set(NODE) | {"dotnet-service", "dotnet-library", "flutter", "infra"}
 # Items added after v1, with the day they shipped (spec 4.3). Their deadline is never before since + GRACE_DAYS.
-SINCE = {"playwright": "2026-11-03"}
+SINCE = {"playwright": "2026-11-03", "integration-tests": "2026-11-16"}
 GRACE_DAYS = 56
 PLAYWRIGHT_CONFIGS = {"playwright.config." + e for e in ("ts", "js", "mjs", "cjs")}
 
 
-def missing_items(stack, files, package_json, csproj_count, has_health_mapping):
+def missing_items(stack, files, package_json, csproj_count, has_health_mapping, dotnet_projects=None):
     if stack not in STACKS:
         raise ValueError("unknown stack: %s" % stack)
     if stack == "infra":  # infra repos have no contract items
@@ -65,6 +68,13 @@ def missing_items(stack, files, package_json, csproj_count, has_health_mapping):
     elif stack == "dotnet-library":
         need(cpm, "cpm")
         need(tests, "test-project")
+    # dotnet_projects: verify-dotnet-tests/classify.py output. A refused project (real connection string in
+    # its config) never runs, so it never counts.
+    projects = [p for p in (dotnet_projects or []) if p["kind"] in ("unit", "integration")]
+    if stack == "dotnet-service":
+        need(any(p["mvc_testing"] for p in projects), "integration-tests")
+    elif stack == "dotnet-library" and any(p["clients"] and not p["test"] for p in dotnet_projects or []):
+        need(any(p["kind"] == "integration" for p in projects), "integration-tests")
 
     scripts = pkg.get("scripts", {})
     for s in SCRIPTS.get(stack, []):
@@ -137,7 +147,8 @@ def main():
     if "package.json" in files:
         with open(os.path.join(a.dir, "package.json"), encoding="utf-8") as f:
             pkg = json.load(f)
-    missing = missing_items(a.stack, files, pkg, csprojs, health)
+    dotnet = classify.classify(a.dir) if a.stack.startswith("dotnet") else None
+    missing = missing_items(a.stack, files, pkg, csprojs, health, dotnet)
     print(json.dumps({"mode": mode_for(a.deadline, date.today()), "missing": missing,
                       "levels": item_levels(missing, a.deadline, date.today())}))
 
