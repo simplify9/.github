@@ -1,0 +1,59 @@
+# =============================================================================
+# Verify Flutter E2E
+# =============================================================================
+# The Flutter `e2e` step of verify: runs `flutter test integration_test` on an
+# Android emulator with no outbound network except loopback and
+# e2e/allowed-hosts.txt.
+#   1. Scans committed e2e recordings and e2e/mocks.json (verify-secret-scan).
+#   2. Before the block: enables KVM and installs the API 34 x86_64 emulator
+#      image (verify-emulator), runs `flutter pub get` and a debug build so
+#      Gradle's dependencies are cached, and installs Mockoon when
+#      e2e/mocks.json exists.
+#   3. Turns the network block on (verify-netblock). Mockoon serves
+#      e2e/mocks.json on 127.0.0.1:3901, forwarded into the emulator with
+#      adb reverse; the emulator boots blocked (one retry; "did not boot" is
+#      reported as infrastructure).
+#   4. Runs `flutter test integration_test --no-pub` blocked with
+#      --dart-define=VERIFY_E2E=true and, with mocks,
+#      --dart-define=E2E_API_URL=http://localhost:3901. If it fails while the
+#      block rejected traffic, re-runs once with the block lifted: passing then
+#      sets output network=needed (the workflow's `network` step reports it).
+#   5. Names failed tests in the job summary. Evidence (test log, logcat,
+#      emulator and Mockoon logs) is left in ${RUNNER_TEMP}/flutter-e2e-report.
+# Needs a GitHub-hosted runner (KVM, root network control) and Flutter on PATH.
+# Logic: flutter_e2e.sh (helpers tested by test_flutter_e2e.sh).
+#
+# Inputs:
+#   working-directory  (optional)  Project directory. Default ".".
+# Outputs:
+#   network  "needed" when the tests passed only with network access, else empty.
+# =============================================================================
+name: 'Verify Flutter E2E'
+author: 'Simplify9'
+description: 'Run Flutter integration tests on an Android emulator with outbound network blocked, mocks served and evidence collected.'
+
+inputs:
+  working-directory:
+    description: 'Project directory (contains pubspec.yaml and integration_test/).'
+    required: false
+    default: '.'
+
+outputs:
+  network:
+    description: '"needed" when the tests passed only with network access, else empty.'
+    value: ${{ steps.e2e.outputs.network }}
+
+runs:
+  using: composite
+  steps:
+    - name: Flutter integration tests
+      id: e2e
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${ACTION_PATH}/flutter_e2e.sh"
+
+branding:
+  icon: 'smartphone'
+  color: 'blue'
