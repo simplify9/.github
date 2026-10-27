@@ -35,7 +35,8 @@ class Stub:
                 n = int(self.headers.get("Content-Length") or 0)
                 sent = json.loads(self.rfile.read(n)) if n else None
                 seen.append((self.command, self.path, self.headers.get("Authorization"), sent))
-                status, body = routes.get((self.command, path), (404, {"error": "nope"}))
+                route = routes.get((self.command, path), (404, {"error": "nope"}))
+                status, body = route(sent) if callable(route) else route
                 data = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -43,7 +44,7 @@ class Stub:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = _reply
+            do_GET = do_POST = do_PUT = _reply
 
             def log_message(self, *args):
                 pass
@@ -170,6 +171,16 @@ class ReviewFixes(unittest.TestCase):
         os.makedirs(self.before)
         os.makedirs(self.after)
         self.assertEqual(a.compare_snapshots(self.before, self.after, set()), ([], []))
+
+    def test_token_creation_failure_message(self):
+        stub = Stub({("POST", "/admin/login"): (200, {"data": {"token": "jwt"}}),
+                     ("POST", "/admin/api-tokens"): (400, {"data": None, "error": {"message": "Name already taken"}})})
+        try:
+            rc, _, err = run(["token", "--base-url", stub.url])
+        finally:
+            stub.close()
+        self.assertEqual(rc, 1)
+        self.assertIn("creating a read-only API token failed (HTTP 400)", err)
 
     def test_token_body_has_no_lifespan(self):
         stub = Stub({("POST", "/admin/login"): (200, {"data": {"token": "jwt"}}),

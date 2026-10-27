@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Helpers for the strapi-rehearsal action. Sourced by action.yml and test_rehearse.sh.
 
-# table_counts <psql-url> -> sorted "table count" lines for tables in schema public.
+# The schema the rehearsal reads: ${REHEARSAL_SCHEMA:-public}, as a quoted SQL literal and identifier.
+schema_lit() { local s="${REHEARSAL_SCHEMA:-public}"; printf "'%s'" "${s//\'/\'\'}"; }
+schema_ident() { local s="${REHEARSAL_SCHEMA:-public}"; printf '"%s"' "${s//\"/\"\"}"; }
+
+# table_counts <psql-url> -> sorted "table count" lines for tables in the rehearsal schema.
 # A failed count aborts with non-zero status: a blank count must never look like a snapshot.
 table_counts() {
   local url="$1" tables t n out=""
-  tables="$(psql "${url}" -v ON_ERROR_STOP=1 -Atc "select table_name from information_schema.tables where table_schema='public' and table_type='BASE TABLE'")" || {
+  tables="$(psql "${url}" -v ON_ERROR_STOP=1 -Atc "select table_name from information_schema.tables where table_schema=$(schema_lit) and table_type='BASE TABLE'")" || {
     echo "::error title=[VERIFY] rehearsal::could not list tables"; return 1; }
   while IFS= read -r t; do
     [ -n "${t}" ] || continue
-    n="$(psql "${url}" -v ON_ERROR_STOP=1 -Atc "select count(*) from public.\"${t}\"")" || {
+    n="$(psql "${url}" -v ON_ERROR_STOP=1 -Atc "select count(*) from $(schema_ident).\"${t//\"/\"\"}\"")" || {
       echo "::error title=[VERIFY] rehearsal::count failed for table ${t}"; return 1; }
     out+="${t} ${n}"$'\n'
   done <<< "${tables}"
@@ -76,13 +80,13 @@ rehearsal_base() {
   fi
 }
 
-# table_columns <psql-url> -> sorted "table<TAB>column<TAB>data_type" lines for base tables in schema public.
+# table_columns <psql-url> -> sorted "table<TAB>column<TAB>data_type" lines for base tables in the rehearsal schema.
 table_columns() {
   local out
   out="$(psql "$1" -v ON_ERROR_STOP=1 -At -F $'\t' -c "select c.table_name, c.column_name, c.data_type
       from information_schema.columns c join information_schema.tables t
         on t.table_schema = c.table_schema and t.table_name = c.table_name
-      where c.table_schema = 'public' and t.table_type = 'BASE TABLE'")" || {
+      where c.table_schema = $(schema_lit) and t.table_type = 'BASE TABLE'")" || {
     echo "::error title=[VERIFY] rehearsal::could not list columns"; return 1; }
   printf '%s\n' "${out}" | LC_ALL=C sort
 }
@@ -99,7 +103,7 @@ column_fingerprints() {
     ord="md5(coalesce(${qc}::text, '<null>'))"
     if awk -F'\t' -v t="${t}" '$1 == t && $2 == "id" { f = 1 } END { exit !f }' "$2"; then ord='"id"'; fi
     h="$(psql "${url}" -v ON_ERROR_STOP=1 -At -c \
-      "select md5(coalesce(string_agg(md5(coalesce(${qc}::text, '<null>')), ',' order by ${ord}), '')) from public.${qt}")" || {
+      "select md5(coalesce(string_agg(md5(coalesce(${qc}::text, '<null>')), ',' order by ${ord}), '')) from $(schema_ident).${qt}")" || {
       echo "::error title=[VERIFY] rehearsal::fingerprint failed for ${t}.${c}"; return 1; }
     out+="${t}"$'\t'"${c}"$'\t'"${h}"$'\n'
   done < "$2"
@@ -141,19 +145,50 @@ compare_fingerprints() {
   return "${PIPESTATUS[0]}"
 }
 
+# config_schema <app-dir> -> the schema config/database.* fixes as a string other than public, or nothing.
+config_schema() {
+  local f
+  for f in "$1"/config/database.ts "$1"/config/database.js "$1"/config/database.mjs "$1"/config/database.cjs; do
+    [ -f "${f}" ] || continue
+    awk -v q="[\"'\`]" '
+      $0 ~ "^[ \t]*schema[ \t]*:[ \t]*" q {
+        val = $0; sub("^[^:]*:[ \t]*" q, "", val); sub(q ".*", "", val)
+        if (val != "public") { print val; exit }
+      }' "${f}"
+  done | head -n 1
+}
+
+# fixture_pg_major <fixture.sql.gz> -> the source server's major version from pg_dump's header, or nothing.
+fixture_pg_major() {
+  { gunzip -c "$1" 2>/dev/null || true; } | head -n 40 | sed -n 's/^-- Dumped from database version \([0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+# prepare_schema <psql-url> <schema> <restored>: make <schema> what Strapi reads. public needs nothing; a
+# restored fixture (always in public) is moved into <schema>; otherwise <schema> is created, which Strapi
+# does not do itself.
+prepare_schema() {
+  local id="\"${2//\"/\"\"}\""
+  [ "$2" = public ] && return 0
+  if [ "$3" = true ]; then
+    psql "$1" -v ON_ERROR_STOP=1 -q -c "ALTER SCHEMA public RENAME TO ${id}; CREATE SCHEMA public;"
+  else
+    psql "$1" -v ON_ERROR_STOP=1 -q -c "CREATE SCHEMA IF NOT EXISTS ${id};"
+  fi
+}
+
 # fixed_db_config <app-dir> -> "file:line key" for each connection setting that config/database.* gives as a
 # fixed string (never the value), exit 1 if any. verify boots Strapi on its throwaway Postgres through the
-# DATABASE_* environment variables; a fixed host or password would send it to a real database instead, and a
-# fixed schema would leave the restored fixture unread. localhost and the public schema are fine.
+# DATABASE_* environment variables; a fixed host or password would send it to a real database instead.
+# localhost is fine. A fixed schema is not a connection setting: config_schema handles it.
 fixed_db_config() {
   local f rc=0
   for f in "$1"/config/database.ts "$1"/config/database.js "$1"/config/database.mjs "$1"/config/database.cjs; do
     [ -f "${f}" ] || continue
     awk -v f="${f#"$1"/}" -v q="[\"'\`]" '
-      $0 ~ "^[ \t]*(host|user|username|password|database|schema|connectionString)[ \t]*:[ \t]*" q {
+      $0 ~ "^[ \t]*(host|user|username|password|database|connectionString)[ \t]*:[ \t]*" q {
         key = $0; sub(/^[ \t]*/, "", key); sub(/[ \t]*:.*/, "", key)
         val = $0; sub("^[^:]*:[ \t]*" q, "", val); sub(q ".*", "", val)
-        if ((key == "host" && (val == "localhost" || val == "127.0.0.1")) || (key == "schema" && val == "public")) next
+        if (key == "host" && (val == "localhost" || val == "127.0.0.1")) next
         print f ":" NR " " key
       }' "${f}" | grep . && rc=1
   done

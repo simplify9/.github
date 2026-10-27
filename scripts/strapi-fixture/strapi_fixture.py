@@ -8,8 +8,11 @@ Run by DevOps on a machine with Docker, never in CI:
 
 A database that only accepts connections from inside its cluster is streamed out by cluster-dump.sh instead:
 
-  scripts/strapi-fixture/cluster-dump.sh CONTEXT NAMESPACE SECRET [SCHEMA] \\
-    | python3 scripts/strapi-fixture/strapi_fixture.py --source-dump - [--schema SCHEMA] --repo ../some-cms
+  scripts/strapi-fixture/cluster-dump.sh CONTEXT NAMESPACE SECRET \\
+    | python3 scripts/strapi-fixture/strapi_fixture.py --source-dump - --repo ../some-cms
+
+The schema (the CMS's DATABASE_SCHEMA) and the Postgres version are detected; --schema and
+--postgres-image override them.
 
 The source database is only read (pg_dump). Everything else happens in a throwaway local Postgres
 container: personal data and secrets are replaced, the result is scanned with
@@ -185,6 +188,22 @@ def image_major(image):
     return int(m.group(1)) if m else None
 
 
+def image_for(major):
+    """The throwaway's image for a source server's major version (17 when unknown)."""
+    return "postgres:%d" % (major or 17)
+
+
+def detect_schema(counts):
+    """The CMS's schema: the only schema whose tables the dump holds ({schema: table count})."""
+    with_tables = sorted(name for name, n in counts.items() if n > 0)
+    if len(with_tables) == 1:
+        return with_tables[0]
+    if not with_tables:
+        raise ValueError("the dump has no tables")
+    raise ValueError("the dump has tables in several schemas (%s): pass --schema with the CMS's DATABASE_SCHEMA"
+                     % ", ".join(with_tables))
+
+
 def keep_schema_sql(schema):
     """SQL for the throwaway database after the restore: drop every other schema (an API sharing the database
     never reaches the fixture), then move the CMS's tables and sequences from `schema` into public, where
@@ -260,12 +279,21 @@ def parse_args(argv):
     source = ap.add_mutually_exclusive_group(required=True)
     source.add_argument("--source-env", help="name of the environment variable holding the source Postgres URL")
     source.add_argument("--source-dump", help="a plain-SQL pg_dump of the source ('-' for stdin), e.g. from cluster-dump.sh")
-    ap.add_argument("--schema", default="public", help="the CMS's schema in the source (its DATABASE_SCHEMA)")
+    ap.add_argument("--schema", default="auto",
+                    help="the CMS's schema in the source (its DATABASE_SCHEMA); auto: the only schema with tables")
     ap.add_argument("--repo", required=True, help="the Strapi repository checkout to write ci/fixture.sql.gz into")
     ap.add_argument("--truncate", action="append", default=[], help="empty this table (repeatable), e.g. form submissions")
-    ap.add_argument("--postgres-image", default="postgres:17",
-                    help="must match the repo's verify postgres-version and be >= the source server's major version")
+    ap.add_argument("--postgres-image", default="auto",
+                    help="auto: postgres:<the source server's major>; an explicit image must be >= that version")
     return ap.parse_args(argv)
+
+
+def _probe_server_major(src):
+    """The source server's major version, asked with psql from a throwaway container (None if it fails)."""
+    pass_env = [x for k in sorted(src) for x in ("-e", k)]
+    r = subprocess.run(["docker", "run", "--rm"] + pass_env + ["postgres:17", "psql", "-Atc", "show server_version_num"],
+                       capture_output=True, text=True, env=dict(os.environ, **src))
+    return int(r.stdout.strip()) // 10000 if r.returncode == 0 and r.stdout.strip().isdigit() else None
 
 
 def _restore_stream(name, fh, restore, first):
@@ -292,9 +320,23 @@ def main(argv):
     pii_entries = parse_list_file(os.path.join(ci_dir, "fixture-pii.txt"))
     pii_extra = {tuple(e.split(".", 1)) for e in pii_entries if "." in e}
     name = "strapi-fixture-%d" % os.getpid()
+    src, fh, first = {}, None, b""
+    if a.source_env:
+        src = pg_env(os.environ[a.source_env])
+        src_major = _probe_server_major(src) if a.postgres_image == "auto" else None
+    else:
+        fh = sys.stdin.buffer if a.source_dump == "-" else open(a.source_dump, "rb")
+        first = fh.read(1 << 16)
+        src_major = dump_server_major(first)
+    image = image_for(src_major) if a.postgres_image == "auto" else a.postgres_image
+    img_major = image_major(image)
+    if src_major and img_major and src_major > img_major:
+        print("the source is Postgres %d: run again with --postgres-image postgres:%d (or auto), and PG_IMAGE=postgres:%d "
+              "(or unset) for cluster-dump.sh" % ((src_major,) * 3), file=sys.stderr)
+        return 1
     try:
         _run(["docker", "run", "-d", "--rm", "--name", name, "-e", "POSTGRES_PASSWORD=fixture",
-              "-e", "POSTGRES_DB=fixture", a.postgres_image], capture_output=True)
+              "-e", "POSTGRES_DB=fixture", image], capture_output=True)
         for _ in range(60):
             if subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "fixture"],
                               capture_output=True).returncode == 0:
@@ -309,25 +351,32 @@ def main(argv):
             print("copying the source database into the throwaway container (read-only on the source)", flush=True)
             # libpq reads the source from PG* variables copied from this process's environment (`-e NAME`
             # without a value), so the password is in no argv, on the host or in the container.
-            src = pg_env(os.environ[a.source_env])
             pass_env = [x for k in sorted(src) for x in ("-e", k)]
-            _run(["docker", "exec"] + pass_env + [name, "bash", "-o", "pipefail", "-c",
-                  source_dump_cmd(a.schema) + " | " + restore], env=dict(os.environ, **src))
+            dump = source_dump_cmd("public" if a.schema == "auto" else a.schema)
+            _run(["docker", "exec"] + pass_env + [name, "bash", "-o", "pipefail", "-c", dump + " | " + restore],
+                 env=dict(os.environ, **src))
         else:
-            fh = sys.stdin.buffer if a.source_dump == "-" else open(a.source_dump, "rb")
-            first = fh.read(1 << 16)
-            src_major, img_major = dump_server_major(first), image_major(a.postgres_image)
-            if src_major and img_major and src_major > img_major:
-                print("the source is Postgres %d: run again with PG_IMAGE=postgres:%d for cluster-dump.sh and "
-                      "--postgres-image postgres:%d, and set postgres-version: '%d' in the repo's verify caller"
-                      % ((src_major,) * 4), file=sys.stderr)
-                return 1
             print("restoring the dump into the throwaway container", flush=True)
             complete = _restore_stream(name, fh, restore, first)
             if not complete:
                 print("the dump ended early (no pg_dump closing line): check cluster-dump.sh's errors above", file=sys.stderr)
                 return 1
-        _psql(name, sql=keep_schema_sql(a.schema))
+        schema = a.schema
+        if schema == "auto":
+            counts = {}
+            for line in _psql(name, query=(
+                    "SELECT n.nspname, count(c.oid) FROM pg_namespace n LEFT JOIN pg_class c ON c.relnamespace = n.oid "
+                    "AND c.relkind IN ('r', 'p') WHERE n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\\_%' "
+                    "GROUP BY 1")).splitlines():
+                nsp, n = line.split("\t")
+                counts[nsp] = int(n)
+            try:
+                schema = detect_schema(counts)
+            except ValueError as e:
+                print(str(e), file=sys.stderr)
+                return 1
+            print("CMS schema: %s" % schema, flush=True)
+        _psql(name, sql=keep_schema_sql(schema))
         columns = [tuple(l.split("\t")) for l in _psql(name, query=(
             "SELECT table_name, column_name, data_type FROM information_schema.columns "
             "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position")).splitlines()]

@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 
 import strapi_fixture as f
 
@@ -146,10 +146,28 @@ class SchemaAndSource(unittest.TestCase):
         self.assertEqual([f.image_major(i) for i in ("postgres:18", "postgres:17-alpine", "postgres:16.4", "registry/pg")],
                          [18, 17, 16, None])
 
+    def test_detect_schema(self):
+        self.assertEqual(f.detect_schema({"public": 0, "my-cms": 40}), "my-cms")
+        self.assertEqual(f.detect_schema({"public": 12}), "public")
+        with self.assertRaises(ValueError) as cm:
+            f.detect_schema({"public": 3, "my-cms": 40})
+        self.assertIn("my-cms", str(cm.exception))
+        self.assertIn("public", str(cm.exception))
+        with self.assertRaises(ValueError):
+            f.detect_schema({})
+
+    def test_image_for(self):
+        self.assertEqual(f.image_for(18), "postgres:18")
+        self.assertEqual(f.image_for(None), "postgres:17")
+
+    def test_defaults_are_auto(self):
+        a = f.parse_args(["--repo", "r", "--source-dump", "-"])
+        self.assertEqual((a.schema, a.postgres_image), ("auto", "auto"))
+
     def test_cli_needs_exactly_one_source(self):
         a = f.parse_args(["--repo", "r", "--source-dump", "-", "--schema", "my-cms"])
         self.assertEqual((a.source_env, a.source_dump, a.schema), (None, "-", "my-cms"))
-        self.assertEqual(f.parse_args(["--repo", "r", "--source-env", "SRC_DB"]).schema, "public")
+        self.assertEqual(f.parse_args(["--repo", "r", "--source-env", "SRC_DB"]).schema, "auto")
         for argv in (["--repo", "r"], ["--repo", "r", "--source-env", "X", "--source-dump", "-"]):
             with self.assertRaises(SystemExit) as cm, redirect_stderr(io.StringIO()):
                 f.parse_args(argv)
@@ -196,6 +214,26 @@ class KeepSchemaDocker(unittest.TestCase):
         r = self.sql(f.keep_schema_sql("cms"))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("dump only the CMS schema", r.stderr)
+
+    def test_auto_schema_round_trip(self):
+        self.sql('CREATE SCHEMA "my-cms"; CREATE TABLE "my-cms".articles (id serial PRIMARY KEY, title text);'
+                 'INSERT INTO "my-cms".articles (title) VALUES (\'a\');')
+        dump = subprocess.run(["docker", "exec", self.name, "pg_dump", "-U", "postgres", "--no-owner", "--no-privileges",
+                               "--schema=\"my-cms\"", "fixture"], check=True, capture_output=True).stdout
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "dump.sql")
+            with open(src, "wb") as fh:
+                fh.write(dump)
+            repo = os.path.join(d, "repo")
+            os.makedirs(repo)
+            with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
+                rc = f.main(["--source-dump", src, "--repo", repo])
+            self.assertEqual(rc, 0)
+            out = subprocess.run(["gunzip", "-c", os.path.join(repo, "ci", "fixture.sql.gz")], check=True,
+                                 capture_output=True, text=True).stdout
+        self.assertIn("CREATE TABLE public.articles", out)
+        self.assertNotIn("my-cms", out)
+        self.assertIn("Dumped from database version 17", out)
 
     def test_public_keeps_public_and_drops_other_schemas(self):
         self.sql("CREATE TABLE public.articles (id int); CREATE SCHEMA api; CREATE TABLE api.customers (email text);")

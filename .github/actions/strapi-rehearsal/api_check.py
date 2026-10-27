@@ -43,7 +43,7 @@ def content_types(dirs):
 
 
 def _request(method, url, token=None, body=None):
-    """-> (status, parsed JSON or None)."""
+    """-> (status, parsed JSON or None); an HTTP error returns its JSON body when it has one."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
     if token:
@@ -52,17 +52,20 @@ def _request(method, url, token=None, body=None):
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.status, json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
-        return e.code, None
+        try:
+            return e.code, json.loads(e.read() or b"null")
+        except ValueError:
+            return e.code, None
 
 
 def api_token(base_url):
     status, body = _request("POST", base_url + "/admin/login", body={"email": CI_ADMIN_EMAIL, "password": CI_ADMIN_PASSWORD})
-    if status != 200 or not (body or {}).get("data", {}).get("token"):
+    if status != 200 or not ((body or {}).get("data") or {}).get("token"):
         raise RuntimeError("admin login as %s failed (HTTP %s): the fixture has no CI admin (or a different password); "
                            "regenerate it with scripts/strapi-fixture" % (CI_ADMIN_EMAIL, status))
     status, created = _request("POST", base_url + "/admin/api-tokens", token=body["data"]["token"],
                                body={"name": "verify-ci", "description": "verify rehearsal", "type": "read-only"})
-    key = (created or {}).get("data", {}).get("accessKey")
+    key = ((created or {}).get("data") or {}).get("accessKey")
     if status not in (200, 201) or not key:
         raise RuntimeError("creating a read-only API token failed (HTTP %s)" % status)
     return key
