@@ -218,11 +218,11 @@ for every repository.
 │   │   ├── verify-plan/ verify-contract/ verify-web-install/
 │   │   ├── verify-node-deps/ verify-web-smoke/ strapi-rehearsal/
 │   │   ├── verify-web-e2e/ verify-netblock/ verify-secret-scan/ verify-mocks/ verify-dotnet-tests/
-│   │   ├── verify-emulator/ verify-maestro/
+│   │   ├── verify-emulator/ verify-maestro/ verify-flutter-e2e/
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
 │   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
-├── starters/                    <- copyable test starters per stack (web-playwright: web e2e journeys; dotnet-integration: WebApplicationFactory + Testcontainers; react-native-maestro: flows and mocks)
+├── starters/                    <- copyable test starters per stack (web-playwright: web e2e journeys; dotnet-integration: WebApplicationFactory + Testcontainers; react-native-maestro: flows and mocks; flutter-integration-test: journeys, DI fakes or mocks)
 ├── workflow-templates/          <- org starter templates (*.yml + *.properties.json)
 └── dependabot-templates/        <- ready-made per-category `dependabot.yml` configs for consumer repos to copy
 ```
@@ -877,7 +877,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
 | `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test` (unit test projects, see below), `docker` (no-push build when a `Dockerfile` exists); `integration` (hosted job: Testcontainers test projects); `smoke` (`docker-smoke`: on by default for `dotnet-service`, opt-in for libraries) |
 | `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (every `.maestro/` flow on an emulator, network-blocked, see below); `network` when flows passed only with network access |
-| `flutter` | `install`, `analyze`, `test`, `build` (debug APK; on GitHub-hosted runners the job first frees ~20 GB of unused toolchains, as the android job does) |
+| `flutter` | `install`, `analyze`, `test`, `build` (debug APK; on GitHub-hosted runners the job first frees ~20 GB of unused toolchains, as the android job does); `flutter-e2e` job: `e2e` (integration tests on an emulator, network-blocked, see below) and `network` |
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
 
 **Web end-to-end (`e2e`).** When `package.json` has a `test:e2e` script (Playwright; starter in `starters/web-playwright/`):
@@ -902,6 +902,15 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 **Docker smoke (`smoke`).** For `dotnet-service`, `docker-smoke` builds the image, runs it and probes `/health` by default (`smoke-path` overrides the path, `none` turns it off). The image must start without its database: `/health` is liveness only. When on by default it is a new step, tolerated until 2026-12-29 or the repo's later deadline; a repo that set `smoke-path` itself keeps its blocking behaviour.
 
 `maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
+
+**Flutter journeys (`flutter-e2e` job, step `e2e`).** Runs when the repo has `integration_test/` and dependencies changed or the PR targets the default branch, on the GitHub-hosted runner. Starter in `starters/flutter-integration-test/`.
+1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
+2. Before the block: the API 34 x86_64 emulator image, `flutter pub get` and a debug build (Gradle's downloads).
+3. The emulator boots with **outbound network blocked** (allowed: loopback and `e2e/allowed-hosts.txt`); 2 attempts, then "did not boot (infrastructure)".
+4. `flutter test integration_test` runs with `--dart-define=VERIFY_E2E=true` and, with `e2e/mocks.json` (Mockoon on port 3901, `adb reverse`), `--dart-define=E2E_API_URL=http://localhost:3901`.
+   - A failure while the block rejected traffic re-runs once with network access. Passing then means the app needs an unmocked host: `e2e` passes and `network` fails, a warning until its deadline.
+5. Failed tests are named in the summary. On failure the test log, `adb logcat` and the emulator and Mockoon logs are uploaded as `flutter-e2e-report` (5 days).
+6. `e2e` is new for Flutter: tolerated until 2026-12-29 (or the repo's later deadline) with no caller change.
 
 **React Native journeys (`maestro`).** Starter in `starters/react-native-maestro/`.
 1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
@@ -1064,7 +1073,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 29 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 30 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -1133,6 +1142,7 @@ All 29 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
 | `verify-dotnet-tests` | Run the `unit` or `integration` (Testcontainers) test projects of a built .NET solution from a filtered copy of it; never run a test project whose config holds a real connection string (`classify.py`, `run_tests.sh`). With no `build-target`, only report `has` | `kind` (required), `build-target`, `working-directory`, `results-directory` | `ran`, `has` |
 | `verify-web-e2e` | The web `e2e` step: scan `e2e/**/*.har` and `e2e/mocks.json`, serve the mocks with Mockoon (`E2E_API_URL`), run `test:e2e` with outbound network blocked (one re-run with network access when blocked traffic may explain a failure), name failed and flaky tests in the summary. Needs a GitHub-hosted runner | `working-directory`, `runner` (required) | `network` (`needed` when the tests passed only with network access) |
+| `verify-flutter-e2e` | The Flutter `e2e` step: `flutter test integration_test` on an API 34 emulator with outbound network blocked, `e2e/mocks.json` served as `E2E_API_URL=http://localhost:3901` (dart-define), a network re-check, evidence in `$RUNNER_TEMP/flutter-e2e-report`. Needs a GitHub-hosted runner and Flutter on PATH | `working-directory` | `network` |
 | `verify-maestro` | The React Native `maestro` step: every `.maestro/` flow on an API 34 emulator with outbound network blocked, `e2e/mocks.json` served as `E2E_API_URL=http://localhost:3901`, flaky flows re-run once, a network re-check, evidence in `$RUNNER_TEMP/maestro-report`. Needs a GitHub-hosted runner | `working-directory`, `apk` (required) | `network` |
 | `verify-emulator` | Script, no `action.yml`: `emulator.sh` (sourced) enables KVM, installs an API 34 x86_64 emulator image and boots it, optionally through `netblock_run` so the emulator's traffic (the app's) is blocked; one retry, and a separate "did not boot (infrastructure)" error. Used by the mobile e2e steps | - | - |
 | `verify-mocks` | Script, no `action.yml`: `mockoon.sh` (sourced) installs the pinned `@mockoon/cli` (9.9.0) and serves a Mockoon environment file on `127.0.0.1:3901` with proxying off, optionally through a prefix command such as `netblock_run`. Used by the web and mobile e2e steps | - | - |

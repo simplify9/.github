@@ -22,7 +22,7 @@
 #   integration  hosted: test projects referencing Testcontainers (verify-dotnet-tests kind integration)
 #   docker-smoke  on by default for dotnet-service (smoke-path empty = /health; 'none' = off):
 #             run the image and probe an HTTP path
-#   react-native, android, maestro, flutter, strapi
+#   react-native, android, maestro, flutter, flutter-e2e, strapi
 #             per-stack ladders (see each job)
 #   vuln-report  informational, default-branch PRs only: critical Dependabot alerts
 #             as a warning. NOT in `result.needs`, so it can never fail the check.
@@ -1244,6 +1244,136 @@ jobs:
             | Failed | `${{ steps.collect.outputs.failed }}` |
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
 
+  # Flutter integration tests on an emulator (hosted: office runner pods have no KVM).
+  # Same scope as maestro: dependencies changed or the PR targets the default branch.
+  flutter-e2e:
+    name: flutter-e2e
+    needs: plan
+    if: ${{ !cancelled() && inputs.stack == 'flutter' && needs.plan.result == 'success' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    permissions:
+      contents: read
+      packages: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      # The emulator image, Gradle and the app build need room; same reclaim as the flutter job.
+      - name: Free disk space
+        if: ${{ runner.environment == 'github-hosted' }}
+        shell: bash
+        working-directory: .
+        run: |
+          set -uo pipefail
+          sudo rm -rf /usr/share/dotnet            || true
+          sudo rm -rf /opt/ghc /usr/local/.ghcup   || true
+          sudo rm -rf /usr/share/swift             || true
+          sudo rm -rf /usr/local/share/powershell  || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL  || true
+          sudo rm -rf /usr/local/share/boost       || true
+          docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | sed 's/^/    /'
+
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Repos without integration_test/ skip the (paid) emulator; the contract reports integration-test.
+      - name: Probe integration tests
+        id: probe
+        shell: bash
+        working-directory: .
+        env:
+          WD: ${{ inputs.working-directory }}
+        run: |
+          if [ -d "$WD/integration_test" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] e2e::no integration_test/ - Flutter e2e skipped (the contract job reports integration-test)"
+          fi
+
+      - name: Setup Java
+        if: ${{ steps.probe.outputs.present == 'true' }}
+        uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Setup Flutter
+        if: ${{ steps.probe.outputs.present == 'true' }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ inputs.flutter-version }}
+          cache: true
+
+      # Hermetic: the emulator and the Flutter tool run with outbound network blocked except loopback
+      # and e2e/allowed-hosts.txt; e2e/mocks.json is served by Mockoon as E2E_API_URL.
+      - name: Integration tests (emulator)
+        id: e2e
+        if: ${{ !cancelled() && steps.probe.outputs.present == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        uses: simplify9/.github/.github/actions/verify-flutter-e2e@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Network block
+        id: network
+        if: ${{ !cancelled() && steps.e2e.outputs.network == 'needed' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' network ') }}
+        shell: bash
+        run: |
+          echo "::error title=[VERIFY] network::the integration tests passed only with network access (blocked destinations in the e2e step). Mock those calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+          exit 1
+
+      - name: Upload e2e evidence
+        if: ${{ !cancelled() && steps.e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: flutter-e2e-report
+          path: ${{ runner.temp }}/flutter-e2e-report
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          failed, warned = [], []
+          for i in ("e2e", "network"):
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              # conclusion is "success" when continue-on-error swallowed the failure
+              (warned if s.get("conclusion") == "success" else failed).append(i)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify flutter-e2e
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
   strapi:
     name: strapi
     needs: plan
@@ -1370,7 +1500,7 @@ jobs:
     name: result
     # `if: always()` is essential: a job whose needs were skipped is skipped, and
     # a skipped required check never reports. Verdict is computed from needs results.
-    needs: [plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, strapi]
+    needs: [plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, flutter-e2e, strapi]
     if: always()
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
