@@ -932,6 +932,7 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 | `maestro-journeys` | `react-native` | at least 3 flow files directly in `.maestro/` (`smoke.yaml` counts; `config.yaml` and subfolders don't) (since 2026-11-03) |
 | `e2e-mocks` | `react-native` | `e2e/mocks.json`, a Mockoon environment file the app's API calls are served from in CI (since 2026-11-03) |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
+| `integration-test` | `flutter` | `integration_test` (`sdk: flutter`) in `pubspec.yaml` and at least 3 `testWidgets(` calls across `integration_test/*_test.dart` (files directly in that folder; commented-out lines don't count) (since 2026-11-03) |
 | `playwright` | `web` | `@playwright/test` in `devDependencies` and a `playwright.config.{ts,js,mjs,cjs}` in the project directory (since 2026-11-03) |
 | `integration-tests` | `dotnet-service`; `dotnet-library` that uses an outside system | service: a test project referencing `Microsoft.AspNetCore.Mvc.Testing`; library with a non-test project referencing an outside-system client (`StackExchange.Redis`, `Npgsql*`, `Microsoft.Data.SqlClient`, `System.Data.SqlClient`, `MongoDB.Driver`, `RabbitMQ.Client`, `MassTransit*`, `Confluent.Kafka`, `Azure.Storage.*`): a test project referencing `Testcontainers`. A project whose config holds a real connection string never counts (since 2026-11-03) |
 
