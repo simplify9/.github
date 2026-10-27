@@ -1,0 +1,63 @@
+# =============================================================================
+# Verify .NET Tests
+# =============================================================================
+# Runs one kind of test project of an already built solution (dotnet-build, Release),
+# as sorted by classify.py:
+#   unit         every test project except Testcontainers and refused ones (the `test` step)
+#   integration  only projects referencing Testcontainers (the hosted `integration` job; needs Docker)
+# A refused project (a config file holding a real-environment connection string) never runs;
+# kind unit names it in a warning. Projects outside the solution never run, as before.
+# With nothing to drop, the original solution is tested unchanged; otherwise a __verify_<kind>
+# copy next to it without the dropped projects. Logic: run_tests.sh (test_run_tests_docker.sh),
+# classify.py (test_classify.py).
+#
+# Inputs:
+#   kind               (required)  unit | integration
+#   build-target       (required)  The built solution (dotnet-build's build-target output).
+#   working-directory  (optional)  Directory whose projects are classified. Default ".".
+#   results-directory  (optional)  Write TRX results there. Default: none.
+# Outputs:
+#   ran  "false" when kind integration found no Testcontainers project, else "true".
+# =============================================================================
+name: 'Verify .NET Tests'
+author: 'Simplify9'
+description: 'Run the unit or the integration (Testcontainers) test projects of a built .NET solution; never run test projects whose config holds real connection strings.'
+
+inputs:
+  kind:
+    description: 'unit or integration.'
+    required: true
+  build-target:
+    description: 'The built solution (dotnet-build build-target output).'
+    required: true
+  working-directory:
+    description: 'Directory whose projects are classified.'
+    required: false
+    default: '.'
+  results-directory:
+    description: 'Directory for TRX results (empty: none).'
+    required: false
+    default: ''
+
+outputs:
+  ran:
+    description: '"false" when kind integration found no Testcontainers project, else "true".'
+    value: ${{ steps.run.outputs.ran }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run tests
+      id: run
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        BUILD_TARGET: ${{ inputs.build-target }}
+        WORKDIR: ${{ inputs.working-directory }}
+        RESULTS_DIR: ${{ inputs.results-directory }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${ACTION_PATH}/run_tests.sh"
+
+branding:
+  icon: 'check-circle'
+  color: 'blue'
