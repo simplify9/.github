@@ -35,7 +35,11 @@ emulator_install() {
   local sdkmanager="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
   yes | "${sdkmanager}" --licenses >/dev/null 2>&1 || true
   "${sdkmanager}" --install emulator platform-tools "${EMULATOR_IMAGE}" >/dev/null
+  # Explicit, so the emulator finds the AVD whatever HOME the process that boots it sees.
+  export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-${HOME}/.android/avd}"
+  mkdir -p "${ANDROID_AVD_HOME}"
   echo no | "${ANDROID_HOME}/cmdline-tools/latest/bin/avdmanager" create avd --force -n verify -k "${EMULATOR_IMAGE}" >/dev/null
+  test -f "${ANDROID_AVD_HOME}/verify.ini" || { echo "::error title=[VERIFY] emulator::AVD not created in ${ANDROID_AVD_HOME}"; return 1; }
   adb start-server >/dev/null 2>&1
 }
 

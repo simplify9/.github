@@ -16,6 +16,9 @@ as_runner() {
   # shellcheck disable=SC2016 # expanded by the inner sh, on purpose
   eq nonroot_keeps_env_uid_and_path "bar runner verify-offline ${PATH}" \
     "$(FOO=bar netblock_run sh -c 'echo "${FOO} $(id -un) $(id -gn) ${PATH}"')"
+  # HOME and USER as the caller sees them: tools find their per-user files (e.g. ~/.android/avd).
+  # shellcheck disable=SC2016 # expanded by the inner sh, on purpose
+  eq nonroot_keeps_home_and_user "${HOME} runner" "$(netblock_run sh -c 'echo "${HOME} ${USER}"')"
   eq nonroot_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"
   eq nonroot_count 1 "$([ "$(netblock_count)" -gt 0 ] && echo 1 || echo 0)"
 }

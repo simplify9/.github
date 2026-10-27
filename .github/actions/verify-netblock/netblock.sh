@@ -94,7 +94,10 @@ netblock_run() {
   if [ "$(id -u)" = 0 ]; then
     setpriv --reuid 0 --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
   else
-    sudo -E env "PATH=${PATH}" setpriv --reuid "$(id -u)" --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
+    # sudo resets PATH (secure_path), USER and LOGNAME, and may reset HOME: pass the caller's own, so
+    # tools find their per-user files (an emulator's ~/.android/avd, a browser cache).
+    sudo -E env "PATH=${PATH}" "HOME=${HOME}" "USER=$(id -un)" "LOGNAME=$(id -un)" \
+      setpriv --reuid "$(id -u)" --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
   fi
 }
 
