@@ -8,6 +8,8 @@ import contract as c
 WEB_PKG = {"scripts": {k: "x" for k in ("lint", "typecheck", "test", "build", "test:e2e")},
            "engines": {"node": ">=20"}, "devDependencies": {"@playwright/test": "1"}}
 WEB_FILES = {"yarn.lock", "playwright.config.ts"}
+MVC_TESTS = {"path": "Api.Tests/Api.Tests.csproj", "test": True, "testcontainers": True, "mvc_testing": True,
+             "clients": [], "refused": [], "kind": "integration"}
 
 
 class MissingItems(unittest.TestCase):
@@ -30,11 +32,37 @@ class MissingItems(unittest.TestCase):
 
     def test_dotnet_single_project_does_not_need_cpm(self):
         files = {"packages.lock.json", "global.json", "Api/Api.csproj", "Api.Tests/Api.Tests.csproj", "Dockerfile"}
-        self.assertEqual(c.missing_items("dotnet-service", files, None, 1, True), [])
+        self.assertEqual(c.missing_items("dotnet-service", files, None, 1, True, [MVC_TESTS]), [])
 
     def test_dotnet_multi_project_needs_cpm(self):
         files = {"packages.lock.json", "global.json", "Api.Tests/Api.Tests.csproj", "Dockerfile"}
-        self.assertEqual(c.missing_items("dotnet-service", files, None, 2, True), ["cpm"])
+        self.assertEqual(c.missing_items("dotnet-service", files, None, 2, True, [MVC_TESTS]), ["cpm"])
+
+    def test_service_needs_mvc_testing_project(self):
+        files = {"packages.lock.json", "global.json", "Api.Tests/Api.Tests.csproj", "Dockerfile"}
+        unit = dict(MVC_TESTS, mvc_testing=False, kind="unit")
+        self.assertEqual(c.missing_items("dotnet-service", files, None, 1, True, [unit]), ["integration-tests"])
+        self.assertEqual(c.missing_items("dotnet-service", files, None, 1, True, None), ["integration-tests"])
+
+    def test_service_refused_project_does_not_count(self):
+        files = {"packages.lock.json", "global.json", "Api.Tests/Api.Tests.csproj", "Dockerfile"}
+        refused = dict(MVC_TESTS, kind="refused", refused=["appsettings.json:2 connection-string"])
+        self.assertEqual(c.missing_items("dotnet-service", files, None, 1, True, [refused]), ["integration-tests"])
+
+    def test_library_without_clients_needs_nothing(self):
+        files = {"Directory.Packages.props", "global.json", "A.Tests/A.Tests.csproj"}
+        lib = {"path": "A/A.csproj", "test": False, "testcontainers": False, "mvc_testing": False,
+               "clients": [], "refused": [], "kind": None}
+        self.assertEqual(c.missing_items("dotnet-library", files, None, 2, False, [lib]), [])
+
+    def test_library_with_redis_needs_testcontainers(self):
+        files = {"Directory.Packages.props", "global.json", "A.Tests/A.Tests.csproj"}
+        lib = {"path": "A/A.csproj", "test": False, "testcontainers": False, "mvc_testing": False,
+               "clients": ["StackExchange.Redis"], "refused": [], "kind": None}
+        unit = dict(MVC_TESTS, mvc_testing=False, kind="unit")
+        tc = dict(MVC_TESTS, mvc_testing=False, testcontainers=True, kind="integration")
+        self.assertEqual(c.missing_items("dotnet-library", files, None, 2, False, [lib, unit]), ["integration-tests"])
+        self.assertEqual(c.missing_items("dotnet-library", files, None, 2, False, [lib, tc]), [])
 
     def test_dotnet_cpm_satisfies_lockfile(self):
         files = {"Directory.Packages.props", "global.json", "A.Tests/A.Tests.csproj"}
@@ -109,6 +137,9 @@ class ItemDeadlines(unittest.TestCase):
                          {"script:test:e2e": "error", "playwright": "warning"})
         self.assertEqual(c.item_levels(missing, "2026-11-10", date(2026, 12, 29)),
                          {"script:test:e2e": "error", "playwright": "error"})
+
+    def test_integration_tests_deadline(self):
+        self.assertEqual(c.item_deadline("integration-tests", "2026-12-21"), date(2026, 12, 29))
 
     def test_item_levels_no_repo_deadline_warns_forever(self):
         self.assertEqual(c.item_levels(["playwright", "lockfile"], "", date(2030, 1, 1)),
