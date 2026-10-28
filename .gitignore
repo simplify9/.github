@@ -4,3 +4,4 @@ docs
 scripts/repo-metadata.csv
 scripts/repo-metadata-apply.csv
 scripts/backfill-repo-metadata.py
+__pycache__/
