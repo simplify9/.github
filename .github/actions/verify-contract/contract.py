@@ -150,7 +150,10 @@ def flutter_journeys(root):
     dep = False
     try:
         with open(os.path.join(root, "pubspec.yaml"), encoding="utf-8") as f:
-            dep = bool(re.search(r"(?m)^\s+integration_test:\s*\n\s+sdk:\s*flutter\b", f.read()))
+            # Indented (under a dependencies key), flow style `{ sdk: flutter }` or block style, CRLF
+            # and a trailing comment allowed; commented-out, top-level and hosted forms are not.
+            dep = bool(re.search(r"(?m)^[ \t]+integration_test:[ \t]*(?:\{[ \t]*sdk:[ \t]*flutter[ \t]*\}"
+                                 r"|(?:#[^\n]*)?\r?\n[ \t]+sdk:[ \t]*flutter\b)", f.read()))
     except OSError:
         pass
     n, d = 0, os.path.join(root, "integration_test")

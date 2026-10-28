@@ -143,6 +143,24 @@ class FlutterJourneys(unittest.TestCase):
                        "integration_test/helpers.dart": "testWidgets('b', (t) async {});\n"})
         self.assertEqual(c.flutter_journeys(d)["journeys"], 0)
 
+    def dep(self, pubspec):
+        return c.flutter_journeys(self.tree({"pubspec.yaml": pubspec}))["dep"]
+
+    def test_flutter_dep_forms_accepted(self):
+        for text in ("dev_dependencies:\n  integration_test: { sdk: flutter }\n",       # the prompt's own form
+                     "dev_dependencies:\n  integration_test: {sdk: flutter}\n",
+                     "dev_dependencies:\n  integration_test:\n    sdk: flutter\n",
+                     "dev_dependencies:\r\n  integration_test:\r\n    sdk: flutter\r\n",
+                     "dev_dependencies:\n  integration_test: # e2e journeys\n    sdk: flutter\n"):
+            self.assertTrue(self.dep(text), repr(text))
+
+    def test_flutter_dep_forms_rejected(self):
+        for text in ("dev_dependencies:\n#  integration_test:\n#    sdk: flutter\n",       # commented out
+                     "dev_dependencies:\n  # integration_test: { sdk: flutter }\n",
+                     "integration_test:\n  sdk: flutter\n",                                # top level
+                     "dev_dependencies:\n  integration_test: ^1.0.0\n"):                   # hosted
+            self.assertFalse(self.dep(text), repr(text))
+
     def test_flutter_dep_missing(self):
         d = self.tree({"pubspec.yaml": "name: app\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n"})
         self.assertEqual(c.flutter_journeys(d), {"dep": False, "journeys": 0})
