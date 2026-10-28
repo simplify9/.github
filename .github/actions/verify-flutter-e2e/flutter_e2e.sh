@@ -105,9 +105,11 @@ fi
 emulator_boot netblock_run || exit 2
 [ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
 device="$(adb devices | awk 'NR > 1 && $2 == "device" {print $1; exit}')"
-# Only what happens from here (the app and its tests) counts as blocked traffic.
+# Only what happens from here (the app and its tests) counts as blocked traffic, and the emulator's own
+# residual background traffic, recorded while nothing runs, is never blamed on the tests.
 sleep 5
 netblock_reset
+netblock_idle 30
 
 # flutter_run [PREFIX...]: the integration tests on the emulator; the log keeps the last run.
 flutter_run() {
@@ -124,8 +126,11 @@ if [ "${first}" -ne 0 ]; then
   flutter_run netblock_run
   rerun=${rc}
 fi
-blocked="$(netblock_count)"
-dests="$(netblock_blocked | tr '\n' ' ')"
+# Blocked traffic the tests are blamed for: destinations listed since the idle window, minus those seen
+# while idle. Its count, not the raw packet counter, decides whether the block may be the cause.
+attributable="$(netblock_subtract "${NETBLOCK_IDLE:-}" "$(netblock_blocked)")"
+blocked="$(grep -c . <<< "${attributable}" || true)"
+dests="$(tr '\n' ' ' <<< "${attributable}")"
 dests="${dests% }"
 verdict="$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}" "${NETWORK_RECHECK:-true}")"
 case "${verdict}" in
@@ -133,11 +138,11 @@ case "${verdict}" in
     e2e_network_enforced "${dests}"
     ;;
   network-check)
-    echo "::notice title=[VERIFY] network::e2e failed twice while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running once with network access to tell the two apart"
+    echo "::notice title=[VERIFY] network::e2e failed twice while the block rejected traffic to ${blocked} destination(s): ${dests}; re-running once with network access to tell the two apart"
     netblock_off
     flutter_run
     if [ "$(e2e_after_retry "${rc}")" = network ]; then
-      echo "::warning title=[VERIFY] network::e2e passed only with network access; blocked: ${dests:-unknown} (Android's own background traffic may be listed too). Mock the app's calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+      echo "::warning title=[VERIFY] network::e2e passed only with network access; blocked: ${dests:-unknown}. Mock the app's calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
       echo "network=needed" >> "${GITHUB_OUTPUT}"
     else
       echo "::notice title=[VERIFY] network::e2e failed with network access too: a real failure"
