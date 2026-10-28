@@ -29,5 +29,11 @@ test_hosts_missing_file_empty() {
 test_hosts_rejects_url() { rejects "${FUNCNAME[0]}" 'https://x.example.com/p' 2; }
 test_hosts_rejects_port() { rejects "${FUNCNAME[0]}" 'x.example.com:443' 2; }
 test_hosts_rejects_wildcard() { rejects "${FUNCNAME[0]}" '*.example.com' 2; }
+test_subtract_idle_destinations() {
+  eq "${FUNCNAME[0]}" $'203.0.113.9:443\n[2001:db8::1]:443' "$(netblock_subtract $'198.51.100.7:443\n192.0.2.1:80' $'198.51.100.7:443\n203.0.113.9:443\n[2001:db8::1]:443')"
+  eq "${FUNCNAME[0]}_no_idle" $'203.0.113.9:443' "$(netblock_subtract '' $'203.0.113.9:443')"
+  eq "${FUNCNAME[0]}_all_idle" "" "$(netblock_subtract $'203.0.113.9:443' $'203.0.113.9:443')"
+  eq "${FUNCNAME[0]}_none" "" "$(netblock_subtract $'203.0.113.9:443' '')"
+}
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
