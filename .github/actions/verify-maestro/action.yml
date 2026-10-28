@@ -1,0 +1,73 @@
+# =============================================================================
+# Verify Maestro
+# =============================================================================
+# The React Native `maestro` step of verify: runs every flow in .maestro/ on an
+# Android emulator with no outbound network except loopback and
+# e2e/allowed-hosts.txt.
+#   1. Scans committed e2e recordings and e2e/mocks.json (verify-secret-scan).
+#   2. Before the block: enables KVM, installs the API 34 x86_64 emulator image
+#      (verify-emulator), Maestro CLI 2.11.0 and, with e2e/mocks.json, Mockoon.
+#   3. Turns the network block on (verify-netblock). Mockoon serves
+#      e2e/mocks.json on 127.0.0.1:3901; Metro starts with VERIFY_E2E=1 and
+#      E2E_API_URL=http://localhost:3901 (the app inlines them at bundle time);
+#      the emulator boots blocked (one retry; "did not boot" is reported as
+#      infrastructure); adb reverse forwards 8081 (Metro) and 3901 (Mockoon).
+#   4. Runs each flow file (smoke.yaml first; config.yaml and subfolders are not
+#      flows) with JUnit output, re-runs failed flows once (passing = flaky),
+#      and when flows still fail while the block rejected traffic, lifts the
+#      block and re-runs them: passing then sets output network=needed (the
+#      workflow's `network` step reports it) and the step passes.
+#   5. Names passed, flaky, network-only and failed flows in the job summary.
+#      Evidence (JUnit, screenshots, Maestro logs, Metro and emulator logs) is
+#      left in ${RUNNER_TEMP}/maestro-report for the workflow to upload.
+# Needs a GitHub-hosted runner (KVM, root network control). Run after
+# `yarn install`. Logic: maestro.sh (helpers tested by test_maestro.sh).
+#
+# Inputs:
+#   working-directory  (optional)  Project directory. Default ".".
+#   apk                (required)  Path or glob of the debug APK to install.
+#   network-recheck    (optional)  true (default) while `network` is tolerated: a failure with
+#                                  blocked traffic re-runs once with network access. false once it
+#                                  is enforced: fail without that re-run (never real hosts).
+# Outputs:
+#   network  "needed" when flows passed only with network access, else empty.
+# =============================================================================
+name: 'Verify Maestro'
+author: 'Simplify9'
+description: 'Run every Maestro flow on an Android emulator with outbound network blocked, mocks served, flaky flows re-run once and evidence collected.'
+
+inputs:
+  working-directory:
+    description: 'Project directory (contains package.json and .maestro/).'
+    required: false
+    default: '.'
+  apk:
+    description: 'Path or glob of the debug APK to install on the emulator.'
+    required: true
+
+  network-recheck:
+    description: 'true while the `network` step is tolerated: a failure with blocked traffic re-runs once with network access. false once it is enforced: fail without that re-run.'
+    required: false
+    default: 'true'
+
+outputs:
+  network:
+    description: '"needed" when flows passed only with network access, else empty.'
+    value: ${{ steps.maestro.outputs.network }}
+
+runs:
+  using: composite
+  steps:
+    - name: Maestro journeys
+      id: maestro
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        APK: ${{ inputs.apk }}
+        ACTION_PATH: ${{ github.action_path }}
+        NETWORK_RECHECK: ${{ inputs.network-recheck }}
+      run: bash "${ACTION_PATH}/maestro.sh"
+
+branding:
+  icon: 'smartphone'
+  color: 'blue'

@@ -9,6 +9,10 @@
 #   netblock_hosts FILE       validated hosts of an allowed-hosts file, one per line
 #   netblock_on [FILE]        (re)build the rules; allowed hosts are resolved once and pinned in /etc/hosts
 #   netblock_run CMD...       run CMD blocked (same uid and env, group verify-offline)
+#   netblock_off              lift the block for the group (rules kept; netblock_on restores it)
+#   netblock_reset            forget what was rejected so far (counters and kernel log), block kept
+#   netblock_idle SECONDS     record what is blocked during an idle window (NETBLOCK_IDLE), then reset
+#   netblock_subtract IDLE LIST   the destinations of LIST that IDLE does not have
 #   netblock_count            packets rejected since the last netblock_on
 #   netblock_blocked          rejected destinations as ip:port (best effort, from the kernel log)
 
@@ -80,6 +84,13 @@ netblock_on() {
     done
     allowed=$((allowed + 1))
   done
+  # Multicast (mDNS) and NTP: an emulator's own chatter, never a journey's. Dropped before LOG and
+  # REJECT, so they are neither listed nor counted (netblock_count sums REJECT only).
+  ${sudo} iptables -w -A "${NETBLOCK_CHAIN}" -d 224.0.0.0/4 -j DROP || return 1
+  ${sudo} ip6tables -w -A "${NETBLOCK_CHAIN}" -d ff00::/8 -j DROP || return 1
+  for ipt in iptables ip6tables; do
+    ${sudo} "${ipt}" -w -A "${NETBLOCK_CHAIN}" -p udp --dport 123 -j DROP || return 1
+  done
   for ipt in iptables ip6tables; do
     ${sudo} "${ipt}" -w -A "${NETBLOCK_CHAIN}" -m limit --limit 10/second --limit-burst 20 \
       -j LOG --log-prefix "VERIFY-NETBLOCK " || return 1
@@ -93,8 +104,47 @@ netblock_run() {
   if [ "$(id -u)" = 0 ]; then
     setpriv --reuid 0 --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
   else
-    sudo -E env "PATH=${PATH}" setpriv --reuid "$(id -u)" --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
+    # sudo resets PATH (secure_path), USER and LOGNAME, and may reset HOME: pass the caller's own, so
+    # tools find their per-user files (an emulator's ~/.android/avd, a browser cache).
+    sudo -E env "PATH=${PATH}" "HOME=${HOME}" "USER=$(id -un)" "LOGNAME=$(id -un)" \
+      setpriv --reuid "$(id -u)" --regid "${NETBLOCK_GROUP}" --clear-groups -- "$@"
   fi
+}
+
+netblock_off() {
+  local sudo ipt
+  sudo="$(_nb_sudo)"
+  for ipt in iptables ip6tables; do
+    ${sudo} "${ipt}" -w -D OUTPUT -m owner --gid-owner "${NETBLOCK_GROUP}" -j "${NETBLOCK_CHAIN}" 2>/dev/null || true
+  done
+}
+
+# Used after an emulator boots: its own system traffic must not count as the app's.
+netblock_reset() {
+  local sudo ipt
+  sudo="$(_nb_sudo)"
+  for ipt in iptables ip6tables; do
+    ${sudo} "${ipt}" -w -Z "${NETBLOCK_CHAIN}" 2>/dev/null || true
+  done
+  ${sudo} dmesg -C 2>/dev/null || true
+}
+
+# For an emulator, whose own background traffic can't be fully silenced: what it sends while
+# nothing runs is recorded here and later subtracted from what a journey run is blamed for.
+netblock_idle() {
+  sleep "$1"
+  NETBLOCK_IDLE="$(netblock_blocked)"
+  echo "[VERIFY] network: idle window ${1} s: $(netblock_count) packet(s), destinations: ${NETBLOCK_IDLE:-none listed}" | tr '\n' ' '
+  echo
+  netblock_reset
+}
+
+netblock_subtract() {
+  local f
+  f="$(mktemp)"
+  printf '%s\n' "$1" | sed '/^$/d' > "${f}"
+  printf '%s\n' "$2" | sed '/^$/d' | grep -vxF -f "${f}" || true
+  rm -f "${f}"
 }
 
 netblock_count() {

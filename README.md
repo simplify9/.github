@@ -217,11 +217,12 @@ for every repository.
 │   │   ├── xcode-export/
 │   │   ├── verify-plan/ verify-contract/ verify-web-install/
 │   │   ├── verify-node-deps/ verify-web-smoke/ strapi-rehearsal/
-│   │   ├── verify-web-e2e/ verify-netblock/ verify-secret-scan/ verify-dotnet-tests/
+│   │   ├── verify-web-e2e/ verify-netblock/ verify-secret-scan/ verify-dotnet-tests/ verify-mocks/
+│   │   ├── verify-emulator/ verify-maestro/
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
 │   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
-├── starters/                    <- copyable test starters per stack (web-playwright: web e2e journeys; dotnet-integration: WebApplicationFactory + Testcontainers)
+├── starters/                    <- copyable test starters per stack (web-playwright: web e2e journeys; dotnet-integration: WebApplicationFactory + Testcontainers; react-native-maestro: Maestro flows + mocks)
 ├── workflow-templates/          <- org starter templates (*.yml + *.properties.json)
 └── dependabot-templates/        <- ready-made per-category `dependabot.yml` configs for consumer repos to copy
 ```
@@ -875,7 +876,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` under the network block (`e2e`, see below) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`, not blocked); `network` when the journeys passed only with network access. Runs on the GitHub-hosted runner |
 | `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
 | `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test` (unit test projects, see below), `docker` (no-push build when a `Dockerfile` exists); `integration` (hosted job: Testcontainers test projects); `smoke` (`docker-smoke`: on by default for `dotnet-service`, opt-in for libraries) |
-| `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (emulator smoke) |
+| `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (every `.maestro/` flow on an emulator, network-blocked, see below); `network` when flows passed only with network access |
 | `flutter` | `install`, `analyze`, `test`, `build` (debug APK; on GitHub-hosted runners the job first frees ~20 GB of unused toolchains, as the android job does) |
 | `infra` | none: `result` passes when `plan` and `contract` succeed |
 
@@ -889,6 +890,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
    - If it fails while the block rejected traffic, it re-runs once with network access.
    - Passing then means the app needs a host that is neither mocked nor allowed: `e2e` passes and the `network` step fails, naming the blocked destinations. Until `network`'s own deadline (see "New steps start tolerated") that failure is a warning.
    - Failing again is a real `e2e` failure.
+   - **Once `network` is enforced for the repo** (its own deadline: the later of `contract-deadline` and 2026-12-29), there is no re-run with network access: it would drive the app against real hosts. A failure while traffic was blocked fails `e2e` and names the blocked destinations.
 5. The job summary names failed and flaky (passed on retry) tests, read from the `list` reporter's output. On failure, `playwright-report/` and `test-results/` are uploaded as the artifact `e2e-report` (5 days).
 
 The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with its real API calls until the contract deadline. The web job runs on the GitHub-hosted runner because the block needs root network control.
@@ -901,6 +903,16 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 **Docker smoke (`smoke`).** For `dotnet-service`, `docker-smoke` builds the image, runs it and probes `/health` by default (`smoke-path` overrides the path, `none` turns it off). The image must start without its database: `/health` is liveness only. When on by default it is a new step, tolerated until 2026-12-29 or the repo's later deadline; a repo that set `smoke-path` itself keeps its blocking behaviour.
 
 `maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
+
+**React Native journeys (`maestro`).** Starter in `starters/react-native-maestro/`.
+1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
+2. An API 34 x86_64 emulator boots with **outbound network blocked** (the emulator, Metro and Mockoon run under the block; Maestro, the host-side driver, does not; allowed: loopback and `e2e/allowed-hosts.txt`). Android's own background traffic is stopped after boot (inside the emulator, system apps' traffic is rejected; multicast and NTP are dropped silently on the runner), and a 30-second idle window records what the emulator still sends: those destinations are never blamed on the journeys. If the emulator doesn't boot in 2 attempts, or its image, Maestro or the APK can't be installed, the step fails as "infrastructure, not the app" (exit 2), not as a journey failure. The step times out after 35 minutes, as a failed step whose evidence is still uploaded.
+3. With `e2e/mocks.json`, Mockoon serves it on port 3901, forwarded into the emulator with `adb reverse`. Metro starts with `VERIFY_E2E=1` and `E2E_API_URL=http://localhost:3901` (and the same as `EXPO_PUBLIC_VERIFY_E2E`/`EXPO_PUBLIC_E2E_API_URL`). They exist only in Metro's environment at bundle time: the app must read them there (a Babel inline-env transform, or Expo's `EXPO_PUBLIC_` variables), not from a `.env` file or a Gradle build field.
+4. Every flow file directly in `.maestro/` runs, `smoke.yaml` first (`config.yaml` and subfolders are not flows).
+   - A failed flow re-runs once; passing then is reported as flaky.
+   - A flow that still fails while the block rejected traffic re-runs once with network access. Passing then means the app needs an unmocked host: `maestro` passes and the `network` step fails, a warning until its deadline.
+   - Once `network` is enforced for the repo, that unblocked re-run no longer happens (no real hosts): the flow fails, naming the blocked destinations.
+5. The summary names passed, flaky, network-only and failed flows. On failure, JUnit files, screenshots, Maestro logs and the Metro and emulator logs are uploaded as `maestro-report` (5 days).
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
@@ -919,6 +931,8 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 | `script:<name>` | `web`: `lint`, `typecheck`, `test`, `build`, `test:e2e`; `react-native`: `lint`, `typecheck`, `test`; `strapi`: `build` | that script in `package.json` |
 | `align-deps` | `react-native` | `@rnx-kit/align-deps` in `devDependencies` |
 | `maestro-smoke` | `react-native` | `.maestro/smoke.yaml` |
+| `maestro-journeys` | `react-native` | at least 3 flow files directly in `.maestro/` (`smoke.yaml` counts; `config.yaml` and subfolders don't) (since 2026-11-03) |
+| `e2e-mocks` | `react-native` | `e2e/mocks.json`, a Mockoon environment file the app's API calls are served from in CI (since 2026-11-03) |
 | `widget-test` | `flutter` | a `test/**/*_test.dart` file |
 | `playwright` | `web` | `@playwright/test` in `devDependencies` and a `playwright.config.{ts,js,mjs,cjs}` in the project directory (since 2026-11-03) |
 | `integration-tests` | `dotnet-service`; `dotnet-library` that uses an outside system | service: a test project referencing `Microsoft.AspNetCore.Mvc.Testing`; library with a non-test project referencing an outside-system client (`StackExchange.Redis`, `Npgsql*`, `Microsoft.Data.SqlClient`, `System.Data.SqlClient`, `MongoDB.Driver`, `RabbitMQ.Client`, `MassTransit*`, `Confluent.Kafka`, `Azure.Storage.*`): a test project referencing `Testcontainers`. A project whose config holds a real connection string never counts (since 2026-11-03) |
@@ -1051,7 +1065,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 28 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 29 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -1120,6 +1134,9 @@ All 28 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-web-smoke` | Serve the built web app and load it in Chromium, failing on page or console errors | `working-directory` | - |
 | `verify-dotnet-tests` | Run the `unit` or `integration` (Testcontainers) test projects of a built .NET solution from a filtered copy of it; never run a test project whose config holds a real connection string (`classify.py`, `run_tests.sh`). With no `build-target`, only report `has` | `kind` (required), `build-target`, `working-directory`, `results-directory` | `ran`, `has` |
 | `verify-web-e2e` | The web `e2e` step: scan `e2e/**/*.har` and `e2e/mocks.json`, serve the mocks with Mockoon (`E2E_API_URL`), run `test:e2e` with outbound network blocked (one re-run with network access when blocked traffic may explain a failure), name failed and flaky tests in the summary. Needs a GitHub-hosted runner | `working-directory`, `runner` (required) | `network` (`needed` when the tests passed only with network access) |
+| `verify-maestro` | The React Native `maestro` step: every `.maestro/` flow on an API 34 emulator with outbound network blocked, `e2e/mocks.json` served as `E2E_API_URL=http://localhost:3901`, flaky flows re-run once, a network re-check, evidence in `$RUNNER_TEMP/maestro-report`. Needs a GitHub-hosted runner | `working-directory`, `apk` (required) | `network` |
+| `verify-emulator` | Script, no `action.yml`: `emulator.sh` (sourced) enables KVM, installs an API 34 x86_64 emulator image and boots it, optionally through `netblock_run` so the emulator's traffic (the app's) is blocked; one retry, and a separate "did not boot (infrastructure)" error. Used by the mobile e2e steps | - | - |
+| `verify-mocks` | Script, no `action.yml`: `mockoon.sh` (sourced) installs the pinned `@mockoon/cli` (9.9.0) and serves a Mockoon environment file on `127.0.0.1:3901` with proxying off, optionally through a prefix command such as `netblock_run`. Used by the web and mobile e2e steps | - | - |
 | `verify-netblock` | Script, no `action.yml`: `netblock.sh` (sourced) blocks outbound traffic for the commands it runs (group `verify-offline`, iptables owner match) except loopback and the hosts of an allowed-hosts file, resolved once and pinned in `/etc/hosts`. Needs `sudo` and iptables | - | - |
 | `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures, Playwright HAR recordings, Mockoon mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), signed JWTs (an unsigned mock token, `{"alg":"none"}` with an empty signature, passes), private keys, common tokens, connection strings with a password and a non-local host (key=value in any key order, split on `;` or `,`, including Redis `host:port,password=…`; or `scheme://user:pass@host`; `localhost`, `127.0.0.1`, `host.docker.internal` and dotless names such as a compose service `db` count as local), credential headers with a value (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `Api-Key`, `X-Auth-Token`, as HAR `name`/`value` or Mockoon `key`/`value`) and non-empty password fields (JSON, escaped JSON in a HAR `postData`, form-encoded); `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
 | `strapi-rehearsal` | Boot Strapi against Postgres; when a dependency file, a database migration, a content-type schema or a component changed, scan and restore `ci/fixture.sql.gz`, boot the base commit then HEAD on it and require unchanged content-table row counts, columns, column values and content-API responses plus `/admin` 200, except lines the PR adds to `ci/rehearsal-expected-changes.txt` (`rehearse.sh`, `api_check.py`); diffs in artifact `strapi-rehearsal-diff` | `base-sha`, `strapi-changed`, `working-directory`, `package-runner` | - |

@@ -16,6 +16,9 @@ as_runner() {
   # shellcheck disable=SC2016 # expanded by the inner sh, on purpose
   eq nonroot_keeps_env_uid_and_path "bar runner verify-offline ${PATH}" \
     "$(FOO=bar netblock_run sh -c 'echo "${FOO} $(id -un) $(id -gn) ${PATH}"')"
+  # HOME and USER as the caller sees them: tools find their per-user files (e.g. ~/.android/avd).
+  # shellcheck disable=SC2016 # expanded by the inner sh, on purpose
+  eq nonroot_keeps_home_and_user "${HOME} runner" "$(netblock_run sh -c 'echo "${HOME} ${USER}"')"
   eq nonroot_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"
   eq nonroot_count 1 "$([ "$(netblock_count)" -gt 0 ] && echo 1 || echo 0)"
 }
@@ -51,6 +54,29 @@ inner() {
   out="$(bash -c "set -euo pipefail; source ${here}/netblock.sh; netblock_on /tmp/bad" 2>&1)"; rc=$?
   eq unresolvable_host_rc 1 "${rc}"
   eq unresolvable_host_named 1 "$(grep -c 'cannot resolve allowed host no-such-host.invalid' <<< "${out}")"
+
+  # Multicast (mDNS) and NTP are dropped silently: an emulator's own chatter, never the app's journey.
+  netblock_on >/dev/null
+  netblock_run python3 -c 'import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); [s.sendto(b"x", a) for a in (("224.0.0.251", 5353), ("203.0.113.9", 123))]' 2>/dev/null
+  eq multicast_and_ntp_not_counted 0 "$(netblock_count)"
+  netblock_run curl -sS -m 5 https://example.org >/dev/null 2>&1
+  eq tcp_still_counted 1 "$([ "$(netblock_count)" -gt 0 ] && echo 1 || echo 0)"
+
+  # netblock_reset forgets traffic rejected so far (an emulator's own boot chatter), keeping the block.
+  netblock_on >/dev/null
+  netblock_run curl -sS -m 5 https://example.org >/dev/null 2>&1
+  eq before_reset_counted 1 "$([ "$(netblock_count)" -gt 0 ] && echo 1 || echo 0)"
+  netblock_reset
+  eq after_reset_zero 0 "$(netblock_count)"
+  eq after_reset_still_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"
+
+  # netblock_off lifts the block for the group without restarting anything (mobile network check).
+  netblock_on >/dev/null
+  eq before_off_blocked 1 "$(failed netblock_run curl -sS -m 5 https://example.org)"
+  netblock_off
+  eq after_off_reachable 0 "$(failed netblock_run curl -sS -m 10 https://example.org)"
+  eq after_off_no_jump 0 "$(iptables -S OUTPUT | grep -c VERIFY_NETBLOCK)"
+  eq after_off_no_jump_v6 0 "$(ip6tables -S OUTPUT | grep -c VERIFY_NETBLOCK)"
 
   useradd -m -s /bin/bash runner && echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner
   netblock_on >/dev/null

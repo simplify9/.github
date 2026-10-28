@@ -38,6 +38,15 @@ test_zip_recordings() {
 test_verdict_pass_with_blocked() { eq "${FUNCNAME[0]}" pass "$(e2e_verdict 0 5)"; }
 test_verdict_fail_nothing_blocked() { eq "${FUNCNAME[0]}" fail "$(e2e_verdict 1 0)"; }
 test_verdict_retry() { eq "${FUNCNAME[0]}" retry "$(e2e_verdict 1 3)"; }
+test_verdict_recheck_true_retries() { eq "${FUNCNAME[0]}" retry "$(e2e_verdict 1 3 true)"; }
+test_verdict_recheck_false_no_rerun() {
+  eq "${FUNCNAME[0]}" blocked "$(e2e_verdict 1 3 false)"
+  eq "${FUNCNAME[0]}_nothing_blocked" fail "$(e2e_verdict 1 0 false)"
+  eq "${FUNCNAME[0]}_pass" pass "$(e2e_verdict 0 3 false)"
+}
+test_network_enforced_message() {
+  eq "${FUNCNAME[0]}" "::error title=[VERIFY] network::the journeys failed while the block rejected traffic; blocked: 203.0.113.5:443. From the network deadline verify no longer re-runs with network access: mock these calls, or list third-party SDK hosts in e2e/allowed-hosts.txt" "$(e2e_network_enforced "203.0.113.5:443")"
+}
 test_after_retry() {
   eq "${FUNCNAME[0]}_pass" network "$(e2e_after_retry 0)"
   eq "${FUNCNAME[0]}_fail" fail "$(e2e_after_retry 1)"

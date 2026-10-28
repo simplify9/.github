@@ -28,6 +28,8 @@ your repo, then replace the selectors and routes with your app's.
   any other host that no route mocked fails the test and lists the URL.
 - **Allowed hosts.** Only third-party SDKs the app cannot work without (crash reporting, maps) go in
   `e2e/allowed-hosts.txt`, one host per line with the reason. Never our own APIs.
+- **Write journeys (sign-up, forms, payments) must only ever call mocks; tests must never create
+  real records.**
 - **No real credentials.** `verify` scans `e2e/**/*.har` and `e2e/mocks.json` and refuses real
   emails, signed JWTs, tokens, credential headers and passwords. Use `example.com` addresses and an
   unsigned token like `FAKE_TOKEN` in `fixtures.ts`.

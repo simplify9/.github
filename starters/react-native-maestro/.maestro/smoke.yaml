@@ -1,0 +1,8 @@
+# Journey 1: the app launches and its first screen renders. Replace appId and the text.
+appId: com.example.app
+---
+- launchApp
+# The first Metro bundle on a cold CI runner takes well over the default wait.
+- extendedWaitUntil:
+    visible: "Welcome"
+    timeout: 180000

@@ -25,9 +25,39 @@ e2e_zip_recordings() {
   (cd "$1" && find e2e -type f -name '*.zip' | LC_ALL=C sort)
 }
 
-# e2e_verdict <rc> <blocked-count>: pass | fail (a real failure) | retry (the block may be the cause)
+# e2e_scan_committed <scan.py>: refuse zipped recordings, scan recordings and mocks (run from the
+# project directory). Shared with verify-maestro.
+e2e_scan_committed() {
+  local -a zips targets
+  mapfile -t zips < <(e2e_zip_recordings .)
+  if [ "${#zips[@]}" -gt 0 ]; then
+    echo "::error title=[VERIFY] e2e::${zips[*]}: zipped recordings cannot be scanned for personal data; record with routeFromHAR(..., { update: true, updateContent: 'embed' }) and commit the .har"
+    return 1
+  fi
+  mapfile -t targets < <(e2e_scan_targets .)
+  [ "${#targets[@]}" -gt 0 ] || return 0
+  echo "[VERIFY] e2e: scanning ${targets[*]}"
+  if ! python3 "$1" "${targets[@]}"; then
+    echo "::error title=[VERIFY] e2e::e2e recordings or mocks hold personal data or secrets (see above); remove or scrub the recording"
+    return 1
+  fi
+}
+
+# e2e_verdict <rc> <blocked-count> [recheck: true|false, default true]: pass | fail (a real failure)
+# | retry (the block may be the cause: re-run with network access) | blocked (the same, but `network`
+# is enforced for this repo, so no unblocked re-run: it would drive the app against real hosts)
 e2e_verdict() {
-  if [ "$1" -eq 0 ]; then echo pass; elif [ "$2" -eq 0 ]; then echo fail; else echo retry; fi
+  if [ "$1" -eq 0 ]; then echo pass
+  elif [ "$2" -eq 0 ]; then echo fail
+  elif [ "${3:-true}" = true ]; then echo retry
+  else echo blocked
+  fi
+}
+
+# e2e_network_enforced <destinations>: the error for a failure with blocked traffic once `network`
+# is enforced (no unblocked re-run any more).
+e2e_network_enforced() {
+  echo "::error title=[VERIFY] network::the journeys failed while the block rejected traffic; blocked: ${1:-unknown}. From the network deadline verify no longer re-runs with network access: mock these calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
 }
 
 # e2e_after_retry <rc of the unblocked run>: network (passes only with network access) | fail
@@ -40,47 +70,25 @@ e2e_after_retry() {
 set -euo pipefail
 # shellcheck source=../verify-netblock/netblock.sh
 source "${ACTION_PATH}/../verify-netblock/netblock.sh"
-MOCK_PORT=3901
+# shellcheck source=../verify-mocks/mockoon.sh
+source "${ACTION_PATH}/../verify-mocks/mockoon.sh"
 log="${RUNNER_TEMP}/e2e.log"
-mock_pid=""
-trap '[ -z "${mock_pid}" ] || kill "${mock_pid}" 2>/dev/null || true' EXIT
+MOCKOON_PID=""
+trap '[ -z "${MOCKOON_PID}" ] || kill "${MOCKOON_PID}" 2>/dev/null || true' EXIT
 
-mapfile -t zips < <(e2e_zip_recordings .)
-if [ "${#zips[@]}" -gt 0 ]; then
-  echo "::error title=[VERIFY] e2e::${zips[*]}: zipped recordings cannot be scanned for personal data; record with routeFromHAR(..., { update: true, updateContent: 'embed' }) and commit the .har"
-  exit 1
-fi
-mapfile -t targets < <(e2e_scan_targets .)
-if [ "${#targets[@]}" -gt 0 ]; then
-  echo "[VERIFY] e2e: scanning ${targets[*]}"
-  if ! python3 "${ACTION_PATH}/../verify-secret-scan/scan.py" "${targets[@]}"; then
-    echo "::error title=[VERIFY] e2e::e2e recordings or mocks hold personal data or secrets (see above); remove or scrub the recording"
-    exit 1
-  fi
-fi
+e2e_scan_committed "${ACTION_PATH}/../verify-secret-scan/scan.py" || exit 1
 netblock_hosts e2e/allowed-hosts.txt >/dev/null
 
 # Everything that needs the internet happens before the block.
 npx playwright install --with-deps chromium
 if [ -f e2e/mocks.json ]; then
-  npm i --no-save --no-audit --no-fund --prefix "${RUNNER_TEMP}/mockoon" @mockoon/cli@9.9.0 >/dev/null
+  mockoon_install
 fi
 
 netblock_on e2e/allowed-hosts.txt
 if [ -f e2e/mocks.json ]; then
-  netblock_run "${RUNNER_TEMP}/mockoon/node_modules/.bin/mockoon-cli" start -d e2e/mocks.json -p "${MOCK_PORT}" \
-    -l 127.0.0.1 --proxy disabled --disable-admin-api -X -r > "${RUNNER_TEMP}/mockoon.log" 2>&1 &
-  mock_pid=$!
-  for _ in $(seq 1 30); do
-    (echo > "/dev/tcp/127.0.0.1/${MOCK_PORT}") 2>/dev/null && break
-    sleep 1
-  done
-  if ! (echo > "/dev/tcp/127.0.0.1/${MOCK_PORT}") 2>/dev/null; then
-    cat "${RUNNER_TEMP}/mockoon.log"
-    echo "::error title=[VERIFY] e2e::Mockoon did not serve e2e/mocks.json on port ${MOCK_PORT} within 30 s (log above)"
-    exit 1
-  fi
-  export E2E_API_URL="http://127.0.0.1:${MOCK_PORT}"
+  mockoon_start e2e/mocks.json netblock_run || exit 1
+  export E2E_API_URL="http://127.0.0.1:${MOCKOON_PORT}"
   echo "::notice title=[VERIFY] e2e::Mockoon serves e2e/mocks.json at ${E2E_API_URL}"
 fi
 
@@ -96,7 +104,10 @@ blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
 dests="${dests% }"
 
-case "$(e2e_verdict "${rc}" "${blocked}")" in
+case "$(e2e_verdict "${rc}" "${blocked}" "${NETWORK_RECHECK:-true}")" in
+  blocked)
+    e2e_network_enforced "${dests}"
+    ;;
   pass)
     if [ "${blocked}" -gt 0 ]; then
       echo "::notice title=[VERIFY] network::e2e passed; the block rejected ${blocked} packet(s) to: ${dests:-unknown (kernel log unreadable)}"

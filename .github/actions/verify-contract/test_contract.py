@@ -8,6 +8,8 @@ import contract as c
 WEB_PKG = {"scripts": {k: "x" for k in ("lint", "typecheck", "test", "build", "test:e2e")},
            "engines": {"node": ">=20"}, "devDependencies": {"@playwright/test": "1"}}
 WEB_FILES = {"yarn.lock", "playwright.config.ts"}
+RN_PKG = {"scripts": {k: "x" for k in ("lint", "typecheck", "test")}, "engines": {"node": "20"},
+          "devDependencies": {"@rnx-kit/align-deps": "1"}}
 MVC_TESTS = {"path": "Api.Tests/Api.Tests.csproj", "test": True, "testcontainers": True, "mvc_testing": True,
              "clients": [], "refused": [], "kind": "integration"}
 
@@ -71,7 +73,26 @@ class MissingItems(unittest.TestCase):
     def test_rn_missing_align_deps_and_maestro(self):
         pkg = {"scripts": {k: "x" for k in ("lint", "typecheck", "test")}, "engines": {"node": "20"}}
         self.assertEqual(c.missing_items("react-native", {"yarn.lock"}, pkg, 0, False),
-                         ["align-deps", "maestro-smoke"])
+                         ["align-deps", "maestro-smoke", "maestro-journeys", "e2e-mocks"])
+
+    def test_rn_journeys_need_three_flows(self):
+        two = {"yarn.lock", ".maestro/smoke.yaml", ".maestro/a.yaml", "e2e/mocks.json"}
+        self.assertIn("maestro-journeys", c.missing_items("react-native", two, RN_PKG, 0, False))
+        three = two | {".maestro/b.yml"}
+        self.assertEqual(c.missing_items("react-native", three, RN_PKG, 0, False), [])
+
+    def test_rn_config_and_subflows_not_counted(self):
+        files = {"yarn.lock", ".maestro/smoke.yaml", ".maestro/config.yaml", ".maestro/sub/x.yaml",
+                 ".maestro/a.yaml", "e2e/mocks.json"}
+        self.assertEqual(c.missing_items("react-native", files, RN_PKG, 0, False), ["maestro-journeys"])
+
+    def test_rn_e2e_mocks(self):
+        files = {"yarn.lock", ".maestro/smoke.yaml", ".maestro/a.yaml", ".maestro/b.yaml"}
+        self.assertEqual(c.missing_items("react-native", files, RN_PKG, 0, False), ["e2e-mocks"])
+
+    def test_rn_new_items_deadline(self):
+        for item in ("maestro-journeys", "e2e-mocks"):
+            self.assertEqual(c.item_deadline(item, "2026-11-10"), date(2026, 12, 29))
 
     def test_strapi_needs_no_fixture(self):
         # Generated data covers a repo without ci/fixture.sql.gz, and DevOps (not the repo) makes the copy.
