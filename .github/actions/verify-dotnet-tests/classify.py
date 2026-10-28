@@ -23,7 +23,10 @@ import scan  # noqa: E402
 
 SKIP_DIRS = {"bin", "obj", ".git", "node_modules"}
 CONFIG_EXT = (".json", ".config", ".runsettings", ".env", ".yml", ".yaml")
-PACKAGE_REF = re.compile(r'<PackageReference\s+Include="([^"]+)"', re.I)
+# Include anywhere among the attributes, single or double quotes (Update= modifies, never adds).
+PACKAGE_REF = re.compile(r"""<PackageReference\b[^>]*?\bInclude\s*=\s*["']([^"']+)["']""", re.I)
+# MSBuild imports these into every project below them: what they reference counts for the project.
+INHERITED = ("Directory.Build.props", "Directory.Build.targets")
 # Outside-system clients: a library using one needs Testcontainers tests (contract item integration-tests).
 CLIENTS = {"stackexchange.redis", "microsoft.data.sqlclient", "system.data.sqlclient", "mongodb.driver",
            "rabbitmq.client", "confluent.kafka"}
@@ -66,14 +69,29 @@ def refusals(project_dir):
     return out
 
 
+def _read(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def inherited_text(project_dir, root):
+    """Every Directory.Build.props/.targets from project_dir up to root. MSBuild imports only the nearest
+    unless it chains upward; folding all of them in can only add references, never hide one."""
+    texts, d, top = [], os.path.realpath(project_dir), os.path.realpath(root)
+    while True:
+        texts += [_read(os.path.join(d, n)) for n in INHERITED if os.path.isfile(os.path.join(d, n))]
+        if d == top or os.path.dirname(d) == d:
+            return "\n".join(texts)
+        d = os.path.dirname(d)
+
+
 def classify(root):
     projects = []
     for dp, fn in _walk(root):
         if not fn.endswith(".csproj"):
             continue
         path = os.path.join(dp, fn)
-        with open(path, encoding="utf-8", errors="replace") as f:
-            info = project_info(f.read())
+        info = project_info(_read(path) + "\n" + inherited_text(dp, root))
         info["path"] = os.path.relpath(path, root).replace(os.sep, "/")
         info["refused"] = refusals(dp) if info["test"] else []
         info["kind"] = None if not info["test"] else (

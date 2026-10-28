@@ -47,7 +47,7 @@ on:
         type: string
         default: "."
       known-failing:
-        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test integration build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later (network) are tolerated until their own deadline without being listed."
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test integration build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later are tolerated until their own deadline without being listed: network (web), smoke (dotnet-service, when smoke-path is empty)."
         required: false
         type: string
         default: ""
@@ -541,8 +541,11 @@ jobs:
           persist-credentials: false
 
       # Cheap check first: no Testcontainers project means no .NET setup or build here.
+      # Same `build` tolerance as the dotnet job's build: a repo whose build is known-failing
+      # must not turn red here either.
       - name: Detect integration projects
         id: detect
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
         uses: simplify9/.github/.github/actions/verify-dotnet-tests@main
         with:
           kind: integration
@@ -551,6 +554,7 @@ jobs:
       - name: Restore and build
         id: build
         if: ${{ steps.detect.outputs.has == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ') }}
         uses: simplify9/.github/.github/actions/dotnet-build@main
         env:
           NUGET_AUTH_TOKEN: ${{ secrets.nuget-restore-token }}
@@ -589,7 +593,8 @@ jobs:
           CONCLUSION: ${{ steps.integration.conclusion }}
         run: |
           failed="" warned=""
-          # A build failure here is already reported by the dotnet job's `build`.
+          # A build failure here fails this job (or, when `build` is known-failing, is tolerated as
+          # in the dotnet job, which reports it under `build`); only the test outcome is collected.
           if [ "$OUTCOME" = "failure" ]; then
             if [ "$CONCLUSION" = "success" ]; then warned="integration"; else failed="integration"; fi
           fi

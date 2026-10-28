@@ -52,8 +52,6 @@ PATTERNS = [
     ("token", re.compile(r"ghp_[A-Za-z0-9]{36}|github_pat_\w{50,}|AKIA[0-9A-Z]{16}"
                          r"|sk_live_[0-9A-Za-z]{16,}|xox[abpr]-[0-9A-Za-z-]{10,}")),
     ("connection-string", re.compile(
-        r"(?i)(?:host|server|data source)=(?!" + LOCAL_HOSTS + r"\b)[^;\"']{1,200};[^\"'\n]{0,300}?password=[^;\"'\s]+")),
-    ("connection-string", re.compile(
         r"(?i)(?:postgres(?:ql)?|amqps?|mongodb(?:\+srv)?|redis)://[^:/@\s\"']*:[^@\s\"']+@(?!" + LOCAL_HOSTS + r"\b)")),
     # Recorded (HAR {"name","value"}) or mocked (Mockoon {"key","value"}) credential headers.
     ("auth-header", re.compile(
@@ -67,6 +65,12 @@ PATTERNS = [
 # Credential headers and cookies, also found by walking parsed HAR/Mockoon JSON (pretty-printed files put
 # "name" and "value" on separate lines, which the line patterns cannot see).
 CRED_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key", "x-auth-token"}
+# Key=value connection strings are checked by _connection_strings (any key order), not a pattern.
+CONN_SEGMENT = re.compile(r"[^\"'\n<>]+")  # quotes, newlines and tags bound one candidate value
+CONN_HOST_KEYS = {"host", "server", "data source", "address", "addr", "network address"}
+CONN_PASSWORD_KEYS = {"password", "pwd"}
+LOCAL_NAMES = {"localhost", "127.0.0.1", "host.docker.internal", "::1"}
+HOST_PORT = re.compile(r"^\s*([A-Za-z0-9.-]+):\d{2,5}\s*$")  # StackExchange.Redis "host:port,password=..."
 COPY = re.compile(r"^COPY public\.\"?([A-Za-z0-9_]+)\"? \((.*)\) FROM stdin;$")
 INSERT = re.compile(r"^INSERT INTO (?:public\.)?\"?([A-Za-z0-9_]+)\"?[ (]")
 
@@ -102,6 +106,43 @@ def _in_url_userinfo(line, start):
     token_start = max(line.rfind(c, 0, start) for c in " \t\"'") + 1
     i = line.rfind("://", token_start, start)
     return i >= 0 and not re.search(r"[/?#\\<>]", line[i + 3:start])
+
+
+def _remote(host):
+    """True for a host a CI run could really reach: not local, and not a dotless name such as a
+    docker-compose service (`db`, `postgres`), which only resolves inside that compose network."""
+    host = host.strip().lower()
+    if host.startswith("tcp:"):
+        host = host[4:]
+    host = host.split(",")[0].strip()
+    if host.count(":") == 1:
+        host = host.split(":")[0]
+    return bool(host) and host not in LOCAL_NAMES and "." in host
+
+
+def _connection_strings(line):
+    """Start offsets of key=value connection strings holding a non-empty password and a remote host,
+    in any key order (parts split on ; or ,). Linear in the line: each segment is split once."""
+    out = []
+    for m in CONN_SEGMENT.finditer(line):
+        seg = m.group(0)
+        low = seg.lower()
+        if "=" not in seg or ("password" not in low and "pwd" not in low):
+            continue
+        password = remote = False
+        for part in re.split(r"[;,]", seg):
+            key, eq, value = part.partition("=")
+            key = key.strip().lower()
+            if eq and key in CONN_PASSWORD_KEYS and value.strip():
+                password = True
+            elif eq and key in CONN_HOST_KEYS:
+                remote = remote or _remote(value)
+            elif not eq:
+                hp = HOST_PORT.match(part)
+                remote = remote or bool(hp and _remote(hp.group(1)))
+        if password and remote:
+            out.append(m.start())
+    return out
 
 
 def scan_lines(lines, allow, strapi_dump):
@@ -143,6 +184,8 @@ def scan_lines(lines, allow, strapi_dump):
             for m in rx.finditer(line):
                 if m.group(0) != CI_ADMIN_HASH:
                     findings.append(Finding(n, kind, m.group(0)[:4] + "…", where(m.start())))
+        for pos in _connection_strings(line):
+            findings.append(Finding(n, "connection-string", "key=value with a password…", where(pos)))
     return findings
 
 

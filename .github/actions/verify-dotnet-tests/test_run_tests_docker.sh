@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317 # shellcheck follows the sourced run_tests.sh into its main path
 # run_tests.sh against the real .NET 10 SDK: re-runs itself in mcr.microsoft.com/dotnet/sdk:10.0.
 # Builds a solution with a unit, a Testcontainers, a refused and an orphan test project (the
 # Testcontainers project never starts a container) and checks which ones each kind runs, for .sln
@@ -40,13 +41,21 @@ inner() {
     eq "${fmt}_unit_rc" 0 $?
     eq "${fmt}_unit_runs_only_unit" 1 "$(grep -c 'Passed!.*Unit.Tests.dll' <<< "${out}")"
     eq "${fmt}_unit_names_refused" 1 "$(grep -c 'tests/Real.Tests/Real.Tests.csproj is not run' <<< "${out}")"
-    eq "${fmt}_unit_ran" "ran=true" "$(cat /tmp/out-u-$fmt)"
+    eq "${fmt}_unit_ran" "ran=true" "$(cat "/tmp/out-u-${fmt}")"
+    eq "${fmt}_unit_copy_removed" 0 "$(find . -maxdepth 1 -name '__verify_*' | wc -l | tr -d ' ')"
     out="$(KIND=integration BUILD_TARGET="App.$fmt" WORKDIR=. RESULTS_DIR=/tmp/trx-$fmt GITHUB_OUTPUT=/tmp/out-i-$fmt bash "${here}/run_tests.sh" 2>&1)"
     eq "${fmt}_integration_fails_on_db_only" "1 0 0" "$(grep -c 'Db.Tests ran' <<< "${out}") $(grep -c 'Real.Tests ran' <<< "${out}") $(grep -c 'Unit.Tests.dll' <<< "${out}")"
-    eq "${fmt}_trx_written" 1 "$(find /tmp/trx-$fmt -name '*.trx' | wc -l | tr -d ' ')"
+    eq "${fmt}_trx_written" 1 "$(find "/tmp/trx-${fmt}" -name '*.trx' | wc -l | tr -d ' ')"
+    eq "${fmt}_integration_copy_removed" 0 "$(find . -maxdepth 1 -name '__verify_*' | wc -l | tr -d ' ')"
     eq "${fmt}_no_copy_left_dirty" "App.$fmt" "$(filtered_solution "App.$fmt" /dev/null unit)"
     KIND=integration BUILD_TARGET="" WORKDIR=. RESULTS_DIR="" GITHUB_OUTPUT=/tmp/out-d-$fmt bash "${here}/run_tests.sh" >/dev/null 2>&1
-    eq "${fmt}_detect_has" "has=true" "$(cat /tmp/out-d-$fmt)"
+    eq "${fmt}_detect_has" "has=true" "$(cat "/tmp/out-d-${fmt}")"
+    # A solution `dotnet sln list` cannot read: fail closed, never test it unfiltered.
+    printf 'not a solution file\n' > "Broken.$fmt"
+    out="$(KIND=unit BUILD_TARGET="Broken.$fmt" WORKDIR=. RESULTS_DIR="" GITHUB_OUTPUT=/tmp/out-b-$fmt bash "${here}/run_tests.sh" 2>&1)"
+    eq "${fmt}_broken_rc" 1 $?
+    eq "${fmt}_broken_named" 1 "$(grep -c 'cannot list the projects of Broken' <<< "${out}")"
+    eq "${fmt}_broken_never_tested" 0 "$(grep -c 'dotnet test' <<< "${out}")"
     cd / || exit 1
   done
   mkdir -p /tmp/none && cd /tmp/none && dotnet new classlib -n Only -o src/Only >/dev/null && dotnet new sln -n N --format sln >/dev/null \

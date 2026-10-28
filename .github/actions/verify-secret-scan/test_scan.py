@@ -129,6 +129,38 @@ class Secrets(unittest.TestCase):
             self.assertEqual(kinds(line), [], line)
 
 
+class ConnectionStringsAnyOrder(unittest.TestCase):
+    def test_password_before_host(self):
+        self.assertEqual(kinds("User ID=app;Password=x;Host=db.example.co"), ["connection-string"])
+
+    def test_server_with_pwd(self):
+        self.assertEqual(kinds("Server=sql.example.co;User Id=sa;Pwd=x"), ["connection-string"])
+
+    def test_redis_host_port_form(self):
+        self.assertEqual(kinds('{"Redis": "cache.example.co:6380,password=x,ssl=True"}'), ["connection-string"])
+
+    def test_compose_service_name_is_local(self):
+        self.assertEqual(kinds("Host=db;Password=postgres"), [])
+        self.assertEqual(kinds("redis:6379,password=x"), [])
+
+    def test_sql_server_tcp_prefix_and_port(self):
+        self.assertEqual(kinds('"Data Source=tcp:sql.example.co,1433;Initial Catalog=app;Password=x"'), ["connection-string"])
+
+    def test_no_password_is_clean(self):
+        self.assertEqual(kinds("Host=db.example.co;Database=app;Username=app"), [])
+
+    def test_value_never_printed(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "appsettings.json")
+            with open(p, "w") as f:
+                f.write('{"Db": "Username=app;Password=hunter22secret;Host=db.example.co"}\n')
+            rc, out = run_main([p])
+        self.assertEqual(rc, 1)
+        self.assertIn("connection-string", out)
+        self.assertNotIn("hunter22", out)
+        self.assertNotIn("db.example.co", out)
+
+
 class RecordingsAndMocks(unittest.TestCase):
     def test_har_authorization_header(self):
         self.assertEqual(kinds('{"name": "Authorization", "value": "Bearer abcdefgh12345"}'), ["auth-header"])

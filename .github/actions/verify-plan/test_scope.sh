@@ -41,6 +41,7 @@ test_smoke_scoped_to_dotnet_service() {
   eq "${FUNCNAME[0]}_effective" "docker network smoke" "$(effective_known_failing docker 2026-12-21 2026-12-01 dotnet-service)"
 }
 test_stack_entry_does_not_leak_to_other_stacks() {
+  # shellcheck disable=SC2034 # read by new_steps_tolerated through bash dynamic scope
   local NEW_STEPS="flutter:e2e:2026-12-29 *:network:2026-12-29"
   eq "${FUNCNAME[0]}_web" "network" "$(new_steps_tolerated '' 2026-12-01 web)"
   eq "${FUNCNAME[0]}_flutter" "e2e network" "$(new_steps_tolerated '' 2026-12-01 flutter)"
@@ -87,6 +88,24 @@ test_scope_expression_copies_identical() {
   res="$(awk '/^  result:/{f=1} f && /FULL: /{sub(/.*FULL: \$\{\{ /,""); sub(/ \}\}$/,""); print; exit}' "$yml")"
   eq "${FUNCNAME[0]}_plan" "$canon" "$plan"
   eq "${FUNCNAME[0]}_result" "$canon" "$res"
+}
+# step_block <job> <step-id>: the lines of that step in verify.yml (empty when absent)
+step_block() {
+  awk -v job="  $1:" -v id="        id: $2" '
+    $0 == job {j = 1; next}
+    j && /^  [a-z][a-z-]*:$/ {exit}
+    j && /^      - name:/ {if (hit) exit; buf = ""}
+    j {buf = buf $0 "\n"}
+    j && $0 == id {hit = 1}
+    END {if (hit) printf "%s", buf}' "${here}/../../workflows/verify.yml"
+}
+test_integration_build_carries_build_tolerance() {
+  local tol="contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ')" step
+  for step in "dotnet build" "integration build" "integration detect"; do
+    # shellcheck disable=SC2086 # two words on purpose: job and step id
+    case "$(step_block ${step})" in *"continue-on-error: \${{ ${tol} }}"*) eq "${FUNCNAME[0]}_${step// /_}" ok ok ;;
+      *) eq "${FUNCNAME[0]}_${step// /_}" "build tolerance" "missing" ;; esac
+  done
 }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
