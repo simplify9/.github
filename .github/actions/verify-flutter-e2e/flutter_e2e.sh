@@ -63,7 +63,7 @@ source "${ACTION_PATH}/../verify-netblock/netblock.sh"
 source "${ACTION_PATH}/../verify-mocks/mockoon.sh"
 # shellcheck source=../verify-emulator/emulator.sh
 source "${ACTION_PATH}/../verify-emulator/emulator.sh"
-# Helpers only (its main is skipped): e2e_scan_committed, e2e_verdict, e2e_after_retry.
+# Helpers only (its main is skipped): e2e_scan_committed, e2e_after_retry.
 # shellcheck source=/dev/null
 E2E_SH_LIB=1 source "${ACTION_PATH}/../verify-web-e2e/e2e.sh"
 

@@ -47,7 +47,7 @@ on:
         type: string
         default: "."
       known-failing:
-        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test integration build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later are tolerated until their own deadline without being listed: network (web), smoke (dotnet-service, when smoke-path is empty)."
+        description: "Space-separated step ids tolerated until contract-deadline (install consistency lint typecheck test integration build worker-dry-run e2e network bundle android maestro analyze docker smoke rehearsal). Steps added later are tolerated until their own deadline without being listed: network (all stacks), smoke (dotnet-service, when smoke-path is empty), e2e (flutter)."
         required: false
         type: string
         default: ""
@@ -1319,10 +1319,13 @@ jobs:
 
       # Hermetic: the emulator and the Flutter tool run with outbound network blocked except loopback
       # and e2e/allowed-hosts.txt; e2e/mocks.json is served by Mockoon as E2E_API_URL.
+      # Step timeout under the job's 45: a hung run ends as a failed step, so the evidence upload and
+      # the collect step below still run.
       - name: Integration tests (emulator)
         id: e2e
         if: ${{ !cancelled() && steps.probe.outputs.present == 'true' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' e2e ') }}
+        timeout-minutes: 35
         uses: simplify9/.github/.github/actions/verify-flutter-e2e@main
         with:
           working-directory: ${{ inputs.working-directory }}

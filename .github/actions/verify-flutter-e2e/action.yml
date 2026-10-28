@@ -15,10 +15,13 @@
 #      reported as infrastructure).
 #   4. Runs `flutter test integration_test --no-pub` blocked with
 #      --dart-define=VERIFY_E2E=true and, with mocks,
-#      --dart-define=E2E_API_URL=http://localhost:3901. If it fails while the
-#      block rejected traffic, re-runs once with the block lifted: passing then
-#      sets output network=needed (the workflow's `network` step reports it).
-#   5. Names failed tests in the job summary. Evidence (test log, logcat,
+#      --dart-define=E2E_API_URL=http://localhost:3901. A failure re-runs once
+#      with the block still on (passing then = flaky, named). If it fails again
+#      while the block rejected traffic, it re-runs once with the block lifted:
+#      passing then sets output network=needed (the workflow's `network` step
+#      reports it).
+#   5. Names flaky and failed tests in the job summary. The step has a
+#      35-minute timeout in verify.yml. Evidence (test log, logcat,
 #      emulator and Mockoon logs) is left in ${RUNNER_TEMP}/flutter-e2e-report.
 # Needs a GitHub-hosted runner (KVM, root network control) and Flutter on PATH.
 # Logic: flutter_e2e.sh (helpers tested by test_flutter_e2e.sh).

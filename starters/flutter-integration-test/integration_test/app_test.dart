@@ -7,6 +7,16 @@ import 'package:your_app/main.dart' as app;
 
 // import 'fakes.dart'; // Option A: fakes through the app's dependency setup (see fakes.dart)
 
+// Starts the app the way main() does, in three steps so fakes can go in between:
+// 1. the app's own dependency setup, 2. (Option A) the fake overrides, 3. runApp.
+// Split your main() into `setupDependencies()` + `runApp(const App())` for this; calling app.main()
+// after registering fakes would run the real setup again and overwrite them.
+Future<void> startApp(WidgetTester tester) async {
+  await app.setupDependencies();
+  // registerFakes(); // Option A
+  await tester.pumpWidget(const app.App());
+}
+
 // Real (mocked) HTTP is async: pump until the widget appears or the timeout passes.
 Future<void> pumpUntilFound(WidgetTester tester, Finder finder,
     {Duration timeout = const Duration(seconds: 30)}) async {
@@ -19,7 +29,7 @@ Future<void> pumpUntilFound(WidgetTester tester, Finder finder,
 }
 
 Future<void> signIn(WidgetTester tester) async {
-  app.main();
+  await startApp(tester);
   await pumpUntilFound(tester, find.byKey(const Key('email')));
   await tester.enterText(find.byKey(const Key('email')), 'user@example.com');
   await tester.enterText(find.byKey(const Key('password')), 'not-a-real-password');
@@ -28,10 +38,9 @@ Future<void> signIn(WidgetTester tester) async {
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  // setUpAll(registerFakes); // Option A
 
   testWidgets('app starts on its first screen', (tester) async {
-    app.main();
+    await startApp(tester);
     await pumpUntilFound(tester, find.text('Sign in'));
   });
 

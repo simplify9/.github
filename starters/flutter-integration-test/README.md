@@ -13,8 +13,10 @@ Android emulator (API 34). Copy it into your repo and adapt the names, keys and 
 2. Copy `integration_test/app_test.dart` and write at least 3 `testWidgets(` journeys across
    `integration_test/*_test.dart`: the app starts, sign in, and the one or two core tasks.
 3. Give the backend a fake, one of:
-   - **Option A, fakes through dependency setup:** register fakes instead of real services before
-     the tests run (`integration_test/fakes.dart`, GetIt shown). No server needed.
+   - **Option A, fakes through dependency setup:** split `main()` into `setupDependencies()` and
+     `runApp(const App())`; the tests' `startApp()` runs the app's setup, then the fake overrides
+     (`integration_test/fakes.dart`, GetIt shown), then `runApp`, so the real setup can't overwrite
+     the fakes. No server needed.
    - **Option B, Mockoon:** read the API host from `lib/api_base_url.dart` and put the fake
      responses in `e2e/mocks.json` (a Mockoon environment file; design or record it in the Mockoon
      desktop app). CI serves it and passes
@@ -25,6 +27,8 @@ Android emulator (API 34). Copy it into your repo and adapt the names, keys and 
 - **Offline:** during the run the emulator and the Flutter tool have no internet except
   `localhost` and the hosts in `e2e/allowed-hosts.txt`. List only third-party SDKs the app cannot
   work without, one host per line with the reason; never our own APIs.
+- **Write journeys (sign-up, forms, payments) must only ever call mocks; tests must never create
+  real records.**
 - **No real credentials:** `e2e/mocks.json` is scanned; use `example.com` addresses and an unsigned
   token (header `{"alg":"none"}`, empty signature), like the one in the mocks here.
 - **Real HTTP is async:** use a pump-until helper (as in `app_test.dart`), not only `pumpAndSettle`.
