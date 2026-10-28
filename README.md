@@ -890,6 +890,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
    - If it fails while the block rejected traffic, it re-runs once with network access.
    - Passing then means the app needs a host that is neither mocked nor allowed: `e2e` passes and the `network` step fails, naming the blocked destinations. Until `network`'s own deadline (see "New steps start tolerated") that failure is a warning.
    - Failing again is a real `e2e` failure.
+   - **Once `network` is enforced for the repo** (its own deadline: the later of `contract-deadline` and 2026-12-29), there is no re-run with network access: it would drive the app against real hosts. A failure while traffic was blocked fails `e2e` and names the blocked destinations.
 5. The job summary names failed and flaky (passed on retry) tests, read from the `list` reporter's output. On failure, `playwright-report/` and `test-results/` are uploaded as the artifact `e2e-report` (5 days).
 
 The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with its real API calls until the contract deadline. The web job runs on the GitHub-hosted runner because the block needs root network control.
@@ -903,6 +904,7 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 4. Every flow file directly in `.maestro/` runs, `smoke.yaml` first (`config.yaml` and subfolders are not flows).
    - A failed flow re-runs once; passing then is reported as flaky.
    - A flow that still fails while the block rejected traffic re-runs once with network access. Passing then means the app needs an unmocked host: `maestro` passes and the `network` step fails, a warning until its deadline.
+   - Once `network` is enforced for the repo, that unblocked re-run no longer happens (no real hosts): the flow fails, naming the blocked destinations.
 5. The summary names passed, flaky, network-only and failed flows. On failure, JUnit files, screenshots, Maestro logs and the Metro and emulator logs are uploaded as `maestro-report` (5 days).
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.

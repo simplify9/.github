@@ -15,11 +15,13 @@ maestro_flows() {
   )
 }
 
-# maestro_verdict <first-rc> <rerun-rc|-> <blocked-count>: pass | flaky | network-check | fail
+# maestro_verdict <first-rc> <rerun-rc|-> <blocked-count> [recheck: true|false, default true]:
+# pass | flaky | network-check | blocked (network enforced: no unblocked re-run) | fail
 maestro_verdict() {
   if [ "$1" -eq 0 ]; then echo pass
   elif [ "$2" != "-" ] && [ "$2" -eq 0 ]; then echo flaky
-  elif [ "$3" -gt 0 ]; then echo network-check
+  elif [ "$3" -gt 0 ] && [ "${4:-true}" = true ]; then echo network-check
+  elif [ "$3" -gt 0 ]; then echo blocked
   else echo fail
   fi
 }
@@ -115,15 +117,18 @@ blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
 dests="${dests% }"
 recheck=()
+enforced=false
 for flow in "${first_failed[@]+"${first_failed[@]}"}"; do
   rc=0
   run_flow "${flow}" 2 || rc=1
-  case "$(maestro_verdict 1 "${rc}" "${blocked}")" in
+  case "$(maestro_verdict 1 "${rc}" "${blocked}" "${NETWORK_RECHECK:-true}")" in
     flaky) flaky+=("${flow}") ;;
     network-check) recheck+=("${flow}") ;;
+    blocked) failed+=("${flow}"); enforced=true ;;
     *) failed+=("${flow}") ;;
   esac
 done
+[ "${enforced}" = false ] || e2e_network_enforced "${dests}"
 if [ "${#recheck[@]}" -gt 0 ]; then
   echo "::notice title=[VERIFY] network::flows failed while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running them once with network access"
   netblock_off

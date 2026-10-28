@@ -322,6 +322,8 @@ jobs:
         with:
           working-directory: ${{ inputs.working-directory }}
           runner: ${{ steps.install.outputs.runner }}
+          # Only while `network` is tolerated: once enforced, never re-run journeys against real hosts.
+          network-recheck: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' network ') }}
 
       # The journeys passed only after a re-run with network access: the app calls a
       # host that is neither mocked nor in e2e/allowed-hosts.txt.
@@ -962,6 +964,8 @@ jobs:
         with:
           working-directory: ${{ inputs.working-directory }}
           apk: ${{ runner.temp }}/apk/*.apk
+          # Only while `network` is tolerated: once enforced, never re-run journeys against real hosts.
+          network-recheck: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' network ') }}
 
       # The flows passed only after a re-run with network access: the app calls a host that
       # is neither mocked nor in e2e/allowed-hosts.txt.
