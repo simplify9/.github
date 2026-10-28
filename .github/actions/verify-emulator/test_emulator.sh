@@ -13,6 +13,10 @@ eq boot_first_try booted "$(emulator_boot_verdict 0 -)"
 eq boot_retry retry "$(emulator_boot_verdict 1 -)"
 eq boot_second_try booted "$(emulator_boot_verdict 1 0)"
 eq boot_failed failed "$(emulator_boot_verdict 1 1)"
+# I1: system apps' UIDs from `cmd package list packages -s -U` (>= 10000; below is blocked as a range).
+eq system_uids $'10023\n10031' "$(emulator_system_uids $'package:com.android.providers.downloads uid:10023\r\npackage:android uid:1000\npackage:com.android.webview uid:10031\npackage:com.android.shell uid:2000,10023\n')"
+eq system_uids_empty "" "$(emulator_system_uids '')"
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 mkdir -p "${tmp}/bin"

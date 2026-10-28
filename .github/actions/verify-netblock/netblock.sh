@@ -11,6 +11,8 @@
 #   netblock_run CMD...       run CMD blocked (same uid and env, group verify-offline)
 #   netblock_off              lift the block for the group (rules kept; netblock_on restores it)
 #   netblock_reset            forget what was rejected so far (counters and kernel log), block kept
+#   netblock_idle SECONDS     record what is blocked during an idle window (NETBLOCK_IDLE), then reset
+#   netblock_subtract IDLE LIST   the destinations of LIST that IDLE does not have
 #   netblock_count            packets rejected since the last netblock_on
 #   netblock_blocked          rejected destinations as ip:port (best effort, from the kernel log)
 
@@ -125,6 +127,24 @@ netblock_reset() {
     ${sudo} "${ipt}" -w -Z "${NETBLOCK_CHAIN}" 2>/dev/null || true
   done
   ${sudo} dmesg -C 2>/dev/null || true
+}
+
+# For an emulator, whose own background traffic can't be fully silenced: what it sends while
+# nothing runs is recorded here and later subtracted from what a journey run is blamed for.
+netblock_idle() {
+  sleep "$1"
+  NETBLOCK_IDLE="$(netblock_blocked)"
+  echo "[VERIFY] network: idle window ${1} s: $(netblock_count) packet(s), destinations: ${NETBLOCK_IDLE:-none listed}" | tr '\n' ' '
+  echo
+  netblock_reset
+}
+
+netblock_subtract() {
+  local f
+  f="$(mktemp)"
+  printf '%s\n' "$1" | sed '/^$/d' > "${f}"
+  printf '%s\n' "$2" | sed '/^$/d' | grep -vxF -f "${f}" || true
+  rm -f "${f}"
 }
 
 netblock_count() {

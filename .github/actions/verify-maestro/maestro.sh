@@ -91,12 +91,9 @@ adb reverse tcp:8081 tcp:8081 >/dev/null
 # Only what happens from here (the app and its flows) counts as blocked traffic.
 sleep 5
 netblock_reset
-# TEMPORARY attribution probe (review I1): what the idle emulator still sends with no flow running.
-if [ "${VERIFY_IDLE_PROBE_SECONDS:-0}" -gt 0 ]; then
-  sleep "${VERIFY_IDLE_PROBE_SECONDS}"
-  echo "[VERIFY] idle probe: $(netblock_count) packet(s) in ${VERIFY_IDLE_PROBE_SECONDS} s to: $(netblock_blocked | tr '\n' ' ')"
-  netblock_reset
-fi
+# The emulator's own residual background traffic, recorded while nothing runs, is never blamed on
+# the journeys (it is subtracted from the destinations below).
+netblock_idle 30
 
 # run_flow <flow> <attempt> [PREFIX...]: one Maestro run, JUnit and artifacts under ${out}. Maestro
 # is the host-side driver, so it runs outside the block: the app's own traffic leaves through the
@@ -113,8 +110,11 @@ passed=() flaky=() network=() failed=() first_failed=()
 for flow in "${flows[@]}"; do
   if run_flow "${flow}" 1; then passed+=("${flow}"); else first_failed+=("${flow}"); fi
 done
-blocked="$(netblock_count)"
-dests="$(netblock_blocked | tr '\n' ' ')"
+# Blocked traffic the journeys are blamed for: destinations listed since the idle window, minus those
+# seen while idle. Its count, not the raw packet counter, decides whether the block may be the cause.
+attributable="$(netblock_subtract "${NETBLOCK_IDLE:-}" "$(netblock_blocked)")"
+blocked="$(grep -c . <<< "${attributable}" || true)"
+dests="$(tr '\n' ' ' <<< "${attributable}")"
 dests="${dests% }"
 recheck=()
 enforced=false
@@ -130,7 +130,7 @@ for flow in "${first_failed[@]+"${first_failed[@]}"}"; do
 done
 [ "${enforced}" = false ] || e2e_network_enforced "${dests}"
 if [ "${#recheck[@]}" -gt 0 ]; then
-  echo "::notice title=[VERIFY] network::flows failed while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running them once with network access"
+  echo "::notice title=[VERIFY] network::flows failed while the block rejected traffic to ${blocked} destination(s): ${dests}; re-running them once with network access"
   netblock_off
   for flow in "${recheck[@]}"; do
     if run_flow "${flow}" 3; then network+=("${flow}"); else failed+=("${flow}"); fi
@@ -157,7 +157,7 @@ fi
 for flow in "${flaky[@]+"${flaky[@]}"}"; do echo "::warning title=[VERIFY] maestro::flaky (passed on re-run): ${flow}"; done
 for flow in "${failed[@]+"${failed[@]}"}"; do echo "::error title=[VERIFY] maestro::failed: ${flow}"; done
 if [ "${#network[@]}" -gt 0 ]; then
-  echo "::warning title=[VERIFY] network::${network[*]} passed only with network access; blocked: ${dests:-unknown} (Android's own background traffic may be listed too). Mock the app's calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
+  echo "::warning title=[VERIFY] network::${network[*]} passed only with network access; blocked: ${dests:-unknown}. Mock the app's calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
   echo "network=needed" >> "${GITHUB_OUTPUT}"
 fi
 [ "${#failed[@]}" -eq 0 ]
