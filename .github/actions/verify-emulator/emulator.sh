@@ -48,6 +48,34 @@ emulator_install() {
   adb start-server >/dev/null 2>&1
 }
 
+# emulator_system_uids <`cmd package list packages -s -U` output>: system apps' UIDs >= 10000, unique.
+emulator_system_uids() {
+  printf '%s\n' "$1" | tr -d '\r' | sed -n 's/.* uid:\([0-9,]*\).*/\1/p' | tr ',' '\n' \
+    | awk '$1 >= 10000' | sort -un
+}
+
+# Stops Android's own background traffic inside the guest, where it can be told apart from the app's
+# (on the host every packet comes from the emulator process). Needs adb root (the default image
+# allows it): loopback and DNS pass; system UIDs (below 10000, and each system app's) are rejected.
+# Apps installed later (the app under test, a test build) are untouched, so their traffic still
+# reaches the host's block and is counted.
+emulator_guest_quiet() {
+  local uids u ipt rule cmd=""
+  local -a rules
+  adb root >/dev/null 2>&1 || return 0
+  timeout 60 adb wait-for-device >/dev/null 2>&1 || return 0
+  uids="$(emulator_system_uids "$(adb shell cmd package list packages -s -U 2>/dev/null)")"
+  rules=("-N verify_quiet" "-A verify_quiet -o lo -j ACCEPT" "-A verify_quiet -p udp --dport 53 -j ACCEPT"
+    "-A verify_quiet -p tcp --dport 53 -j ACCEPT" "-A verify_quiet -m owner --uid-owner 0-9999 -j REJECT")
+  for u in ${uids}; do rules+=("-A verify_quiet -m owner --uid-owner ${u} -j REJECT"); done
+  rules+=("-I OUTPUT 1 -j verify_quiet")
+  for ipt in iptables ip6tables; do
+    for rule in "${rules[@]}"; do cmd="${cmd}${ipt} -w ${rule}; "; done
+  done
+  adb shell "${cmd}" >/dev/null 2>&1 || true
+  echo "[VERIFY] emulator: Android's own traffic stopped in the guest ($(wc -w <<< "${uids}" | tr -d ' ') system app UIDs + UIDs below 10000)"
+}
+
 verify_infra_fail() {
   echo "::error title=[VERIFY] emulator::$1 (infrastructure, not the app)"
   echo "**$1 (infrastructure, not the app)**" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -108,6 +136,7 @@ emulator_boot() {
         sleep 3
         adb shell cmd connectivity airplane-mode disable >/dev/null 2>&1 || true
         sleep 5
+        emulator_guest_quiet
         echo "[VERIFY] emulator: booted (attempt ${attempt})"
         return 0
         ;;
