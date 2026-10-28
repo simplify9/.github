@@ -10,9 +10,38 @@ flutter_e2e_defines() {
   return 0
 }
 
-# flutter_e2e_failed <log>: "file: test name" of each failed test in `flutter test --reporter expanded`.
+# flutter_e2e_failed <log>: "file: test name" of each failed test, from the "Failing tests:" footer
+# `flutter test` prints (the per-test "[E]" lines carry no path in a one-file run).
 flutter_e2e_failed() {
-  sed -n 's#^[0-9:]* +[0-9]* -[0-9]*: .*/\([^/]*\.dart\): \(.*\) \[E\]$#\1: \2#p' "$1" | LC_ALL=C sort -u
+  sed -n '/^Failing tests:$/,/^$/ s#^  .*/\([^/]*\.dart\): \(.*\)$#\1: \2#p' "$1" | LC_ALL=C sort -u
+}
+
+# flutter_e2e_result_line <log>: the last "+N [~S] [-F]: Some tests failed." / "All tests passed!" line.
+flutter_e2e_result_line() {
+  grep -E '^[0-9:]+ \+[0-9]+( ~[0-9]+)?( -[0-9]+)?: (Some tests failed\.|All tests passed!)$' "$1" | tail -n 1
+}
+
+# flutter_e2e_summary <verdict> <first-run-log> <last-run-log>: Markdown on stdout (the job summary),
+# one annotation per flaky or failed test on stderr. Flaky tests are named from the first run's log.
+flutter_e2e_summary() {
+  local -a names
+  local t
+  echo "### Flutter integration tests"
+  flutter_e2e_result_line "$3"
+  if [ "$1" = flaky ]; then
+    mapfile -t names < <(flutter_e2e_failed "$2")
+    echo
+    echo "**Flaky (failed, then passed on a re-run)**"
+    printf -- '- %s\n' "${names[@]+"${names[@]}"}"
+    for t in "${names[@]+"${names[@]}"}"; do echo "::warning title=[VERIFY] e2e::flaky (passed on re-run): ${t}" >&2; done
+  fi
+  mapfile -t names < <(flutter_e2e_failed "$3")
+  if [ "${#names[@]}" -gt 0 ]; then
+    echo
+    echo "**Failed**"
+    printf -- '- %s\n' "${names[@]}"
+    for t in "${names[@]}"; do echo "::error title=[VERIFY] e2e::failed: ${t}" >&2; done
+  fi
 }
 
 # flutter_e2e_verdict <first-rc> <blocked-rerun-rc|-> <blocked-count>: pass | flaky | network-check | fail.
@@ -42,7 +71,8 @@ out="${RUNNER_TEMP}/flutter-e2e-report"
 log="${out}/flutter-test.log"
 mkdir -p "${out}"
 MOCKOON_PID=""
-trap 'adb logcat -d > "${out}/logcat.txt" 2>/dev/null || true
+# logcat only when a device is online (adb would otherwise wait for one forever), and bounded.
+trap '{ adb get-state >/dev/null 2>&1 && timeout 60 adb logcat -d > "${out}/logcat.txt"; } 2>/dev/null || true
       cp "${RUNNER_TEMP}"/emulator-*.log "${RUNNER_TEMP}"/mockoon.log "${out}/" 2>/dev/null || true
       [ -z "${MOCKOON_PID}" ] || kill "${MOCKOON_PID}" 2>/dev/null || true' EXIT
 
@@ -85,6 +115,7 @@ flutter_run() {
 flutter_run netblock_run
 first=${rc} rerun=-
 if [ "${first}" -ne 0 ]; then
+  cp "${log}" "${out}/flutter-test-run1.log"
   echo "[VERIFY] e2e: failed; re-running once with the block still on"
   flutter_run netblock_run
   rerun=${rc}
@@ -92,10 +123,8 @@ fi
 blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
 dests="${dests% }"
-case "$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}")" in
-  flaky)
-    echo "::warning title=[VERIFY] e2e::flaky: failed, then passed on a re-run (log above); fix it"
-    ;;
+verdict="$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}")"
+case "${verdict}" in
   network-check)
     echo "::notice title=[VERIFY] network::e2e failed twice while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running once with network access to tell the two apart"
     netblock_off
@@ -109,15 +138,5 @@ case "$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}")" in
     ;;
 esac
 
-mapfile -t failed < <(flutter_e2e_failed "${log}")
-{
-  echo "### Flutter integration tests"
-  tail -n 1 "${log}"
-  if [ "${#failed[@]}" -gt 0 ]; then
-    echo
-    echo "**Failed**"
-    printf -- '- %s\n' "${failed[@]}"
-  fi
-} >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-for t in "${failed[@]+"${failed[@]}"}"; do echo "::error title=[VERIFY] e2e::failed: ${t}"; done
+flutter_e2e_summary "${verdict}" "${out}/flutter-test-run1.log" "${log}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 exit "${rc}"

@@ -24,8 +24,48 @@ test_failed_names() {
     '  Expected: at least one matching candidate' \
     '01:03 +2 -1: /w/integration_test/app_test.dart: signed-in user sees their items' \
     '01:10 +2 -2: /w/integration_test/partner_test.dart: partner reachable [E]' \
-    '01:10 +2 -2: Some tests failed.' > "${tmp}/log"
+    '01:10 +2 -2: Some tests failed.' \
+    '' \
+    'Failing tests:' \
+    '  /w/integration_test/app_test.dart: user signs in' \
+    '  /w/integration_test/partner_test.dart: partner reachable' > "${tmp}/log"
   eq "${FUNCNAME[0]}" $'app_test.dart: user signs in\npartner_test.dart: partner reachable' "$(flutter_e2e_failed "${tmp}/log")"
+}
+test_failed_single_file_real_output() {
+  # A real one-file run: its "[E]" line carries no path, only the "Failing tests:" footer does.
+  eq "${FUNCNAME[0]}" "app_test.dart: user signs in" "$(flutter_e2e_failed "${here}/testdata/single_file_failed.txt")"
+}
+test_result_line() {
+  eq "${FUNCNAME[0]}" "00:34 +2 -1: Some tests failed." "$(flutter_e2e_result_line "${here}/testdata/single_file_failed.txt")"
+  printf '00:05 +3: All tests passed!\n\nsome trailing output\n' > "${tmp}/ok2"
+  eq "${FUNCNAME[0]}_pass" "00:05 +3: All tests passed!" "$(flutter_e2e_result_line "${tmp}/ok2")"
+}
+test_summary_names_flaky_from_first_run() {
+  printf '00:05 +3: All tests passed!\n' > "${tmp}/last"
+  local out
+  out="$(flutter_e2e_summary flaky "${here}/testdata/single_file_failed.txt" "${tmp}/last" 2>&1)"
+  eq "${FUNCNAME[0]}_section" 1 "$(grep -c 'Flaky' <<< "${out}")"
+  eq "${FUNCNAME[0]}_name" 1 "$(grep -c -- '- app_test.dart: user signs in' <<< "${out}")"
+  eq "${FUNCNAME[0]}_annotation" 1 "$(grep -c '::warning title=\[VERIFY\] e2e::flaky (passed on re-run): app_test.dart: user signs in' <<< "${out}")"
+}
+test_trap_does_not_hang_without_device() {
+  # An invalid allowed-hosts line fails the step before any emulator; the exit trap must not wait
+  # for a device (adb logcat would block forever).
+  mkdir -p "${tmp}/proj/e2e" "${tmp}/bin" "${tmp}/rt"
+  echo 'https://bad.example.com/path' > "${tmp}/proj/e2e/allowed-hosts.txt"
+  # shellcheck disable=SC2016 # $1 belongs to the stub script
+  printf '#!/usr/bin/env bash\ncase "$1" in get-state) exit 1 ;; logcat) sleep 300 ;; esac\n' > "${tmp}/bin/adb"
+  chmod +x "${tmp}/bin/adb"
+  (cd "${tmp}/proj" && PATH="${tmp}/bin:${PATH}" ACTION_PATH="${here}" RUNNER_TEMP="${tmp}/rt" \
+    GITHUB_OUTPUT="${tmp}/rt/out" bash "${here}/flutter_e2e.sh" > "${tmp}/rt/log" 2>&1) &
+  local pid=$! t0=${SECONDS}
+  while kill -0 "${pid}" 2>/dev/null && [ $((SECONDS - t0)) -lt 15 ]; do sleep 1; done
+  if kill -0 "${pid}" 2>/dev/null; then
+    pkill -P "${pid}" 2>/dev/null; kill "${pid}" 2>/dev/null
+    eq "${FUNCNAME[0]}" "exited within 15 s" "still running after 15 s"
+  else
+    wait "${pid}"; eq "${FUNCNAME[0]}_rc" 1 $?
+  fi
 }
 test_failed_none() { printf '00:30 +3: All tests passed!\n' > "${tmp}/ok"; eq "${FUNCNAME[0]}" "" "$(flutter_e2e_failed "${tmp}/ok")"; }
 test_verdict_pass() { eq "${FUNCNAME[0]}" pass "$(flutter_e2e_verdict 0 - 9)"; }
