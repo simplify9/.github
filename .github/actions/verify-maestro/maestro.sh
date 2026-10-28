@@ -98,11 +98,15 @@ if [ "${VERIFY_IDLE_PROBE_SECONDS:-0}" -gt 0 ]; then
   sudo iptables -w -L VERIFY_NETBLOCK -n -v -x | sed 's/^/[VERIFY] idle v4: /'
   sudo ip6tables -w -L VERIFY_NETBLOCK -n -v -x | sed 's/^/[VERIFY] idle v6: /'
   sudo dmesg | grep 'VERIFY-NETBLOCK' | tail -n 8 | sed 's/^/[VERIFY] idle log: /'
-  # Hold blocked TCP in SYN-SENT for a moment so ss can name the process and the destination.
-  sudo iptables -w -I VERIFY_NETBLOCK 2 -p tcp -j DROP
-  sleep 12
-  sudo ss -tnpH state syn-sent | sed 's/^/[VERIFY] idle syn: /' | head -n 12
-  sudo iptables -w -D VERIFY_NETBLOCK -p tcp -j DROP
+  # Split TCP into SYN and non-SYN counters for a moment, and list every non-loopback TCP socket.
+  sudo iptables -w -I VERIFY_NETBLOCK 2 -p tcp --syn -j RETURN
+  sudo iptables -w -I VERIFY_NETBLOCK 2 -p tcp ! --syn -j RETURN
+  netblock_reset
+  sleep 20
+  sudo iptables -w -L VERIFY_NETBLOCK -n -v -x | grep -E 'RETURN' | sed 's/^/[VERIFY] idle split: /'
+  sudo ss -tanpH | grep -v -E '127\.0\.0\.1|\[::1\]|::ffff:127' | sed 's/^/[VERIFY] idle sock: /' | head -n 15
+  sudo iptables -w -D VERIFY_NETBLOCK -p tcp ! --syn -j RETURN
+  sudo iptables -w -D VERIFY_NETBLOCK -p tcp --syn -j RETURN
   netblock_reset
 fi
 
