@@ -71,6 +71,11 @@ test_failed_none() { printf '00:30 +3: All tests passed!\n' > "${tmp}/ok"; eq "$
 test_verdict_pass() { eq "${FUNCNAME[0]}" pass "$(flutter_e2e_verdict 0 - 9)"; }
 test_verdict_flaky() { eq "${FUNCNAME[0]}" flaky "$(flutter_e2e_verdict 1 0 9)"; }
 test_verdict_network_check() { eq "${FUNCNAME[0]}" network-check "$(flutter_e2e_verdict 1 1 3)"; }
+test_verdict_recheck_false_no_rerun() {
+  eq "${FUNCNAME[0]}" blocked "$(flutter_e2e_verdict 1 1 3 false)"
+  eq "${FUNCNAME[0]}_true" network-check "$(flutter_e2e_verdict 1 1 3 true)"
+  eq "${FUNCNAME[0]}_flaky_unaffected" flaky "$(flutter_e2e_verdict 1 0 3 false)"
+}
 test_verdict_fail() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 1 1 0)"; }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

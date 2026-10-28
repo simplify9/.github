@@ -1336,6 +1336,8 @@ jobs:
         uses: simplify9/.github/.github/actions/verify-flutter-e2e@main
         with:
           working-directory: ${{ inputs.working-directory }}
+          # Only while `network` is tolerated: once enforced, never re-run journeys against real hosts.
+          network-recheck: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' network ') }}
 
       - name: Network block
         id: network

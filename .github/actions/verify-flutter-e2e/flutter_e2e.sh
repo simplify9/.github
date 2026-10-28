@@ -44,12 +44,14 @@ flutter_e2e_summary() {
   fi
 }
 
-# flutter_e2e_verdict <first-rc> <blocked-rerun-rc|-> <blocked-count>: pass | flaky | network-check | fail.
+# flutter_e2e_verdict <first-rc> <blocked-rerun-rc|-> <blocked-count> [recheck: true|false, default
+# true]: pass | flaky | network-check | blocked (network enforced: no unblocked re-run) | fail.
 # A failure is re-run once under the block first, so a flake is never taken for a network need.
 flutter_e2e_verdict() {
   if [ "$1" -eq 0 ]; then echo pass
   elif [ "$2" != "-" ] && [ "$2" -eq 0 ]; then echo flaky
-  elif [ "$3" -gt 0 ]; then echo network-check
+  elif [ "$3" -gt 0 ] && [ "${4:-true}" = true ]; then echo network-check
+  elif [ "$3" -gt 0 ]; then echo blocked
   else echo fail
   fi
 }
@@ -63,13 +65,15 @@ source "${ACTION_PATH}/../verify-netblock/netblock.sh"
 source "${ACTION_PATH}/../verify-mocks/mockoon.sh"
 # shellcheck source=../verify-emulator/emulator.sh
 source "${ACTION_PATH}/../verify-emulator/emulator.sh"
-# Helpers only (its main is skipped): e2e_scan_committed, e2e_after_retry.
+# Helpers only (its main is skipped): e2e_scan_committed, e2e_after_retry, e2e_network_enforced.
 # shellcheck source=/dev/null
 E2E_SH_LIB=1 source "${ACTION_PATH}/../verify-web-e2e/e2e.sh"
 
 out="${RUNNER_TEMP}/flutter-e2e-report"
 log="${out}/flutter-test.log"
 mkdir -p "${out}"
+# Emulator logs straight into the evidence folder: a step timeout skips the exit trap.
+export EMULATOR_LOG_DIR="${out}"
 MOCKOON_PID=""
 # logcat only when a device is online (adb would otherwise wait for one forever), and bounded.
 trap '{ adb get-state >/dev/null 2>&1 && timeout 60 adb logcat -d > "${out}/logcat.txt"; } 2>/dev/null || true
@@ -123,8 +127,11 @@ fi
 blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
 dests="${dests% }"
-verdict="$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}")"
+verdict="$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}" "${NETWORK_RECHECK:-true}")"
 case "${verdict}" in
+  blocked)
+    e2e_network_enforced "${dests}"
+    ;;
   network-check)
     echo "::notice title=[VERIFY] network::e2e failed twice while the block rejected ${blocked} packet(s) to: ${dests:-unknown}; re-running once with network access to tell the two apart"
     netblock_off

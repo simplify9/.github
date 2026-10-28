@@ -28,6 +28,9 @@
 #
 # Inputs:
 #   working-directory  (optional)  Project directory. Default ".".
+#   network-recheck    (optional)  true (default) while `network` is tolerated: a failure with
+#                                  blocked traffic re-runs once with network access. false once it
+#                                  is enforced: fail without that re-run (never real hosts).
 # Outputs:
 #   network  "needed" when the tests passed only with network access, else empty.
 # =============================================================================
@@ -40,6 +43,11 @@ inputs:
     description: 'Project directory (contains pubspec.yaml and integration_test/).'
     required: false
     default: '.'
+
+  network-recheck:
+    description: 'true while the `network` step is tolerated: a failure with blocked traffic re-runs once with network access. false once it is enforced: fail without that re-run.'
+    required: false
+    default: 'true'
 
 outputs:
   network:
@@ -55,6 +63,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         ACTION_PATH: ${{ github.action_path }}
+        NETWORK_RECHECK: ${{ inputs.network-recheck }}
       run: bash "${ACTION_PATH}/flutter_e2e.sh"
 
 branding:
