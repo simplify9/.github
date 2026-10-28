@@ -25,13 +25,31 @@ test_contract_mode() {
   eq "${FUNCNAME[0]}_none" warn "$(contract_mode '' 2027-01-01)"
 }
 test_new_step_tolerated_before_own_deadline() { eq "${FUNCNAME[0]}" network "$(new_steps_tolerated 2026-11-10 2026-12-01)"; }
-test_new_step_enforced_on_own_deadline() { eq "${FUNCNAME[0]}" "" "$(new_steps_tolerated 2026-11-10 2026-12-29)"; }
+test_new_step_enforced_on_own_deadline() { eq "${FUNCNAME[0]}" "" "$(new_steps_tolerated 2026-11-10 2026-12-29 dotnet-service)"; }
 test_new_step_later_repo_deadline_wins() { eq "${FUNCNAME[0]}" network "$(new_steps_tolerated 2027-02-01 2027-01-15)"; }
 test_new_step_no_repo_deadline_forever() { eq "${FUNCNAME[0]}" network "$(new_steps_tolerated '' 2030-01-01)"; }
 test_effective_known_failing_merges() {
   eq "${FUNCNAME[0]}_before" "lint network" "$(effective_known_failing "lint network" 2026-11-10 2026-11-01)"
   eq "${FUNCNAME[0]}_repo_passed" "network" "$(effective_known_failing "lint network" 2026-11-10 2026-11-10)"
   eq "${FUNCNAME[0]}_all_passed" "" "$(effective_known_failing "lint" 2026-11-10 2027-01-01)"
+}
+test_smoke_scoped_to_dotnet_service() {
+  eq "${FUNCNAME[0]}_service" "network smoke" "$(new_steps_tolerated 2026-11-20 2026-12-01 dotnet-service)"
+  eq "${FUNCNAME[0]}_library" "network" "$(new_steps_tolerated 2026-11-20 2026-12-01 dotnet-library)"
+  eq "${FUNCNAME[0]}_web" "network" "$(new_steps_tolerated 2026-11-20 2026-12-01 web)"
+  eq "${FUNCNAME[0]}_on_deadline" "" "$(new_steps_tolerated 2026-11-20 2026-12-29 dotnet-service)"
+  eq "${FUNCNAME[0]}_effective" "docker network smoke" "$(effective_known_failing docker 2026-12-21 2026-12-01 dotnet-service)"
+}
+test_stack_entry_does_not_leak_to_other_stacks() {
+  # shellcheck disable=SC2034 # read by new_steps_tolerated through bash dynamic scope
+  local NEW_STEPS="flutter:e2e:2026-12-29 *:network:2026-12-29"
+  eq "${FUNCNAME[0]}_web" "network" "$(new_steps_tolerated '' 2026-12-01 web)"
+  eq "${FUNCNAME[0]}_flutter" "e2e network" "$(new_steps_tolerated '' 2026-12-01 flutter)"
+  eq "${FUNCNAME[0]}_no_stack" "network" "$(new_steps_tolerated '' 2026-12-01)"
+}
+test_repo_known_failing_excludes_new_steps() { eq "${FUNCNAME[0]}" "test" "$(known_failing_effective "test" 2027-02-01 2026-12-01)"; }
+test_integration_is_not_a_new_step() {
+  case " $(new_steps_tolerated '' 2026-12-01) " in *" integration "*) eq "${FUNCNAME[0]}" absent present ;; *) eq "${FUNCNAME[0]}" absent absent ;; esac
 }
 test_deps_changed_manifest() { eq "${FUNCNAME[0]}" true "$(deps_changed_from_list $'src/a.cs\nweb/package.json')"; }
 test_deps_changed_none() { eq "${FUNCNAME[0]}" false "$(deps_changed_from_list $'src/a.cs\nREADME.md')"; }
@@ -62,6 +80,24 @@ test_scope_expression_copies_identical() {
   res="$(awk '/^  result:/{f=1} f && /FULL: /{sub(/.*FULL: \$\{\{ /,""); sub(/ \}\}$/,""); print; exit}' "$yml")"
   eq "${FUNCNAME[0]}_plan" "$canon" "$plan"
   eq "${FUNCNAME[0]}_result" "$canon" "$res"
+}
+# step_block <job> <step-id>: the lines of that step in verify.yml (empty when absent)
+step_block() {
+  awk -v job="  $1:" -v id="        id: $2" '
+    $0 == job {j = 1; next}
+    j && /^  [a-z][a-z-]*:$/ {exit}
+    j && /^      - name:/ {if (hit) exit; buf = ""}
+    j {buf = buf $0 "\n"}
+    j && $0 == id {hit = 1}
+    END {if (hit) printf "%s", buf}' "${here}/../../workflows/verify.yml"
+}
+test_integration_build_carries_build_tolerance() {
+  local tol="contains(format(' {0} ', needs.plan.outputs.known_failing), ' build ')" step
+  for step in "dotnet build" "integration build" "integration detect"; do
+    # shellcheck disable=SC2086 # two words on purpose: job and step id
+    case "$(step_block ${step})" in *"continue-on-error: \${{ ${tol} }}"*) eq "${FUNCNAME[0]}_${step// /_}" ok ok ;;
+      *) eq "${FUNCNAME[0]}_${step// /_}" "build tolerance" "missing" ;; esac
+  done
 }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
