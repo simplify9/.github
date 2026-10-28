@@ -8,12 +8,17 @@
 #                                 (downloads: run before the network block)
 #   emulator_boot [PREFIX...]     boot through PREFIX (e.g. netblock_run, so the emulator's own
 #                                 sockets, which carry the app's traffic, are blocked); 2 attempts of
-#                                 300 s; returns 2 with an "infrastructure" error when it never boots
-#   emulator_stop
+#                                 300 s; exits 2 through verify_infra_fail when it never boots
+#   emulator_stop                 until adb lists no emulator (SIGKILL after a grace period)
 #   emulator_boot_verdict RC1 RC2|-   booted | retry | failed
+#   verify_infra_fail MESSAGE     "MESSAGE (infrastructure, not the app)" as an error and in the job
+#                                 summary, then exit 2 (not reported as a journey failure)
 
 EMULATOR_IMAGE="system-images;android-34;default;x86_64"
 EMULATOR_BOOT_SECONDS=300
+# Where emulator-<attempt>.log go; a caller points it at its evidence folder so the logs survive a
+# step timeout (no exit trap runs then).
+EMULATOR_LOG_DIR="${EMULATOR_LOG_DIR:-${RUNNER_TEMP:-/tmp}}"
 export PATH="${ANDROID_HOME:-}/platform-tools:${ANDROID_HOME:-}/emulator:${PATH}"
 
 emulator_boot_verdict() {
@@ -43,28 +48,42 @@ emulator_install() {
   adb start-server >/dev/null 2>&1
 }
 
-# _emulator_wait <seconds>: 0 once sys.boot_completed is 1.
+verify_infra_fail() {
+  echo "::error title=[VERIFY] emulator::$1 (infrastructure, not the app)"
+  echo "**$1 (infrastructure, not the app)**" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 2
+}
+
+# _emulator_wait <seconds>: 0 once sys.boot_completed is 1; 1 at the timeout, or at once when the
+# emulator process (EMULATOR_PID) has exited, e.g. on "Unknown AVD name".
 _emulator_wait() {
   local end=$((SECONDS + $1))
-  timeout "$1" adb wait-for-device >/dev/null 2>&1 || return 1
   while [ "${SECONDS}" -lt "${end}" ]; do
-    [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && return 0
-    sleep 3
+    if [ -n "${EMULATOR_PID:-}" ] && ! kill -0 "${EMULATOR_PID}" 2>/dev/null; then return 1; fi
+    if [ "$(adb get-state 2>/dev/null)" = device ] \
+      && [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then
+      return 0
+    fi
+    sleep 2
   done
   return 1
 }
 
+_emulator_listed() { adb devices 2>/dev/null | grep -q '^emulator-'; }
+
 emulator_stop() {
   adb emu kill >/dev/null 2>&1 || true
-  pkill -u "$(id -u)" -f 'qemu-system-x86_64' 2>/dev/null || true
-  sleep 2
+  for _ in $(seq 1 15); do _emulator_listed || return 0; sleep 2; done
+  pkill -9 -u "$(id -u)" -f 'qemu-system-x86_64' 2>/dev/null || true
+  for _ in $(seq 1 10); do _emulator_listed || return 0; sleep 2; done
 }
 
 emulator_boot() {
   local attempt rc1=1 rc2=- rc
   for attempt in 1 2; do
-    "$@" emulator -avd verify -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
-      -camera-back none -camera-front none > "${RUNNER_TEMP}/emulator-${attempt}.log" 2>&1 &
+    "$@" emulator -avd verify -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics \
+      -gpu swiftshader_indirect -camera-back none -camera-front none > "${EMULATOR_LOG_DIR}/emulator-${attempt}.log" 2>&1 &
+    EMULATOR_PID=$!
     if _emulator_wait "${EMULATOR_BOOT_SECONDS}"; then rc=0; else rc=1; fi
     if [ "${attempt}" = 1 ]; then rc1=${rc}; else rc2=${rc}; fi
     case "$(emulator_boot_verdict "${rc1}" "${rc2}")" in
@@ -94,12 +113,11 @@ emulator_boot() {
         ;;
       retry)
         echo "::warning title=[VERIFY] emulator::the Android emulator did not boot within ${EMULATOR_BOOT_SECONDS} s; retrying once"
-        tail -n 20 "${RUNNER_TEMP}/emulator-1.log"
+        tail -n 20 "${EMULATOR_LOG_DIR}/emulator-1.log"
         emulator_stop
         ;;
     esac
   done
-  tail -n 40 "${RUNNER_TEMP}/emulator-2.log"
-  echo "::error title=[VERIFY] emulator::the Android emulator did not boot after 2 attempts (infrastructure, not the app)"
-  return 2
+  tail -n 40 "${EMULATOR_LOG_DIR}/emulator-2.log"
+  verify_infra_fail "the Android emulator did not boot after 2 attempts"
 }

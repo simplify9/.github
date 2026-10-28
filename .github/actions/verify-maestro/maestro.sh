@@ -24,6 +24,14 @@ maestro_verdict() {
   fi
 }
 
+# maestro_app_env <has-mocks: true|false>: Metro's environment, one VAR=value per line. Metro passes
+# it to the app only at bundle time; the EXPO_PUBLIC_ copies are for Expo apps.
+maestro_app_env() {
+  printf '%s\n' VERIFY_E2E=1 EXPO_PUBLIC_VERIFY_E2E=1
+  [ "$1" = true ] && printf '%s\n' E2E_API_URL=http://localhost:3901 EXPO_PUBLIC_E2E_API_URL=http://localhost:3901
+  return 0
+}
+
 [ "${MAESTRO_SH_LIB:-}" = 1 ] && return 0
 
 set -euo pipefail
@@ -40,9 +48,11 @@ E2E_SH_LIB=1 source "${ACTION_PATH}/../verify-web-e2e/e2e.sh"
 export MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
 out="${RUNNER_TEMP}/maestro-report"
 mkdir -p "${out}"
+# Metro and emulator logs are written straight into the evidence folder: a step timeout kills this
+# script without running the exit trap.
+export EMULATOR_LOG_DIR="${out}"
 MOCKOON_PID=""
-# The evidence folder gets the Metro and emulator logs whatever happens.
-trap 'cp "${RUNNER_TEMP}"/metro.log "${RUNNER_TEMP}"/emulator-*.log "${RUNNER_TEMP}"/mockoon.log "${out}/" 2>/dev/null || true
+trap 'cp "${RUNNER_TEMP}"/mockoon.log "${out}/" 2>/dev/null || true
       [ -z "${MOCKOON_PID}" ] || kill "${MOCKOON_PID}" 2>/dev/null || true' EXIT
 
 e2e_scan_committed "${ACTION_PATH}/../verify-secret-scan/scan.py" || exit 1
@@ -56,29 +66,39 @@ fi
 
 # Everything that needs the internet happens before the block.
 emulator_kvm
-emulator_install
-curl -fsSL "https://get.maestro.mobile.dev" | MAESTRO_VERSION=2.11.0 bash >/dev/null
+emulator_install || verify_infra_fail "the Android emulator image could not be installed"
+curl -fsSL "https://get.maestro.mobile.dev" | MAESTRO_VERSION=2.11.0 bash >/dev/null \
+  || verify_infra_fail "the Maestro CLI could not be installed"
 export PATH="${HOME}/.maestro/bin:${PATH}"
-[ -f e2e/mocks.json ] && mockoon_install
+has_mocks=false
+[ -f e2e/mocks.json ] && has_mocks=true
+[ "${has_mocks}" = true ] && mockoon_install
 
 netblock_on e2e/allowed-hosts.txt
-app_env=(VERIFY_E2E=1)
-if [ -f e2e/mocks.json ]; then
+mapfile -t app_env < <(maestro_app_env "${has_mocks}")
+if [ "${has_mocks}" = true ]; then
   mockoon_start e2e/mocks.json netblock_run || exit 1
-  app_env+=("E2E_API_URL=http://localhost:${MOCKOON_PORT}")
   echo "::notice title=[VERIFY] maestro::Mockoon serves e2e/mocks.json; the app gets E2E_API_URL=http://localhost:${MOCKOON_PORT}"
 fi
-# Metro inlines VERIFY_E2E and E2E_API_URL at bundle time (the app's Babel env plugin), so no stale cache.
-netblock_run env "${app_env[@]}" npx react-native start --port 8081 --reset-cache > "${RUNNER_TEMP}/metro.log" 2>&1 &
-emulator_boot netblock_run || exit 2
-adb install -r "${apks[0]}" >/dev/null
+# Metro inlines the env at bundle time (the app's Babel env plugin), so no stale cache.
+netblock_run env "${app_env[@]}" npx react-native start --port 8081 --reset-cache > "${out}/metro.log" 2>&1 &
+emulator_boot netblock_run
+adb install -r "${apks[0]}" >/dev/null || verify_infra_fail "the APK could not be installed on the emulator"
 adb reverse tcp:8081 tcp:8081 >/dev/null
-[ -f e2e/mocks.json ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
+[ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
 # Only what happens from here (the app and its flows) counts as blocked traffic.
 sleep 5
 netblock_reset
+# TEMPORARY attribution probe (review I1): what the idle emulator still sends with no flow running.
+if [ "${VERIFY_IDLE_PROBE_SECONDS:-0}" -gt 0 ]; then
+  sleep "${VERIFY_IDLE_PROBE_SECONDS}"
+  echo "[VERIFY] idle probe: $(netblock_count) packet(s) in ${VERIFY_IDLE_PROBE_SECONDS} s to: $(netblock_blocked | tr '\n' ' ')"
+  netblock_reset
+fi
 
-# run_flow <flow> <attempt> [PREFIX...]: one Maestro run, JUnit and artifacts under ${out}.
+# run_flow <flow> <attempt> [PREFIX...]: one Maestro run, JUnit and artifacts under ${out}. Maestro
+# is the host-side driver, so it runs outside the block: the app's own traffic leaves through the
+# emulator, which is blocked, and Maestro's own calls are not the app's.
 run_flow() {
   local flow="$1" attempt="$2" name
   shift 2
@@ -89,7 +109,7 @@ run_flow() {
 
 passed=() flaky=() network=() failed=() first_failed=()
 for flow in "${flows[@]}"; do
-  if run_flow "${flow}" 1 netblock_run; then passed+=("${flow}"); else first_failed+=("${flow}"); fi
+  if run_flow "${flow}" 1; then passed+=("${flow}"); else first_failed+=("${flow}"); fi
 done
 blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
@@ -97,7 +117,7 @@ dests="${dests% }"
 recheck=()
 for flow in "${first_failed[@]+"${first_failed[@]}"}"; do
   rc=0
-  run_flow "${flow}" 2 netblock_run || rc=1
+  run_flow "${flow}" 2 || rc=1
   case "$(maestro_verdict 1 "${rc}" "${blocked}")" in
     flaky) flaky+=("${flow}") ;;
     network-check) recheck+=("${flow}") ;;

@@ -951,10 +951,13 @@ jobs:
       # Hermetic journeys: the emulator, Metro and Maestro run with outbound network blocked
       # except loopback and e2e/allowed-hosts.txt; e2e/mocks.json is served by Mockoon and
       # forwarded into the emulator as E2E_API_URL=http://localhost:3901.
+      # Step timeout under the job's 45: a hung run ends as a failed step, so the evidence upload and
+      # the collect step below still run.
       - name: Maestro journeys (emulator)
         id: smoke
         if: ${{ !cancelled() && steps.apk.outcome == 'success' && steps.install.outcome == 'success' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' maestro ') }}
+        timeout-minutes: 35
         uses: simplify9/.github/.github/actions/verify-maestro@main
         with:
           working-directory: ${{ inputs.working-directory }}

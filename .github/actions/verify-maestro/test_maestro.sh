@@ -30,5 +30,9 @@ test_verdict_pass() { eq "${FUNCNAME[0]}" pass "$(maestro_verdict 0 - 0)"; }
 test_verdict_flaky() { eq "${FUNCNAME[0]}" flaky "$(maestro_verdict 1 0 0)"; }
 test_verdict_network_check() { eq "${FUNCNAME[0]}" network-check "$(maestro_verdict 1 1 3)"; }
 test_verdict_fail() { eq "${FUNCNAME[0]}" fail "$(maestro_verdict 1 1 0)"; }
+test_app_env_with_mocks() {
+  eq "${FUNCNAME[0]}" $'VERIFY_E2E=1\nEXPO_PUBLIC_VERIFY_E2E=1\nE2E_API_URL=http://localhost:3901\nEXPO_PUBLIC_E2E_API_URL=http://localhost:3901' "$(maestro_app_env true)"
+}
+test_app_env_without_mocks() { eq "${FUNCNAME[0]}" $'VERIFY_E2E=1\nEXPO_PUBLIC_VERIFY_E2E=1' "$(maestro_app_env false)"; }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
