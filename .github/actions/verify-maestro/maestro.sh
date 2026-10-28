@@ -95,6 +95,9 @@ netblock_reset
 if [ "${VERIFY_IDLE_PROBE_SECONDS:-0}" -gt 0 ]; then
   sleep "${VERIFY_IDLE_PROBE_SECONDS}"
   echo "[VERIFY] idle probe: $(netblock_count) packet(s) in ${VERIFY_IDLE_PROBE_SECONDS} s to: $(netblock_blocked | tr '\n' ' ')"
+  sudo iptables -w -L VERIFY_NETBLOCK -n -v -x | sed 's/^/[VERIFY] idle v4: /'
+  sudo ip6tables -w -L VERIFY_NETBLOCK -n -v -x | sed 's/^/[VERIFY] idle v6: /'
+  sudo dmesg | grep 'VERIFY-NETBLOCK' | tail -n 8 | sed 's/^/[VERIFY] idle log: /'
   netblock_reset
 fi
 
