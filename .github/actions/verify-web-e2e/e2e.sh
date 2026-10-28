@@ -43,9 +43,21 @@ e2e_scan_committed() {
   fi
 }
 
-# e2e_verdict <rc> <blocked-count>: pass | fail (a real failure) | retry (the block may be the cause)
+# e2e_verdict <rc> <blocked-count> [recheck: true|false, default true]: pass | fail (a real failure)
+# | retry (the block may be the cause: re-run with network access) | blocked (the same, but `network`
+# is enforced for this repo, so no unblocked re-run: it would drive the app against real hosts)
 e2e_verdict() {
-  if [ "$1" -eq 0 ]; then echo pass; elif [ "$2" -eq 0 ]; then echo fail; else echo retry; fi
+  if [ "$1" -eq 0 ]; then echo pass
+  elif [ "$2" -eq 0 ]; then echo fail
+  elif [ "${3:-true}" = true ]; then echo retry
+  else echo blocked
+  fi
+}
+
+# e2e_network_enforced <destinations>: the error for a failure with blocked traffic once `network`
+# is enforced (no unblocked re-run any more).
+e2e_network_enforced() {
+  echo "::error title=[VERIFY] network::the journeys failed while the block rejected traffic; blocked: ${1:-unknown}. From the network deadline verify no longer re-runs with network access: mock these calls, or list third-party SDK hosts in e2e/allowed-hosts.txt"
 }
 
 # e2e_after_retry <rc of the unblocked run>: network (passes only with network access) | fail
@@ -92,7 +104,10 @@ blocked="$(netblock_count)"
 dests="$(netblock_blocked | tr '\n' ' ')"
 dests="${dests% }"
 
-case "$(e2e_verdict "${rc}" "${blocked}")" in
+case "$(e2e_verdict "${rc}" "${blocked}" "${NETWORK_RECHECK:-true}")" in
+  blocked)
+    e2e_network_enforced "${dests}"
+    ;;
   pass)
     if [ "${blocked}" -gt 0 ]; then
       echo "::notice title=[VERIFY] network::e2e passed; the block rejected ${blocked} packet(s) to: ${dests:-unknown (kernel log unreadable)}"

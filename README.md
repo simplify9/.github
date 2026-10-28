@@ -890,6 +890,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
    - If it fails while the block rejected traffic, it re-runs once with network access.
    - Passing then means the app needs a host that is neither mocked nor allowed: `e2e` passes and the `network` step fails, naming the blocked destinations. Until `network`'s own deadline (see "New steps start tolerated") that failure is a warning.
    - Failing again is a real `e2e` failure.
+   - **Once `network` is enforced for the repo** (its own deadline: the later of `contract-deadline` and 2026-12-29), there is no re-run with network access: it would drive the app against real hosts. A failure while traffic was blocked fails `e2e` and names the blocked destinations.
 5. The job summary names failed and flaky (passed on retry) tests, read from the `list` reporter's output. On failure, `playwright-report/` and `test-results/` are uploaded as the artifact `e2e-report` (5 days).
 
 The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with its real API calls until the contract deadline. The web job runs on the GitHub-hosted runner because the block needs root network control.
@@ -914,11 +915,12 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 
 **React Native journeys (`maestro`).** Starter in `starters/react-native-maestro/`.
 1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
-2. An API 34 x86_64 emulator boots with **outbound network blocked** (the emulator, Metro and Maestro run under the block; allowed: loopback and `e2e/allowed-hosts.txt`). If it doesn't boot in 2 attempts, the step fails with "did not boot (infrastructure)", not as a journey failure.
-3. With `e2e/mocks.json`, Mockoon serves it on port 3901, forwarded into the emulator with `adb reverse`. Metro starts with `VERIFY_E2E=1` and `E2E_API_URL=http://localhost:3901`; the app must read them (for example with `babel-plugin-transform-inline-environment-variables`).
+2. An API 34 x86_64 emulator boots with **outbound network blocked** (the emulator, Metro and Mockoon run under the block; Maestro, the host-side driver, does not; allowed: loopback and `e2e/allowed-hosts.txt`). Android's own background traffic is switched off after boot and not counted; multicast and NTP are dropped silently. If the emulator doesn't boot in 2 attempts, or its image, Maestro or the APK can't be installed, the step fails as "infrastructure, not the app" (exit 2), not as a journey failure. The step times out after 35 minutes, as a failed step whose evidence is still uploaded.
+3. With `e2e/mocks.json`, Mockoon serves it on port 3901, forwarded into the emulator with `adb reverse`. Metro starts with `VERIFY_E2E=1` and `E2E_API_URL=http://localhost:3901` (and the same as `EXPO_PUBLIC_VERIFY_E2E`/`EXPO_PUBLIC_E2E_API_URL`). They exist only in Metro's environment at bundle time: the app must read them there (a Babel inline-env transform, or Expo's `EXPO_PUBLIC_` variables), not from a `.env` file or a Gradle build field.
 4. Every flow file directly in `.maestro/` runs, `smoke.yaml` first (`config.yaml` and subfolders are not flows).
    - A failed flow re-runs once; passing then is reported as flaky.
    - A flow that still fails while the block rejected traffic re-runs once with network access. Passing then means the app needs an unmocked host: `maestro` passes and the `network` step fails, a warning until its deadline.
+   - Once `network` is enforced for the repo, that unblocked re-run no longer happens (no real hosts): the flow fails, naming the blocked destinations.
 5. The summary names passed, flaky, network-only and failed flows. On failure, JUnit files, screenshots, Maestro logs and the Metro and emulator logs are uploaded as `maestro-report` (5 days).
 
 **`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.

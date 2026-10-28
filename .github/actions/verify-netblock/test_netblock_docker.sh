@@ -55,6 +55,13 @@ inner() {
   eq unresolvable_host_rc 1 "${rc}"
   eq unresolvable_host_named 1 "$(grep -c 'cannot resolve allowed host no-such-host.invalid' <<< "${out}")"
 
+  # Multicast (mDNS) and NTP are dropped silently: an emulator's own chatter, never the app's journey.
+  netblock_on >/dev/null
+  netblock_run python3 -c 'import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); [s.sendto(b"x", a) for a in (("224.0.0.251", 5353), ("203.0.113.9", 123))]' 2>/dev/null
+  eq multicast_and_ntp_not_counted 0 "$(netblock_count)"
+  netblock_run curl -sS -m 5 https://example.org >/dev/null 2>&1
+  eq tcp_still_counted 1 "$([ "$(netblock_count)" -gt 0 ] && echo 1 || echo 0)"
+
   # netblock_reset forgets traffic rejected so far (an emulator's own boot chatter), keeping the block.
   netblock_on >/dev/null
   netblock_run curl -sS -m 5 https://example.org >/dev/null 2>&1

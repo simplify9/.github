@@ -20,6 +20,9 @@
 # Inputs:
 #   working-directory  (optional)  Project directory. Default ".".
 #   runner             (required)  Package-manager command (verify-web-install's `runner` output).
+#   network-recheck    (optional)  true (default) while `network` is tolerated: a failure with
+#                                  blocked traffic re-runs once with network access. false once it
+#                                  is enforced: fail without that re-run (never real hosts).
 # Outputs:
 #   network  "needed" when the tests passed only with network access, else empty.
 # =============================================================================
@@ -36,6 +39,11 @@ inputs:
     description: 'Package-manager command used to run scripts (yarn, npm or pnpm).'
     required: true
 
+  network-recheck:
+    description: 'true while the `network` step is tolerated: a failure with blocked traffic re-runs once with network access. false once it is enforced: fail without that re-run.'
+    required: false
+    default: 'true'
+
 outputs:
   network:
     description: '"needed" when the tests passed only with network access, else empty.'
@@ -51,6 +59,7 @@ runs:
       env:
         RUNNER: ${{ inputs.runner }}
         ACTION_PATH: ${{ github.action_path }}
+        NETWORK_RECHECK: ${{ inputs.network-recheck }}
       run: bash "${ACTION_PATH}/e2e.sh"
 
 branding:

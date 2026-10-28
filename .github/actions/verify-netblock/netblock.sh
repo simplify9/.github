@@ -82,6 +82,13 @@ netblock_on() {
     done
     allowed=$((allowed + 1))
   done
+  # Multicast (mDNS) and NTP: an emulator's own chatter, never a journey's. Dropped before LOG and
+  # REJECT, so they are neither listed nor counted (netblock_count sums REJECT only).
+  ${sudo} iptables -w -A "${NETBLOCK_CHAIN}" -d 224.0.0.0/4 -j DROP || return 1
+  ${sudo} ip6tables -w -A "${NETBLOCK_CHAIN}" -d ff00::/8 -j DROP || return 1
+  for ipt in iptables ip6tables; do
+    ${sudo} "${ipt}" -w -A "${NETBLOCK_CHAIN}" -p udp --dport 123 -j DROP || return 1
+  done
   for ipt in iptables ip6tables; do
     ${sudo} "${ipt}" -w -A "${NETBLOCK_CHAIN}" -m limit --limit 10/second --limit-burst 20 \
       -j LOG --log-prefix "VERIFY-NETBLOCK " || return 1
