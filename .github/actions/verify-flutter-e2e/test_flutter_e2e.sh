@@ -89,5 +89,6 @@ test_verdict_recheck_false_no_rerun() {
   eq "${FUNCNAME[0]}_flaky_unaffected" flaky "$(flutter_e2e_verdict 1 0 3 false)"
 }
 test_verdict_fail() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 1 1 0)"; }
+test_verdict_timeout_no_retry() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 124 - 3)"; }
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

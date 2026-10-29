@@ -46,9 +46,11 @@ flutter_e2e_summary() {
 
 # flutter_e2e_verdict <first-rc> <blocked-rerun-rc|-> <blocked-count> [recheck: true|false, default
 # true]: pass | flaky | network-check | blocked (network enforced: no unblocked re-run) | fail.
-# A failure is re-run once under the block first, so a flake is never taken for a network need.
+# A failure is re-run once under the block first, so a flake is never taken for a network need;
+# a timed-out first run (124) is a plain fail.
 flutter_e2e_verdict() {
   if [ "$1" -eq 0 ]; then echo pass
+  elif [ "$1" -eq 124 ]; then echo fail # timed out: a hanging run hangs again, so no re-run or re-check
   elif [ "$2" != "-" ] && [ "$2" -eq 0 ]; then echo flaky
   elif [ "$3" -gt 0 ] && [ "${4:-true}" = true ]; then echo network-check
   elif [ "$3" -gt 0 ]; then echo blocked
@@ -140,7 +142,7 @@ flutter_run() {
 }
 flutter_run
 first=${rc} rerun=-
-if [ "${first}" -ne 0 ]; then
+if [ "${first}" -ne 0 ] && [ "${first}" -ne 124 ]; then
   cp "${log}" "${out}/flutter-test-run1.log"
   echo "[VERIFY] e2e: failed; re-running once with the block still on"
   flutter_run
