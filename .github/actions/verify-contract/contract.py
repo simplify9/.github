@@ -31,12 +31,13 @@ SKIP_DIRS = {".git", "node_modules", "bin", "obj", "build", ".dart_tool", ".yarn
 STACKS = set(NODE) | {"dotnet-service", "dotnet-library", "flutter", "infra"}
 # Items added after v1, with the day they shipped (spec 4.3). Their deadline is never before since + GRACE_DAYS.
 SINCE = {"playwright": "2026-11-03", "integration-tests": "2026-11-03", "maestro-journeys": "2026-11-03",
-         "e2e-mocks": "2026-11-03"}
+         "e2e-mocks": "2026-11-03", "integration-test": "2026-11-03"}
 GRACE_DAYS = 56
 PLAYWRIGHT_CONFIGS = {"playwright.config." + e for e in ("ts", "js", "mjs", "cjs")}
 
 
-def missing_items(stack, files, package_json, csproj_count, has_health_mapping, dotnet_projects=None):
+def missing_items(stack, files, package_json, csproj_count, has_health_mapping, dotnet_projects=None,
+                  flutter_e2e=None):
     if stack not in STACKS:
         raise ValueError("unknown stack: %s" % stack)
     if stack == "infra":  # infra repos have no contract items
@@ -91,6 +92,8 @@ def missing_items(stack, files, package_json, csproj_count, has_health_mapping, 
         need("e2e/mocks.json" in files, "e2e-mocks")
     elif stack == "flutter":
         need(any(f.startswith("test/") and f.endswith("_test.dart") for f in files), "widget-test")
+        fe = flutter_e2e or {}
+        need(fe.get("dep") and fe.get("journeys", 0) >= 3, "integration-test")
     return out
 
 
@@ -141,6 +144,27 @@ def scan(root):
     return files, csprojs, health
 
 
+def flutter_journeys(root):
+    """-> {"dep": pubspec.yaml has integration_test (sdk: flutter), "journeys": testWidgets( calls in
+    integration_test/*_test.dart directly in that folder, commented-out lines excluded}."""
+    dep = False
+    try:
+        with open(os.path.join(root, "pubspec.yaml"), encoding="utf-8") as f:
+            # Indented (under a dependencies key), flow style `{ sdk: flutter }` or block style, CRLF
+            # and a trailing comment allowed; commented-out, top-level and hosted forms are not.
+            dep = bool(re.search(r"(?m)^[ \t]+integration_test:[ \t]*(?:\{[ \t]*sdk:[ \t]*flutter[ \t]*\}"
+                                 r"|(?:#[^\n]*)?\r?\n[ \t]+sdk:[ \t]*flutter\b)", f.read()))
+    except OSError:
+        pass
+    n, d = 0, os.path.join(root, "integration_test")
+    for fn in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        path = os.path.join(d, fn)
+        if fn.endswith("_test.dart") and os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                n += sum(line.count("testWidgets(") for line in f if not line.lstrip().startswith("//"))
+    return {"dep": dep, "journeys": n}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stack", required=True)
@@ -153,7 +177,8 @@ def main():
         with open(os.path.join(a.dir, "package.json"), encoding="utf-8") as f:
             pkg = json.load(f)
     dotnet = classify.classify(a.dir) if a.stack.startswith("dotnet") else None
-    missing = missing_items(a.stack, files, pkg, csprojs, health, dotnet)
+    fe = flutter_journeys(a.dir) if a.stack == "flutter" else None
+    missing = missing_items(a.stack, files, pkg, csprojs, health, dotnet, fe)
     print(json.dumps({"mode": mode_for(a.deadline, date.today()), "missing": missing,
                       "levels": item_levels(missing, a.deadline, date.today())}))
 
