@@ -56,6 +56,15 @@ flutter_e2e_verdict() {
   fi
 }
 
+# flutter_e2e_stop_gradle: after the warm build (run from the project directory), no Gradle or Kotlin
+# daemon stays resident next to the emulator; a large app's daemons plus the emulator ran a 2-vCPU
+# hosted runner out of memory. The blocked test build later starts a fresh, incremental one.
+flutter_e2e_stop_gradle() {
+  if [ -x android/gradlew ]; then (cd android && ./gradlew --stop) >/dev/null 2>&1 || true; fi
+  pkill -u "$(id -u)" -f KotlinCompileDaemon 2>/dev/null || true
+  pkill -u "$(id -u)" -f GradleDaemon 2>/dev/null || true
+}
+
 [ "${FLUTTER_E2E_SH_LIB:-}" = 1 ] && return 0
 
 set -euo pipefail
@@ -95,6 +104,10 @@ emulator_kvm
 emulator_install
 flutter pub get
 flutter build apk --debug
+verify_mem "after the debug build"
+flutter_e2e_stop_gradle
+sleep 3
+verify_mem "Gradle stopped, before the emulator"
 [ "${has_mocks}" = true ] && mockoon_install
 
 netblock_on e2e/allowed-hosts.txt
@@ -103,6 +116,7 @@ if [ "${has_mocks}" = true ]; then
   echo "::notice title=[VERIFY] e2e::Mockoon serves e2e/mocks.json; the app gets E2E_API_URL=http://localhost:${MOCKOON_PORT}"
 fi
 emulator_boot netblock_run || exit 2
+verify_mem "emulator booted"
 [ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
 device="$(adb devices | awk 'NR > 1 && $2 == "device" {print $1; exit}')"
 # Only what happens from here (the app and its tests) counts as blocked traffic, and the emulator's own

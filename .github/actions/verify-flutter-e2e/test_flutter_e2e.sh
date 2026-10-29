@@ -67,6 +67,18 @@ test_trap_does_not_hang_without_device() {
     wait "${pid}"; eq "${FUNCNAME[0]}_rc" 1 $?
   fi
 }
+test_stop_gradle() {
+  # Re-land fix 1: after the warm build, no Gradle or Kotlin daemon stays resident next to the emulator.
+  mkdir -p "${tmp}/g/android" "${tmp}/gbin"
+  printf '#!/usr/bin/env bash\necho "gradlew $*" >> "%s/calls"\n' "${tmp}" > "${tmp}/g/android/gradlew"
+  printf '#!/usr/bin/env bash\necho "pkill $*" >> "%s/calls"\n' "${tmp}" > "${tmp}/gbin/pkill"
+  chmod +x "${tmp}/g/android/gradlew" "${tmp}/gbin/pkill"
+  rm -f "${tmp}/calls"
+  (cd "${tmp}/g" && PATH="${tmp}/gbin:${PATH}" flutter_e2e_stop_gradle >/dev/null 2>&1)
+  eq "${FUNCNAME[0]}_gradlew" 1 "$(grep -c '^gradlew --stop' "${tmp}/calls" 2>/dev/null || echo 0)"
+  eq "${FUNCNAME[0]}_kotlin" 1 "$(grep -c 'KotlinCompileDaemon' "${tmp}/calls" 2>/dev/null || echo 0)"
+  eq "${FUNCNAME[0]}_gradle_daemon" 1 "$(grep -c 'GradleDaemon' "${tmp}/calls" 2>/dev/null || echo 0)"
+}
 test_failed_none() { printf '00:30 +3: All tests passed!\n' > "${tmp}/ok"; eq "${FUNCNAME[0]}" "" "$(flutter_e2e_failed "${tmp}/ok")"; }
 test_verdict_pass() { eq "${FUNCNAME[0]}" pass "$(flutter_e2e_verdict 0 - 9)"; }
 test_verdict_flaky() { eq "${FUNCNAME[0]}" flaky "$(flutter_e2e_verdict 1 0 9)"; }

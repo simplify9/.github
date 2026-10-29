@@ -11,11 +11,15 @@
 #                                 300 s; exits 2 through verify_infra_fail when it never boots
 #   emulator_stop                 until adb lists no emulator (SIGKILL after a grace period)
 #   emulator_boot_verdict RC1 RC2|-   booted | retry | failed
+#   verify_mem LABEL              one line of `free -m` in the step log
 #   verify_infra_fail MESSAGE     "MESSAGE (infrastructure, not the app)" as an error and in the job
 #                                 summary, then exit 2 (not reported as a journey failure)
 
 EMULATOR_IMAGE="system-images;android-34;default;x86_64"
 EMULATOR_BOOT_SECONDS=300
+# Guest RAM in MB, capped so the emulator fits next to the rest of the job on a 2-vCPU / ~8 GB hosted
+# runner (private repositories): a large app's Gradle build plus an uncapped emulator ran it out of memory.
+EMULATOR_MEMORY_MB="${EMULATOR_MEMORY_MB:-2048}"
 # Where emulator-<attempt>.log go; a caller points it at its evidence folder so the logs survive a
 # step timeout (no exit trap runs then).
 EMULATOR_LOG_DIR="${EMULATOR_LOG_DIR:-${RUNNER_TEMP:-/tmp}}"
@@ -76,6 +80,12 @@ emulator_guest_quiet() {
   echo "[VERIFY] emulator: Android's own traffic stopped in the guest ($(wc -w <<< "${uids}" | tr -d ' ') system app UIDs + UIDs below 10000)"
 }
 
+# verify_mem <label>: one line of `free -m` in the step log (memory is what runs a hosted runner out).
+verify_mem() {
+  free -m 2>/dev/null | awk -v l="$1" '/^Mem:/ {t = $2; u = $3; a = $7} /^Swap:/ {s = $3}
+    END {if (t) printf "[VERIFY] memory (%s): total %s MB, used %s MB, available %s MB, swap used %s MB\n", l, t, u, a, s + 0}'
+}
+
 verify_infra_fail() {
   echo "::error title=[VERIFY] emulator::$1 (infrastructure, not the app)"
   echo "**$1 (infrastructure, not the app)**" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -109,7 +119,7 @@ emulator_stop() {
 emulator_boot() {
   local attempt rc1=1 rc2=- rc
   for attempt in 1 2; do
-    "$@" emulator -avd verify -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics \
+    "$@" emulator -avd verify -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -memory "${EMULATOR_MEMORY_MB}" \
       -gpu swiftshader_indirect -camera-back none -camera-front none > "${EMULATOR_LOG_DIR}/emulator-${attempt}.log" 2>&1 &
     EMULATOR_PID=$!
     if _emulator_wait "${EMULATOR_BOOT_SECONDS}"; then rc=0; else rc=1; fi

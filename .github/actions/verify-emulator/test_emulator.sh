@@ -53,4 +53,29 @@ eq infra_fail_rc 2 "$( (GITHUB_STEP_SUMMARY="${tmp}/summary" verify_infra_fail "
 eq infra_fail_annotation 1 "$(grep -c '::error title=\[VERIFY\] emulator::the emulator image could not be installed (infrastructure, not the app)' <<< "${out}")"
 eq infra_fail_summary 1 "$(grep -c 'infrastructure, not the app' "${tmp}/summary" | awk '{print ($1 > 0)}')"
 
+# Re-land fix 2: the emulator's RAM is capped, so it fits next to the rest on a 2-vCPU/8 GB runner.
+cat > "${tmp}/bin/emulator" <<'STUB'
+#!/usr/bin/env bash
+echo "$@" > "${STUB_DIR}/emulator-args"
+sleep 20
+STUB
+cat > "${tmp}/bin/adb" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in get-state) echo device ;; shell) [ "$2" = getprop ] && echo 1 ;; esac
+exit 0
+STUB
+chmod +x "${tmp}/bin/emulator" "${tmp}/bin/adb"
+# shellcheck disable=SC2119 # booted with no prefix on purpose
+(RUNNER_TEMP="${tmp}" EMULATOR_LOG_DIR="${tmp}" emulator_boot >/dev/null 2>&1)
+eq boot_caps_memory 1 "$(grep -c -- '-memory 2048' "${tmp}/emulator-args" 2>/dev/null || echo 0)"
+pkill -f "${tmp}/bin/emulator" 2>/dev/null || true
+
+# verify_mem: one line from `free -m`, labelled.
+cat > "${tmp}/bin/free" <<'STUB'
+#!/usr/bin/env bash
+printf '               total        used        free      shared  buff/cache   available\nMem:            7939        5120         512          12        2306        2510\nSwap:           4095         100        3995\n'
+STUB
+chmod +x "${tmp}/bin/free"
+eq verify_mem_line "[VERIFY] memory (after the build): total 7939 MB, used 5120 MB, available 2510 MB, swap used 100 MB" "$(verify_mem "after the build")"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
