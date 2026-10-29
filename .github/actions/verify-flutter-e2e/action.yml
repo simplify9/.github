@@ -21,7 +21,8 @@
 #      with the block still on (passing then = flaky, named). If it fails again
 #      while the block rejected traffic, it re-runs once with the block lifted:
 #      passing then sets output network=needed (the workflow's `network` step
-#      reports it).
+#      reports it). An attempt that runs out of its 10 minutes is a plain
+#      failure, not re-run.
 #   5. Names flaky and failed tests in the job summary. The step has a
 #      35-minute timeout in verify.yml. Evidence (test log, logcat,
 #      emulator and Mockoon logs) is left in ${RUNNER_TEMP}/flutter-e2e-report.

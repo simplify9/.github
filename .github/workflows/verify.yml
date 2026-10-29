@@ -1346,8 +1346,9 @@ jobs:
           flutter-version: ${{ inputs.flutter-version }}
           cache: true
 
-      # Hermetic: the emulator and the Flutter tool run with outbound network blocked except loopback
-      # and e2e/allowed-hosts.txt; e2e/mocks.json is served by Mockoon as E2E_API_URL.
+      # Hermetic: the emulator (where the app and its tests run) and Mockoon run with outbound network
+      # blocked except loopback and e2e/allowed-hosts.txt; the host-side Flutter tool (Gradle build, adb)
+      # stays outside the block. e2e/mocks.json is served by Mockoon as E2E_API_URL.
       # Step timeout under the job's 45: a hung run ends as a failed step, so the evidence upload and
       # the collect step below still run.
       - name: Integration tests (emulator)

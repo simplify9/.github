@@ -44,13 +44,17 @@ flutter_e2e_summary() {
   fi
 }
 
+# flutter_e2e_timed_out <rc>: the attempt was stopped by its time cap: timeout's 124, or 137 when the
+# child ignored TERM and was killed (an OOM kill is 137 too, and no more worth re-running).
+flutter_e2e_timed_out() { [ "$1" = 124 ] || [ "$1" = 137 ]; }
+
 # flutter_e2e_verdict <first-rc> <blocked-rerun-rc|-> <blocked-count> [recheck: true|false, default
 # true]: pass | flaky | network-check | blocked (network enforced: no unblocked re-run) | fail.
 # A failure is re-run once under the block first, so a flake is never taken for a network need;
-# a timed-out first run (124) is a plain fail.
+# a timed-out attempt (first or re-run) makes it a plain fail with no further attempt.
 flutter_e2e_verdict() {
   if [ "$1" -eq 0 ]; then echo pass
-  elif [ "$1" -eq 124 ]; then echo fail # timed out: a hanging run hangs again, so no re-run or re-check
+  elif flutter_e2e_timed_out "$1" || flutter_e2e_timed_out "$2"; then echo fail # a hanging run hangs again
   elif [ "$2" != "-" ] && [ "$2" -eq 0 ]; then echo flaky
   elif [ "$3" -gt 0 ] && [ "${4:-true}" = true ]; then echo network-check
   elif [ "$3" -gt 0 ]; then echo blocked
@@ -124,6 +128,8 @@ emulator_boot netblock_run || exit 2
 verify_mem "emulator booted"
 [ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
 device="$(adb devices | awk 'NR > 1 && $2 == "device" {print $1; exit}')"
+# Without one, `flutter test -d ""` could pick a host device, which runs outside the block.
+[ -n "${device}" ] || verify_infra_fail "adb lists no booted emulator"
 # Only what happens from here (the app and its tests) counts as blocked traffic, and the emulator's own
 # residual background traffic, recorded while nothing runs, is never blamed on the tests.
 sleep 5
@@ -137,12 +143,13 @@ flutter_run() {
   timeout --kill-after=30 600 \
     flutter test integration_test --no-pub --reporter expanded -d "${device}" "${defines[@]}" 2>&1 | tee "${log}"
   rc=${PIPESTATUS[0]}
-  [ "${rc}" -eq 124 ] && echo "::warning title=[VERIFY] e2e::an attempt ran past 10 minutes and was stopped"
+  flutter_e2e_timed_out "${rc}" && echo "::warning title=[VERIFY] e2e::an attempt ran past 10 minutes and was stopped"
+  verify_mem "after a test attempt"
   set -e
 }
 flutter_run
 first=${rc} rerun=-
-if [ "${first}" -ne 0 ] && [ "${first}" -ne 124 ]; then
+if [ "${first}" -ne 0 ] && ! flutter_e2e_timed_out "${first}"; then
   cp "${log}" "${out}/flutter-test-run1.log"
   echo "[VERIFY] e2e: failed; re-running once with the block still on"
   flutter_run
@@ -155,6 +162,10 @@ blocked="$(grep -c . <<< "${attributable}" || true)"
 dests="$(tr '\n' ' ' <<< "${attributable}")"
 dests="${dests% }"
 verdict="$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}" "${NETWORK_RECHECK:-true}")"
+# A timed-out run gets no network re-check, but the hosts it was refused still point at the cause.
+if [ "${verdict}" = fail ] && [ "${blocked}" -gt 0 ]; then
+  echo "::notice title=[VERIFY] network::the block rejected traffic to ${blocked} destination(s) during the e2e step: ${dests}"
+fi
 case "${verdict}" in
   blocked)
     e2e_network_enforced "${dests}"

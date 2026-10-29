@@ -90,5 +90,12 @@ test_verdict_recheck_false_no_rerun() {
 }
 test_verdict_fail() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 1 1 0)"; }
 test_verdict_timeout_no_retry() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 124 - 3)"; }
+test_verdict_killed_no_retry() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 137 - 3)"; }
+test_verdict_rerun_timed_out_no_recheck() { eq "${FUNCNAME[0]}" fail "$(flutter_e2e_verdict 1 124 3)"; }
+test_timed_out() {
+  local r=""
+  for rc in 124 137 1 0 -; do flutter_e2e_timed_out "${rc}" && r="${r}${rc}:y " || r="${r}${rc}:n "; done
+  eq "${FUNCNAME[0]}" "124:y 137:y 1:n 0:n -:n " "${r}"
+}
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

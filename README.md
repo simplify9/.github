@@ -908,7 +908,8 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
 2. Before the block: the API 34 x86_64 emulator image, `flutter pub get` and a debug build (Gradle's downloads).
 3. The emulator boots with **outbound network blocked** (allowed: loopback and `e2e/allowed-hosts.txt`); 2 attempts, then "did not boot (infrastructure)".
-4. `flutter test integration_test` runs with `--dart-define=VERIFY_E2E=true` and, with `e2e/mocks.json` (Mockoon on port 3901, `adb reverse`), `--dart-define=E2E_API_URL=http://localhost:3901`.
+4. `flutter test integration_test` runs against that emulator with `--dart-define=VERIFY_E2E=true` and, with `e2e/mocks.json` (Mockoon on port 3901, `adb reverse`), `--dart-define=E2E_API_URL=http://localhost:3901`. The app and its tests run inside the blocked emulator; the Flutter tool on the runner (its Gradle build, adb) does not need the block.
+   - Each attempt (test build plus run) has **10 minutes**. An attempt that runs out is a plain failure and is not re-run: a hanging run hangs again. If the block rejected traffic meanwhile, the destinations are named.
    - A failure re-runs once with the block still on; passing then is reported as flaky (fix it). A test that fails twice while the block rejected traffic re-runs once with network access. Passing then means the app needs an unmocked host: `e2e` passes and `network` fails, a warning until its deadline. Once `network` is enforced for the repo, that unblocked re-run no longer happens (no real hosts): the test fails, naming the blocked destinations.
 5. Failed tests are named in the summary. On failure the test log, `adb logcat` and the emulator and Mockoon logs are uploaded as `flutter-e2e-report` (5 days).
 6. `e2e` is new for Flutter: tolerated until 2026-12-29 (or the repo's later deadline) with no caller change.
