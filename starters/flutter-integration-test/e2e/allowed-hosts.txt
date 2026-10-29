@@ -1,5 +1,0 @@
-# Third-party SDK hosts the app must reach during verify's e2e run (crash reporting, maps).
-# One host name or IP per line; no scheme, port, path or wildcard. Say why on each line.
-# Never list our own API hosts: mock them instead.
-# Example:
-# maps.example.com  # map tiles; the map screen fails without them

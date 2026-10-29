@@ -100,70 +100,8 @@ class MissingItems(unittest.TestCase):
         self.assertEqual(c.missing_items("strapi", {"package-lock.json"}, pkg, 0, False), [])
 
     def test_flutter_widget_test(self):
-        ok = {"dep": True, "journeys": 3}
-        self.assertEqual(c.missing_items("flutter", {"pubspec.lock"}, None, 0, False, flutter_e2e=ok), ["widget-test"])
-        self.assertEqual(c.missing_items("flutter", {"pubspec.lock", "test/a_test.dart"}, None, 0, False,
-                                         flutter_e2e=ok), [])
-
-    def test_flutter_integration_test_item(self):
-        files = {"pubspec.lock", "test/a_test.dart"}
-        for fe in (None, {"dep": False, "journeys": 3}, {"dep": True, "journeys": 2}):
-            self.assertEqual(c.missing_items("flutter", files, None, 0, False, flutter_e2e=fe), ["integration-test"])
-
-    def test_flutter_item_deadline(self):
-        self.assertEqual(c.item_deadline("integration-test", "2026-11-10"), date(2026, 12, 29))
-
-
-class FlutterJourneys(unittest.TestCase):
-    def tree(self, files):
-        d = tempfile.mkdtemp()
-        for rel, text in files.items():
-            path = os.path.join(d, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(text)
-        return d
-
-    PUBSPEC = "name: app\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n  integration_test:\n    sdk: flutter\n"
-
-    def test_flutter_dep_and_count(self):
-        d = self.tree({"pubspec.yaml": self.PUBSPEC,
-                       "integration_test/app_test.dart": "testWidgets('a', (t) async {});\n  testWidgets('b', (t) async {});\n",
-                       "integration_test/more_test.dart": "testWidgets('c', (t) async {});\n"})
-        self.assertEqual(c.flutter_journeys(d), {"dep": True, "journeys": 3})
-
-    def test_flutter_commented_testwidgets_not_counted(self):
-        d = self.tree({"pubspec.yaml": self.PUBSPEC,
-                       "integration_test/app_test.dart": "// testWidgets('old', (t) async {});\ntestWidgets('a', (t) async {});\n"})
-        self.assertEqual(c.flutter_journeys(d)["journeys"], 1)
-
-    def test_flutter_nested_files_not_counted(self):
-        d = self.tree({"pubspec.yaml": self.PUBSPEC,
-                       "integration_test/sub/x_test.dart": "testWidgets('a', (t) async {});\n",
-                       "integration_test/helpers.dart": "testWidgets('b', (t) async {});\n"})
-        self.assertEqual(c.flutter_journeys(d)["journeys"], 0)
-
-    def dep(self, pubspec):
-        return c.flutter_journeys(self.tree({"pubspec.yaml": pubspec}))["dep"]
-
-    def test_flutter_dep_forms_accepted(self):
-        for text in ("dev_dependencies:\n  integration_test: { sdk: flutter }\n",       # the prompt's own form
-                     "dev_dependencies:\n  integration_test: {sdk: flutter}\n",
-                     "dev_dependencies:\n  integration_test:\n    sdk: flutter\n",
-                     "dev_dependencies:\r\n  integration_test:\r\n    sdk: flutter\r\n",
-                     "dev_dependencies:\n  integration_test: # e2e journeys\n    sdk: flutter\n"):
-            self.assertTrue(self.dep(text), repr(text))
-
-    def test_flutter_dep_forms_rejected(self):
-        for text in ("dev_dependencies:\n#  integration_test:\n#    sdk: flutter\n",       # commented out
-                     "dev_dependencies:\n  # integration_test: { sdk: flutter }\n",
-                     "integration_test:\n  sdk: flutter\n",                                # top level
-                     "dev_dependencies:\n  integration_test: ^1.0.0\n"):                   # hosted
-            self.assertFalse(self.dep(text), repr(text))
-
-    def test_flutter_dep_missing(self):
-        d = self.tree({"pubspec.yaml": "name: app\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n"})
-        self.assertEqual(c.flutter_journeys(d), {"dep": False, "journeys": 0})
+        self.assertEqual(c.missing_items("flutter", {"pubspec.lock"}, None, 0, False), ["widget-test"])
+        self.assertEqual(c.missing_items("flutter", {"pubspec.lock", "test/a_test.dart"}, None, 0, False), [])
 
     def test_infra_has_no_requirements(self):
         self.assertEqual(c.missing_items("infra", set(), None, 0, False), [])
