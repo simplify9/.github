@@ -863,7 +863,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `dotnet-version` | | `10.0.x` | .NET SDK (dotnet stacks) |
 | `java-version` | | `17` | Java (Android builds, Flutter) |
 | `flutter-version` | | `3.x` | Flutter (flutter stack) |
-| `smoke-path` | | `''` | HTTP path probed by `docker-smoke`. Empty: `/health` for `dotnet-service` (on by default; skipped without a `Dockerfile`), off for `dotnet-library`. `none` turns it off |
+| `smoke-path` | | `''` | HTTP path probed by `docker-smoke` (opt-in). Empty or `none`: no smoke. The on-by-default `/health` smoke for `dotnet-service` is paused (see below) |
 | `docker-build-github-token` | | `false` | Boolean, opt-in. Mounts the job's `GITHUB_TOKEN` into the docker build as the BuildKit secret `GITHUB_TOKEN` (`RUN --mount=type=secret,id=GITHUB_TOKEN`) for GitHub Packages installs; never in the image. Applies to the docker rung and `docker-smoke` |
 | `postgres-version` | | (empty) | PostgreSQL major for the strapi job. Empty: the version in `ci/fixture.sql.gz`'s header, else 17. A newer version restores dumps from older servers, never the reverse. |
 
@@ -900,7 +900,7 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 - **Refused:** a config file in the project (`*.json`, `*.config`, `*.runsettings`, `*.env`, `*.yml`, `*.yaml`) holds a connection string to a non-local host with a password. The project never runs; the `test` step names it and the file:line, never the value. It does not count for the contract until it is converted to Testcontainers or local values.
 - **Everything else** runs in the blocking `test` step as before, from a copy of the solution without the other two kinds; with nothing to drop, from the solution itself.
 
-**Docker smoke (`smoke`).** For `dotnet-service`, `docker-smoke` builds the image, runs it and probes `/health` by default (`smoke-path` overrides the path, `none` turns it off). The image must start without its database: `/health` is liveness only. When on by default it is a new step, tolerated until 2026-12-29 or the repo's later deadline; a repo that set `smoke-path` itself keeps its blocking behaviour.
+**Docker smoke (`smoke`).** With `smoke-path` set, `docker-smoke` builds the image, runs it and probes that path; a failure blocks. The on-by-default `/health` smoke for `dotnet-service` is **paused**: it ran the image with network access and no environment, so ASP.NET would load `appsettings.json` (and `appsettings.Production.json`), and an image that ships a real connection string would connect to, and migrate, a real database from CI. It comes back once the container runs network-isolated. Until then, opt in only for images whose committed settings point at no real database. The image must start without its database: `/health` is liveness only.
 
 `maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
 
