@@ -1546,53 +1546,14 @@ jobs:
     steps:
       - name: Evaluate
         id: verdict
-        shell: bash
+        uses: simplify9/.github/.github/actions/verify-result@main
         env:
           # Same expression as the `plan` job `if:`.
           FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login }}
           BASE: ${{ github.base_ref }}
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-
-          needs = json.loads(os.environ["NEEDS"])
-          full = os.environ["FULL"] == "true"
-          base = os.environ["BASE"]
-
-          def out(job, key):
-              return (needs.get(job, {}).get("outputs") or {}).get(key, "") or ""
-
-          bad = sorted(j for j, n in needs.items() if n.get("result") in ("failure", "cancelled"))
-          plan_ok = needs.get("plan", {}).get("result") == "success"
-          problems = [f"{j} {needs[j]['result']}" for j in bad]
-          if full and not plan_ok and "plan" not in bad:
-              problems.append(f"plan {needs.get('plan', {}).get('result')} (expected success)")
-
-          ladder = [j for j in needs if j not in ("plan", "contract")]
-          report = {
-              "scope": "full" if full else "skipped-human-develop",
-              "failed": sorted(w for j in ladder for w in out(j, "failed").split()),
-              "warned": sorted(w for j in ladder for w in out(j, "warned").split()),
-              "missing": out("contract", "missing").split(),
-          }
-          with open("verify-report.json", "w") as f:
-              json.dump(report, f, indent=2)
-
-          status = "failure" if problems else "success"
-          if problems:
-              line = "Verification failed: " + "; ".join(problems)
-          elif not full:
-              line = f"Human PR into {base}: full verification runs on PRs into the default branch and on Renovate PRs."
-          else:
-              line = "Verification passed."
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"status={status}\n")
-              f.write(f"summary={line}\n")
-          print(line)
-          if problems:
-              print("::error title=[VERIFY] Result::" + "; ".join(problems))
-          PY
+          # A lost emulator job (runner gone before its collect step) is a warning while its step is here.
+          KNOWN_FAILING: ${{ needs.plan.outputs.known_failing }}
 
       - name: Upload report
         if: always()

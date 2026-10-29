@@ -218,7 +218,7 @@ for every repository.
 │   │   ├── verify-plan/ verify-contract/ verify-web-install/
 │   │   ├── verify-node-deps/ verify-web-smoke/ strapi-rehearsal/
 │   │   ├── verify-web-e2e/ verify-netblock/ verify-secret-scan/ verify-mocks/ verify-dotnet-tests/
-│   │   ├── verify-emulator/ verify-maestro/ verify-flutter-e2e/
+│   │   ├── verify-emulator/ verify-maestro/ verify-flutter-e2e/ verify-result/
 │   │   ├── write-job-summary/
 │   │   └── check-critical-vulns/
 │   └── dependabot.yml           <- this repo's own Dependabot config (github-actions only)
@@ -1032,7 +1032,9 @@ Either way:
 
 **Informational vuln report.** On PRs into the default branch a `vuln-report` job runs `check-critical-vulns` and surfaces open critical Dependabot alerts in its summary. It is `continue-on-error` and is not part of `result`'s needs, so it can never fail `verify / result`.
 
-**Outputs / artifacts:** `result` uploads `verify-report.json` (artifact `verify-report`, 5 days) with `scope`, `failed`, `warned` and `missing`.
+**Outputs / artifacts:** `result` uploads `verify-report.json` (artifact `verify-report`, 5 days) with `scope`, `failed`, `warned`, `missing` and `lost_jobs`.
+
+**A lost emulator job.** If `flutter-e2e` or `maestro` ends without reporting its steps (its runner was lost, for example out of memory on a 2-vCPU hosted runner) while its step id (`e2e`, `maestro`) is still tolerated, `result` reports it under `warned` and `lost_jobs` instead of failing. After that step's deadline, it fails as before. A job that did report a failed step (for example `network`) always fails.
 
 **Required caller permissions:** `contents: read`, `packages: read`, `pull-requests: read` (the `plan` job lists the PR's files).
 
@@ -1075,7 +1077,7 @@ Call composite actions directly in job steps:
 uses: simplify9/.github/.github/actions/<name>@main
 ```
 
-All 30 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
+All 31 actions are **composite** (`runs.using: composite`). Only `gateway-onboard` (`onboard.sh`), `gateway-routing` (`render.sh`), and `check-critical-vulns` (`parse_yarn_lock.py` for its PR-branch npm verification, and `alerts_to_csv.jq` for its blocking-alerts CSV report — see below) keep logic in a sibling script; the rest is inline bash.
 
 ### Versioning & Tagging
 
@@ -1147,6 +1149,7 @@ All 30 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 | `verify-flutter-e2e` | The Flutter `e2e` step: `flutter test integration_test` on an API 34 emulator with outbound network blocked, `e2e/mocks.json` served as `E2E_API_URL=http://localhost:3901` (dart-define), a network re-check, evidence in `$RUNNER_TEMP/flutter-e2e-report`. Needs a GitHub-hosted runner and Flutter on PATH | `working-directory` | `network` |
 | `verify-maestro` | The React Native `maestro` step: every `.maestro/` flow on an API 34 emulator with outbound network blocked, `e2e/mocks.json` served as `E2E_API_URL=http://localhost:3901`, flaky flows re-run once, a network re-check, evidence in `$RUNNER_TEMP/maestro-report`. Needs a GitHub-hosted runner | `working-directory`, `apk` (required) | `network` |
 | `verify-emulator` | Script, no `action.yml`: `emulator.sh` (sourced) enables KVM, installs an API 34 x86_64 emulator image and boots it, optionally through `netblock_run` so the emulator's traffic (the app's) is blocked; one retry, and a separate "did not boot (infrastructure)" error. Used by the mobile e2e steps | - | - |
+| `verify-result` | The `result` job's verdict (`evaluate.py`): any failed or cancelled needed job fails, except a lost emulator job whose step is still tolerated (warned). Reads `NEEDS`, `FULL`, `BASE`, `KNOWN_FAILING` from the step env; writes `verify-report.json` | - (env) | `status`, `summary` |
 | `verify-mocks` | Script, no `action.yml`: `mockoon.sh` (sourced) installs the pinned `@mockoon/cli` (9.9.0) and serves a Mockoon environment file on `127.0.0.1:3901` with proxying off, optionally through a prefix command such as `netblock_run`. Used by the web and mobile e2e steps | - | - |
 | `verify-netblock` | Script, no `action.yml`: `netblock.sh` (sourced) blocks outbound traffic for the commands it runs (group `verify-offline`, iptables owner match) except loopback and the hosts of an allowed-hosts file, resolved once and pinned in `/etc/hosts`. Needs `sudo` and iptables | - | - |
 | `verify-secret-scan` | Script, no `action.yml` yet: `scan.py [--allow FILE] [--strapi-dump] PATH...` refuses files committed for CI (Strapi fixtures, Playwright HAR recordings, Mockoon mock files) that hold personal data or secrets: real emails (allowed: `example.com/.org/.net`, `strapi.io`, `.invalid`/`.example`/`.test`/`.localhost`, plus `ci/fixture-allow.txt` lines), password hashes (except the public CI admin's), signed JWTs (an unsigned mock token, `{"alg":"none"}` with an empty signature, passes), private keys, common tokens, connection strings with a password and a non-local host (key=value in any key order, split on `;` or `,`, including Redis `host:port,password=…`; or `scheme://user:pass@host`; `localhost`, `127.0.0.1`, `host.docker.internal` and dotless names such as a compose service `db` count as local), credential headers with a value (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `Api-Key`, `X-Auth-Token`, as HAR `name`/`value` or Mockoon `key`/`value`) and non-empty password fields (JSON, escaped JSON in a HAR `postData`, form-encoded); `--strapi-dump` also requires Strapi's token, session and webhook tables to be empty. Reads `.gz`; exit 0 clean, 1 findings, 2 usage/IO error; **masks every value** (`***@domain`, first 4 characters). Stdlib only, tested by `test_scan.py` | - | - |
