@@ -183,7 +183,7 @@ runs:
             > "${tmp}/declared-base.txt" 2>/dev/null || : > "${tmp}/declared-base.txt"
           declared_changes "${tmp}/declared-base.txt" "${head_dir}/ci/rehearsal-expected-changes.txt" > "${tmp}/declared.txt"
 
-          git -C "${repo_root}" worktree add --detach "${tmp}/base" "${base_ref}"
+          base_worktree "${repo_root}" "${tmp}/base" "${base_ref}"
           base_dir="${tmp}/base${rel}"
           base_schema="$(config_schema "${base_dir}")"
           if [ "${base_schema:-public}" != "${REHEARSAL_SCHEMA}" ]; then
