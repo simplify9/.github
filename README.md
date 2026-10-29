@@ -964,7 +964,7 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
   - The summary and the notice name the mode. When the PR changes any dependency file (`package.json` or a lock file: an `@strapi/*` bump, but also a lock file refresh or a driver update moves Strapi's own dependencies), a database migration (`database/migrations/`), a content-type schema (`src/api/*/content-types/*/schema.json`) or a component (`src/components/**.json`), it also does the following:
 1. Scans `ci/fixture.sql.gz` with `verify-secret-scan --strapi-dump` and refuses a fixture that holds personal data or secrets.
 2. Restores the fixture into Postgres (or, without one, generates data after step 3).
-3. Boots the base commit from a git worktree, so it migrates the fixture.
+3. Boots the base commit from a git worktree, so it migrates the fixture. Git LFS files stay pointer files there, as in HEAD's checkout: CI has no LFS credentials, and the rehearsal never needs their contents.
 4. Boots HEAD on the same database.
 5. Compares, for content tables (Strapi bookkeeping tables `strapi_*`, `admin_*`, `up_*` and `i18n_locale` are excluded):
    - row counts

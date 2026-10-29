@@ -206,3 +206,10 @@ wait_health() {
   echo "::error title=[VERIFY] Rehearsal::$1/_health did not return 204 within 120 s (last status ${code:-none})"
   return 1
 }
+
+# base_worktree <repo-root> <dir> <ref>: check out the base commit in a git worktree without
+# downloading Git LFS objects. CI has no credentials for them (persist-credentials: false), and the
+# rehearsal never needs their contents: LFS files stay pointer files, as they are in HEAD's checkout.
+base_worktree() {
+  GIT_LFS_SKIP_SMUDGE=1 git -C "$1" worktree add --detach "$2" "$3"
+}
