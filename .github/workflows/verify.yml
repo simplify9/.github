@@ -624,7 +624,11 @@ jobs:
   docker-smoke:
     name: docker-smoke
     needs: plan
-    if: startsWith(inputs.stack, 'dotnet-') && inputs.smoke-path != 'none' && (inputs.smoke-path != '' || inputs.stack == 'dotnet-service')
+    # Opt-in only (an explicit smoke-path). The on-by-default smoke for dotnet-service is PAUSED: it runs the
+    # image with network access and no environment, so ASP.NET loads appsettings.json (+ Production) and an
+    # image that ships a real connection string would connect to, and migrate, a real database from CI.
+    # Re-enable only once the container runs network-isolated.
+    if: startsWith(inputs.stack, 'dotnet-') && inputs.smoke-path != '' && inputs.smoke-path != 'none'
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     outputs:
