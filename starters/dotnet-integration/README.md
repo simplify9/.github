@@ -14,7 +14,9 @@ API's real endpoints.
    `ApiFactory` if yours differs) and uses JwtBearer authentication. `ApiFactory` swaps the identity
    provider for a test-only key, so no real provider is ever called.
 4. `/health` must be liveness only (no database check), and the image must start without its
-   database: `verify` also runs your Docker image and probes `/health`.
+   database. `verify` runs your Docker image and probes the path only if your caller sets
+   `smoke-path` (opt-in). Never commit real connection strings in `appsettings*.json`: they ship
+   inside the image.
 5. Run it: `dotnet test` (Docker must be running: Testcontainers starts `postgres:17`).
 
 ## What `verify` does with it
