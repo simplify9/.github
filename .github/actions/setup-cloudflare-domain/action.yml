@@ -36,7 +36,7 @@
 #       runs-on: ubuntu-latest
 #       steps:
 #         - name: Setup custom domain
-#           uses: simplify9/.github/.github/actions/setup-cloudflare-domain@main
+#           uses: simplify9/.github/.github/actions/setup-cloudflare-domain@proof/maestro-warm
 #           with:
 #             api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 #             account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

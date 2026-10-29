@@ -20,7 +20,7 @@
 #
 # Usage:
 #   - name: Install iOS provisioning profile
-#     uses: simplify9/.github/.github/actions/ios-install-profile@main
+#     uses: simplify9/.github/.github/actions/ios-install-profile@proof/maestro-warm
 #     with:
 #       profileBase64: ${{ secrets.IOS_MOBILEPROVISION_BASE64 }}
 # =============================================================================

@@ -40,7 +40,7 @@
 #
 # Usage:
 #   - name: Build and push Docker image
-#     uses: simplify9/.github/.github/actions/docker-build-push@main
+#     uses: simplify9/.github/.github/actions/docker-build-push@proof/maestro-warm
 #     with:
 #       registry: registry.digitalocean.com
 #       image-name: my-org/my-app

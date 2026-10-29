@@ -16,7 +16,7 @@
 # Usage:
 #   - name: Write summary
 #     if: always()
-#     uses: simplify9/.github/.github/actions/write-job-summary@main
+#     uses: simplify9/.github/.github/actions/write-job-summary@proof/maestro-warm
 #     with:
 #       title: Helm Chart Validation
 #       status: ${{ job.status }}

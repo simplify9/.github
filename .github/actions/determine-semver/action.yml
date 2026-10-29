@@ -50,7 +50,7 @@
 #             persist-credentials: false
 #         - name: Determine version
 #           id: semver
-#           uses: simplify9/.github/.github/actions/determine-semver@main
+#           uses: simplify9/.github/.github/actions/determine-semver@proof/maestro-warm
 #           with:
 #             major: 1
 #             minor: 2

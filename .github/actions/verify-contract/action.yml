@@ -18,7 +18,7 @@
 #   mode     "warn" or "enforce".
 #
 # Usage:
-#   - uses: simplify9/.github/.github/actions/verify-contract@main
+#   - uses: simplify9/.github/.github/actions/verify-contract@proof/maestro-warm
 #     with:
 #       stack: web
 #       deadline: 2026-12-20

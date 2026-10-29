@@ -44,7 +44,7 @@
 #       runs-on: ubuntu-latest
 #       steps:
 #         - name: Helm generic deploy
-#           uses: simplify9/.github/.github/actions/helm-generic@main
+#           uses: simplify9/.github/.github/actions/helm-generic@proof/maestro-warm
 #           with:
 #             app_name: myapp
 #             namespace: production

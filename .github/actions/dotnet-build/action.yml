@@ -45,7 +45,7 @@
 #       steps:
 #         - uses: actions/checkout@v7
 #         - name: Restore and build
-#           uses: simplify9/.github/.github/actions/dotnet-build@main
+#           uses: simplify9/.github/.github/actions/dotnet-build@proof/maestro-warm
 #           with:
 #             projects: '**/*.csproj'
 #             configuration: Release

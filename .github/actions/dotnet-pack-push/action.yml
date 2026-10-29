@@ -49,7 +49,7 @@
 #         - uses: actions/checkout@v7
 #         - name: Pack and push
 #           id: nuget
-#           uses: simplify9/.github/.github/actions/dotnet-pack-push@main
+#           uses: simplify9/.github/.github/actions/dotnet-pack-push@proof/maestro-warm
 #           with:
 #             projects: '**/*.Sdk.csproj'
 #             version: ${{ needs.version.outputs.version }}
