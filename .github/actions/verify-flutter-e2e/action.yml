@@ -13,7 +13,9 @@
 #      e2e/mocks.json on 127.0.0.1:3901, forwarded into the emulator with
 #      adb reverse; the emulator boots blocked (one retry; "did not boot" is
 #      reported as infrastructure).
-#   4. Runs `flutter test integration_test --no-pub` blocked with
+#   4. Runs `flutter test integration_test --no-pub` against the blocked
+#      emulator (the host-side tool and its Gradle build stay outside the
+#      block), each attempt capped at 10 minutes, with
 #      --dart-define=VERIFY_E2E=true and, with mocks,
 #      --dart-define=E2E_API_URL=http://localhost:3901. A failure re-runs once
 #      with the block still on (passing then = flaky, named). If it fails again

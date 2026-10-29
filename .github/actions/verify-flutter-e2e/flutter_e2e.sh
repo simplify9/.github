@@ -95,8 +95,8 @@ has_mocks=false
 [ -f e2e/mocks.json ] && has_mocks=true
 mapfile -t defines < <(flutter_e2e_defines "${has_mocks}")
 
-# Everything that needs the internet happens before the block: the emulator image, packages, and a
-# debug build so Gradle has its dependencies cached when the blocked test build runs.
+# Before the block: the emulator image, packages, and a debug build that warms Gradle's caches so
+# each test build is incremental.
 export FLUTTER_SUPPRESS_ANALYTICS=true
 flutter config --no-analytics >/dev/null 2>&1 || true
 dart --disable-analytics >/dev/null 2>&1 || true
@@ -110,6 +110,9 @@ sleep 3
 verify_mem "Gradle stopped, before the emulator"
 [ "${has_mocks}" = true ] && mockoon_install
 
+# The block covers the emulator, where the app and its tests run, and Mockoon. The host-side
+# `flutter test` (Gradle build, adb, result reader) stays outside it, as in the maestro job: blocked,
+# Gradle could not resolve dynamic versions such as integration_test's androidx.test:runner:1.2+.
 netblock_on e2e/allowed-hosts.txt
 if [ "${has_mocks}" = true ]; then
   mockoon_start e2e/mocks.json netblock_run || exit 1
@@ -125,19 +128,22 @@ sleep 5
 netblock_reset
 netblock_idle 30
 
-# flutter_run [PREFIX...]: the integration tests on the emulator; the log keeps the last run.
+# flutter_run: the integration tests on the emulator, one attempt capped at 10 minutes so a hanging
+# test cannot use up the job; the log keeps the last run.
 flutter_run() {
   set +e
-  "$@" flutter test integration_test --no-pub --reporter expanded -d "${device}" "${defines[@]}" 2>&1 | tee "${log}"
+  timeout --kill-after=30 600 \
+    flutter test integration_test --no-pub --reporter expanded -d "${device}" "${defines[@]}" 2>&1 | tee "${log}"
   rc=${PIPESTATUS[0]}
+  [ "${rc}" -eq 124 ] && echo "::warning title=[VERIFY] e2e::an attempt ran past 10 minutes and was stopped"
   set -e
 }
-flutter_run netblock_run
+flutter_run
 first=${rc} rerun=-
 if [ "${first}" -ne 0 ]; then
   cp "${log}" "${out}/flutter-test-run1.log"
   echo "[VERIFY] e2e: failed; re-running once with the block still on"
-  flutter_run netblock_run
+  flutter_run
   rerun=${rc}
 fi
 # Blocked traffic the tests are blamed for: destinations listed since the idle window, minus those seen
