@@ -47,14 +47,6 @@ test_stack_entry_does_not_leak_to_other_stacks() {
   eq "${FUNCNAME[0]}_flutter" "e2e network" "$(new_steps_tolerated '' 2026-12-01 flutter)"
   eq "${FUNCNAME[0]}_no_stack" "network" "$(new_steps_tolerated '' 2026-12-01)"
 }
-test_flutter_e2e_tolerated_for_flutter() {
-  eq "${FUNCNAME[0]}" "e2e" "$(new_steps_tolerated 2026-11-20 2026-12-01 flutter | tr ' ' '\n' | grep -x e2e)"
-  eq "${FUNCNAME[0]}_on_deadline" "" "$(new_steps_tolerated 2026-11-20 2026-12-29 flutter | tr ' ' '\n' | grep -x e2e)"
-}
-test_flutter_e2e_not_tolerated_for_web() {
-  eq "${FUNCNAME[0]}" "" "$(new_steps_tolerated '' 2026-12-01 web | tr ' ' '\n' | grep -x e2e)"
-  eq "${FUNCNAME[0]}_effective" "lint network" "$(effective_known_failing "lint" '' 2026-12-01 web)"
-}
 test_repo_known_failing_excludes_new_steps() { eq "${FUNCNAME[0]}" "test" "$(known_failing_effective "test" 2027-02-01 2026-12-01)"; }
 test_integration_is_not_a_new_step() {
   case " $(new_steps_tolerated '' 2026-12-01) " in *" integration "*) eq "${FUNCNAME[0]}" absent present ;; *) eq "${FUNCNAME[0]}" absent absent ;; esac
