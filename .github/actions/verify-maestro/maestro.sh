@@ -88,6 +88,15 @@ emulator_boot netblock_run
 adb install -r "${apks[0]}" >/dev/null || verify_infra_fail "the APK could not be installed on the emulator"
 adb reverse tcp:8081 tcp:8081 >/dev/null
 [ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null
+# A cold Metro builds the bundle on the app's first launch: minutes on a 2-vCPU runner, so the first flow
+# timed out and passed only on its re-run. Build every module once now (index.js, React Native's default
+# entry; lazy=false also covers screens loaded later). Best effort: the first launch builds it otherwise.
+for _ in $(seq 60); do curl -fs http://localhost:8081/status | grep -q running && break; sleep 2; done
+if curl -fs --max-time 600 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false&lazy=false"; then
+  echo "[VERIFY] maestro: Metro bundle built before the first flow"
+else
+  echo "::notice title=[VERIFY] maestro::the Metro bundle could not be built ahead of the flows; the first launch builds it"
+fi
 # Only what happens from here (the app and its flows) counts as blocked traffic.
 sleep 5
 netblock_reset
