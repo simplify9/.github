@@ -29,7 +29,7 @@
 #
 # Usage:
 #   - name: Build and archive
-#     uses: simplify9/.github/.github/actions/xcode-build@main
+#     uses: simplify9/.github/.github/actions/xcode-build@proof/flutter-reland
 #     with:
 #       workspace: App.xcworkspace
 #       scheme: App

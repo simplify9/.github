@@ -42,7 +42,7 @@
 #       steps:
 #         - uses: actions/checkout@v7
 #         - name: Generate wrangler.toml
-#           uses: simplify9/.github/.github/actions/generate-wrangler-config@main
+#           uses: simplify9/.github/.github/actions/generate-wrangler-config@proof/flutter-reland
 #           with:
 #             compatibility-date: '2024-10-20'
 #             route: example.com/*

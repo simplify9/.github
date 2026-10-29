@@ -38,7 +38,7 @@
 #       steps:
 #         - name: Tag new version on GitHub origin
 #           id: tag
-#           uses: simplify9/.github/.github/actions/tag-github-origin@main
+#           uses: simplify9/.github/.github/actions/tag-github-origin@proof/flutter-reland
 #           with:
 #             github-token: ${{ secrets.GITHUB_TOKEN }}
 #             repository: ${{ github.repository }}

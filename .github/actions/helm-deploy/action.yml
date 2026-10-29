@@ -50,7 +50,7 @@
 #       steps:
 #         - name: Deploy Helm chart
 #           id: deploy
-#           uses: simplify9/.github/.github/actions/helm-deploy@main
+#           uses: simplify9/.github/.github/actions/helm-deploy@proof/flutter-reland
 #           with:
 #             chart-name: myapp
 #             chart-version: 1.2.3

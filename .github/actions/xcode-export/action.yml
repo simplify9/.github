@@ -15,7 +15,7 @@
 #
 # Usage:
 #   - name: Export IPA
-#     uses: simplify9/.github/.github/actions/xcode-export@main
+#     uses: simplify9/.github/.github/actions/xcode-export@proof/flutter-reland
 #     with:
 #       archivePath: build/App.xcarchive
 #       exportOptionsPlist: ExportOptions.plist

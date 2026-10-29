@@ -20,7 +20,7 @@
 #
 # Usage:
 #   - name: Install iOS signing certificate
-#     uses: simplify9/.github/.github/actions/ios-install-cert@main
+#     uses: simplify9/.github/.github/actions/ios-install-cert@proof/flutter-reland
 #     with:
 #       p12Base64: ${{ secrets.IOS_P12_BASE64 }}
 #       p12Password: ${{ secrets.IOS_P12_PASSWORD }}

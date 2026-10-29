@@ -41,7 +41,7 @@
 #
 # Usage:
 #   - name: Package and push Helm chart
-#     uses: simplify9/.github/.github/actions/helm-package-push@main
+#     uses: simplify9/.github/.github/actions/helm-package-push@proof/flutter-reland
 #     with:
 #       chart-name: my-app
 #       chart-path: ./chart

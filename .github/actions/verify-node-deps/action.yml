@@ -13,7 +13,7 @@
 #   package-manager    (required)  npm | yarn | yarn-berry | pnpm
 #
 # Usage:
-#   - uses: simplify9/.github/.github/actions/verify-node-deps@main
+#   - uses: simplify9/.github/.github/actions/verify-node-deps@proof/flutter-reland
 #     with:
 #       package-manager: npm
 # =============================================================================
