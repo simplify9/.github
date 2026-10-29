@@ -17,9 +17,6 @@
 
 EMULATOR_IMAGE="system-images;android-34;default;x86_64"
 EMULATOR_BOOT_SECONDS=300
-# Guest RAM in MB, capped so the emulator fits next to the rest of the job on a 2-vCPU / ~8 GB hosted
-# runner (private repositories): a large app's Gradle build plus an uncapped emulator ran it out of memory.
-EMULATOR_MEMORY_MB="${EMULATOR_MEMORY_MB:-2048}"
 # Where emulator-<attempt>.log go; a caller points it at its evidence folder so the logs survive a
 # step timeout (no exit trap runs then).
 EMULATOR_LOG_DIR="${EMULATOR_LOG_DIR:-${RUNNER_TEMP:-/tmp}}"
@@ -119,7 +116,7 @@ emulator_stop() {
 emulator_boot() {
   local attempt rc1=1 rc2=- rc
   for attempt in 1 2; do
-    "$@" emulator -avd verify -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics -memory "${EMULATOR_MEMORY_MB}" \
+    "$@" emulator -avd verify -no-window -no-audio -no-boot-anim -no-snapshot -no-metrics \
       -gpu swiftshader_indirect -camera-back none -camera-front none > "${EMULATOR_LOG_DIR}/emulator-${attempt}.log" 2>&1 &
     EMULATOR_PID=$!
     if _emulator_wait "${EMULATOR_BOOT_SECONDS}"; then rc=0; else rc=1; fi
