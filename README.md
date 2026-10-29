@@ -1762,6 +1762,10 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
   or that a parent pins exactly, waits for that parent's own update or shows up in the vulnerability gate.
 - No hourly PR cap (`prHourlyLimit: 0`). Each stack gets one in-window run a week, so security PRs opened in
   that run must not push the weekly group to the next week. At most 5 PRs are open per repo (`prConcurrentLimit`).
+- Renovate updates npm lock files with npm 11 (`constraints`), the npm that ships with Node 24, which verify and
+  the Docker builds use. Without it, a repo whose `engines.npm` is open-ended (`>=6`) got npm 12, whose new
+  `allow-remote=none` default refused a registry package that bundles its dependencies (`EALLOWREMOTE`), so the
+  lock file was not updated and `npm ci` failed in verify. Move it when CI moves to a newer Node.
 
 Rule order matters: a later `packageRules` entry overrides an earlier one. Stack presets extend `default`, so their own rules come after it.
 
