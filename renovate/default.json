@@ -23,6 +23,8 @@
       "groupName": "non-major dependencies", "groupSlug": "non-major", "automerge": true },
     { "description": "npm soak against compromised fresh releases",
       "matchDatasources": ["npm"], "minimumReleaseAge": "7 days" },
+    { "description": "Docker registries give Renovate no release timestamps, and Renovate 44 treats an update without one as too young forever (minimumReleaseAgeBehaviour timestamp-required), so it never updated a base image (FROM node, dotnet, nginx) and dropped them from branches silently. The age of a Docker tag cannot be measured: let those updates through",
+      "matchDatasources": ["docker"], "minimumReleaseAgeBehaviour": "timestamp-optional" },
     { "description": "0.x minors can break: own branch, dashboard approval, never automerged (regex matcher works for every datasource, unlike isBreaking)",
       "matchCurrentVersion": "/^v?0\\./", "matchUpdateTypes": ["minor"],
       "groupName": null, "dependencyDashboardApproval": true, "automerge": false },

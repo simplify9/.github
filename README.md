@@ -1753,7 +1753,11 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
 
 `default` policy:
 - Non-breaking updates (minor, patch, pin, digest) form one weekly group and automerge. This includes 0.x patch updates.
-- npm releases wait 7 days; everything else waits 3 days.
+- npm releases wait 7 days; everything else waits 3 days. Docker images are the exception: registries give Renovate
+  no release date, and Renovate 44 holds an update without one forever (`minimumReleaseAgeBehaviour`
+  `timestamp-required`), so no `FROM` line was ever updated and the update was dropped from its branch without a
+  word (a Node major bumped `.nvmrc` and `package.json` but not the Dockerfiles). Docker updates go through
+  without the wait.
 - 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
 - An update whose leading version number changes (`3.6.4` to `4.5.2`) is handled as a major even when Renovate
   types it minor or patch. Renovate 44 does that for a NuGet package whose current release is deprecated: a bare
