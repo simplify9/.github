@@ -1762,7 +1762,7 @@ The org ships Renovate presets in `renovate/`. They are inert until a self-hoste
 | Preset | Schedule (Asia/Amman) | Extra rules |
 |---|---|---|
 | `default` | (none) | Base policy for every stack (see below) |
-| `dotnet` | Mon 00:00-08:59 | none |
+| `dotnet` | Mon 00:00-08:59 | NuGet wildcard versions (`3.*`) get majors only: a wildcard already takes new minors and patches at restore, and Renovate 44 would narrow `3.*` to `3.1*` (it rounds the new minor down to a multiple of ten). Its major PR comes out as `4.1*` the same way: write `4.*` when you approve it |
 | `web` | Tue 00:00-08:59 | none |
 | `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) never automerged, as verify builds no iOS |
 | `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android and iOS toolchain rules as `react-native` |
@@ -1778,6 +1778,12 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
   `timestamp-required`), so no `FROM` line was ever updated and the update was dropped from its branch without a
   word (a Node major bumped `.nvmrc` and `package.json` but not the Dockerfiles). Docker updates go through
   without the wait.
+- The 7-day npm wait also covers what Yarn picks for dependencies of dependencies, and every version in a weekly
+  lock refresh. Renovate only checks the versions it writes into `package.json`; it gives npm a `--before` date
+  for the rest, but Yarn nothing, so lock refreshes merged versions a few hours old. The self-hosted Renovate run
+  puts a filter in front of the npm registry for Yarn that hides every version younger than 7 days, except a
+  version GitHub's reviewed advisories name as a first patched version. Using these presets without that filter
+  gives the wait on direct dependencies only.
 - 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
 - An update whose leading version number changes (`3.6.4` to `4.5.2`) is handled as a major even when Renovate
   types it minor or patch. Renovate 44 does that for a NuGet package whose current release is deprecated: a bare

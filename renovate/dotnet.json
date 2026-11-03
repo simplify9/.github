@@ -4,7 +4,7 @@
   "schedule": ["* 0-8 * * 1"],
   "lockFileMaintenance": { "schedule": ["* 0-8 * * 1"] },
   "packageRules": [
-    { "description": "A NuGet wildcard version (3.*) already takes every new minor and patch at restore time, so Renovate only proposes a new major for it. Left to itself, Renovate 44 'bumps' a wildcard by rounding the new minor down to a multiple of ten: Testcontainers 3.* became 3.1*, which only matches 3.1 and 3.10-3.19. Same leading number = not a major, whatever Renovate types it (see the cross-major guard in default.json)",
+    { "description": "A NuGet wildcard version (3.*) already takes every new minor and patch at restore time, so Renovate only proposes a new major for it. Left to itself, Renovate 44 'bumps' a wildcard by rounding the new minor down to a multiple of ten: Testcontainers 3.* became 3.1*, which only matches 3.1 and 3.10-3.19. Same leading number = not a major, whatever Renovate types it (see the cross-major guard in default.json). The major PR is rounded the same way (4.1*): write 4.* when approving",
       "matchManagers": ["nuget"], "matchCurrentValue": "/\\*/",
       "matchJsonata": ["$exists(currentValue) and $exists(newValue) and $number($match(currentValue, /\\d+/, 1).match) = $number($match(newValue, /\\d+/, 1).match)"],
       "enabled": false }
