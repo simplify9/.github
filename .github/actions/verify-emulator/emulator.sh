@@ -11,6 +11,7 @@
 #                                 300 s; exits 2 through verify_infra_fail when it never boots
 #   emulator_stop                 until adb lists no emulator (SIGKILL after a grace period)
 #   emulator_boot_verdict RC1 RC2|-   booted | retry | failed
+#   verify_mem LABEL              one line of `free -m` in the step log
 #   verify_infra_fail MESSAGE     "MESSAGE (infrastructure, not the app)" as an error and in the job
 #                                 summary, then exit 2 (not reported as a journey failure)
 
@@ -74,6 +75,12 @@ emulator_guest_quiet() {
   done
   adb shell "${cmd}" >/dev/null 2>&1 || true
   echo "[VERIFY] emulator: Android's own traffic stopped in the guest ($(wc -w <<< "${uids}" | tr -d ' ') system app UIDs + UIDs below 10000)"
+}
+
+# verify_mem <label>: one line of `free -m` in the step log (memory is what runs a hosted runner out).
+verify_mem() {
+  free -m 2>/dev/null | awk -v l="$1" '/^Mem:/ {t = $2; u = $3; a = $7} /^Swap:/ {s = $3}
+    END {if (t) printf "[VERIFY] memory (%s): total %s MB, used %s MB, available %s MB, swap used %s MB\n", l, t, u, a, s + 0}'
 }
 
 verify_infra_fail() {

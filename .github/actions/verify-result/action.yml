@@ -1,0 +1,45 @@
+# =============================================================================
+# Verify Result
+# =============================================================================
+# The verdict of verify's `result` job (evaluate.py, tested by test_evaluate.py):
+# fails on any failed or cancelled needed job, or a non-successful `plan` in
+# full scope. Exception: an emulator job (flutter-e2e: e2e, maestro: maestro)
+# that ended without reporting its steps (its runner was lost, e.g. out of
+# memory) while that step id is still in known-failing is a warning, not a
+# red check. Writes verify-report.json (scope, failed, warned, missing,
+# lost_jobs) to the working directory.
+#
+# Environment (set on the calling step):
+#   NEEDS          toJSON(needs)
+#   FULL           "true" when the full ladder ran
+#   BASE           github.base_ref
+#   KNOWN_FAILING  the plan job's effective known_failing list
+# Outputs:
+#   status   success | failure
+#   summary  one line
+# =============================================================================
+name: 'Verify Result'
+author: 'Simplify9'
+description: 'Compute the verify verdict from the needed jobs, tolerating a lost emulator job while its step is still known-failing.'
+
+outputs:
+  status:
+    description: 'success or failure.'
+    value: ${{ steps.verdict.outputs.status }}
+  summary:
+    description: 'One-line verdict.'
+    value: ${{ steps.verdict.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - name: Evaluate
+      id: verdict
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: python3 "${ACTION_PATH}/evaluate.py"
+
+branding:
+  icon: 'check-circle'
+  color: 'blue'

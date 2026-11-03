@@ -84,7 +84,9 @@ if [ "${has_mocks}" = true ]; then
 fi
 # Metro inlines the env at bundle time (the app's Babel env plugin), so no stale cache.
 netblock_run env "${app_env[@]}" npx react-native start --port 8081 --reset-cache > "${out}/metro.log" 2>&1 &
+verify_mem "before the emulator"
 emulator_boot netblock_run
+verify_mem "emulator booted"
 adb install -r "${apks[0]}" >/dev/null || verify_infra_fail "the APK could not be installed on the emulator"
 adb reverse tcp:8081 tcp:8081 >/dev/null
 [ "${has_mocks}" = true ] && adb reverse "tcp:${MOCKOON_PORT}" "tcp:${MOCKOON_PORT}" >/dev/null

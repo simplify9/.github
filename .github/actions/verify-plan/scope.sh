@@ -24,9 +24,11 @@ known_failing_effective() {
 #   network  web e2e network block, shipped 2026-11-03 (no other stack has a `network` step)
 #   smoke    default-on docker smoke for dotnet-service, shipped 2026-11-03; verify.yml applies it only
 #            when smoke-path is empty (an explicit opt-in uses repo_known_failing and keeps blocking)
+#   e2e      Flutter's emulator journeys (flutter-e2e job), shipped 2026-11-03; scoped to flutter because
+#            web's `e2e` already blocks
 # `integration` is deliberately absent: its projects already ran, and blocked, inside `test`, so it
 # follows `test`'s tolerance in verify.yml.
-NEW_STEPS="*:network:2026-12-29 dotnet-service:smoke:2026-12-29"
+NEW_STEPS="*:network:2026-12-29 dotnet-service:smoke:2026-12-29 flutter:e2e:2026-12-29"
 
 # new_steps_tolerated <repo-deadline> <today> [stack] -> the new step ids still tolerated for that stack
 # (without a stack, only `*` entries)
