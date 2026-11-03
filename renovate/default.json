@@ -12,6 +12,13 @@
   "constraints": { "npm": "^11" },
   "dependencyDashboard": true,
   "lockFileMaintenance": { "enabled": true, "automerge": true },
+  "customManagers": [
+    { "customType": "regex",
+      "description": "Yarn 1 pinned in Dockerfiles: node:26 images no longer include Yarn, so Dockerfiles install it (RUN command -v yarn >/dev/null || npm install -g yarn@<version>). Renovate keeps that pin current, within Yarn 1 (the org standard; see the yarn rule below)",
+      "managerFilePatterns": ["/(^|/)Dockerfile[^/]*$/i"],
+      "matchStrings": ["npm install -g yarn@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "yarn", "datasourceTemplate": "npm" }
+  ],
   "vulnerabilityAlerts": {
     "labels": ["dependencies", "security"],
     "minimumReleaseAge": null
@@ -28,6 +35,8 @@
     { "description": "0.x minors can break: own branch, dashboard approval, never automerged (regex matcher works for every datasource, unlike isBreaking)",
       "matchCurrentVersion": "/^v?0\\./", "matchUpdateTypes": ["minor"],
       "groupName": null, "dependencyDashboardApproval": true, "automerge": false },
+    { "description": "Yarn 1 is the org standard (yarn.lock v1): the Dockerfile pin never leaves 1.x",
+      "matchManagers": ["custom.regex"], "matchDepNames": ["yarn"], "allowedVersions": "<2" },
     { "description": "Major updates need a human: dashboard approval, never automerged",
       "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true, "automerge": false },
     { "description": "Cross-major guard: Renovate can type a major as minor or patch. A NuGet bare version is a minimum, and when the current release is deprecated Renovate measures from the oldest non-deprecated one (MSTest 3.6.4 -> 4.5.2 was typed 4.5.1 -> 4.5.2, patch). So the leading number of the version actually written decides: if it changes, treat the update as a major",
