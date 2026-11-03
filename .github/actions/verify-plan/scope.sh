@@ -2,10 +2,9 @@
 # Scope helpers for verify.yml. Sourced by the verify-plan action and by test_scope.sh.
 # All dates are ISO YYYY-MM-DD, compared as strings.
 
-# verify_full <event> <base> <default-branch> <author> <bot-login> [tests-changed] -> true|false
-# tests-changed is the tests-probe job's answer (tests_changed_from_list) for a human PR into develop.
+# verify_full <event> <base> <default-branch> <author> <bot-login> -> true|false
 verify_full() {
-  if [ "$1" = "workflow_dispatch" ] || [ "$2" = "$3" ] || [ "$4" = "$5" ] || [ "${6:-false}" = "true" ]; then
+  if [ "$1" = "workflow_dispatch" ] || [ "$2" = "$3" ] || [ "$4" = "$5" ]; then
     echo true
   else
     echo false
@@ -75,22 +74,4 @@ deps_changed_from_list() {
 strapi_changed_from_pr() {
   local data='(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$|(^|/)database/migrations/|(^|/)src/(api/[^/]+/content-types/[^/]+/schema\.json|components/.+\.json)$'
   if grep -Eq "${data}" <<< "$1"; then echo true; else echo false; fi
-}
-
-# tests_changed_from_list <newline-separated file paths> [stack] -> true|false
-# True when a PR changes critical-journey or integration test files: Maestro flows (.maestro/), e2e/
-# (Playwright specs, Mockoon mocks, allowed hosts), Flutter integration_test/, a Playwright config, and for
-# the .NET stacks a test-project directory (tests/, Tests/ or a name ending in Test or Tests, capital T so
-# Latest/ or Contests/ don't count). A human PR into develop that changes them gets the full ladder, so new
-# tests run before they reach develop instead of first failing a Renovate PR. Other stacks' unit-test
-# folders (__tests__, *.test.ts) stay out: they would send every mobile unit-test tweak through the
-# emulator ladder.
-tests_changed_from_list() {
-  local journeys='(^|/)(\.maestro|e2e|integration_test)/|(^|/)playwright\.config\.[cm]?[jt]s$'
-  local dotnet='(^|/)([Tt]ests?|[^/]*Tests?)/'
-  if grep -Eq "${journeys}" <<< "$1"; then echo true; return; fi
-  case "${2:-}" in
-    dotnet-service|dotnet-library) if grep -Eq "${dotnet}" <<< "$1"; then echo true; return; fi ;;
-  esac
-  echo false
 }
