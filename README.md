@@ -1778,12 +1778,12 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
   `timestamp-required`), so no `FROM` line was ever updated and the update was dropped from its branch without a
   word (a Node major bumped `.nvmrc` and `package.json` but not the Dockerfiles). Docker updates go through
   without the wait.
-- The 7-day npm wait also covers what Yarn picks for dependencies of dependencies, and every version in a weekly
-  lock refresh. Renovate only checks the versions it writes into `package.json`; it gives npm a `--before` date
-  for the rest, but Yarn nothing, so lock refreshes merged versions a few hours old. The self-hosted Renovate run
-  puts a filter in front of the npm registry for Yarn that hides every version younger than 7 days, except a
-  version GitHub's reviewed advisories name as a first patched version. Using these presets without that filter
-  gives the wait on direct dependencies only.
+- The release-age wait also covers what Yarn and pub pick for dependencies of dependencies, and every version in
+  a weekly lock refresh. Renovate only checks the versions it writes into `package.json` or `pubspec.yaml`; it
+  gives npm a `--before` date for the rest, but Yarn and pub nothing, so lock refreshes merged versions a few
+  hours old. The self-hosted Renovate run puts a filter in front of the npm registry and pub.dev that hides every
+  version younger than 7 days from Yarn and pub, except a version GitHub's reviewed advisories name as a first
+  patched version. Using these presets without that filter gives the wait on direct dependencies only.
 - 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
 - An update whose leading version number changes (`3.6.4` to `4.5.2`) is handled as a major even when Renovate
   types it minor or patch. Renovate 44 does that for a NuGet package whose current release is deprecated: a bare
