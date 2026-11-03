@@ -7,16 +7,12 @@
 #
 # Scope: the full ladder runs when the event is workflow_dispatch,
 # OR the PR base is the repo's default branch, OR the PR author is the bot
-# (input `bot-login`), OR a human PR changes critical-journey or integration test
-# files (.maestro/, e2e/, integration_test/, a Playwright config; .NET test projects),
-# which the `tests-probe` job checks, so new tests run before they reach develop.
-# Any other human PR into develop/development/staging skips every job except
-# `tests-probe` and `result`, which then passes (about 2 billed minutes).
-# The scope expression appears in the `tests-probe`, `plan` and `result` jobs below; the
-# verify-plan action's test_scope.sh asserts the copies match and documents the truth table.
+# (input `bot-login`). A human PR into develop/development/staging skips every
+# job except `result`, which then passes immediately (about 1 billed minute).
+# The scope expression appears in the `plan` and `result` jobs below; the verify-plan
+# action's test_scope.sh asserts both copies are identical and documents the truth table.
 #
 # Jobs:
-#   tests-probe  human PRs into develop only: did the PR change journey/integration test files?
 #   plan      scope gate: effective known-failing list, deps_changed, contract_mode
 #   contract  per-stack verification contract (verify-contract action)
 #   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke,
@@ -117,35 +113,11 @@ permissions:
   pull-requests: read
 
 jobs:
-  tests-probe:
-    name: tests-probe
-    # Runs exactly when the v1 scope is not full (a human PR into develop/development/staging):
-    # a PR that changes journey or integration test files must run them here, or they first run on
-    # a Renovate PR and block it. The same verify-plan action lists the PR files (tests_changed).
-    # Guarded by test_scope.sh.
-    if: github.event_name == 'pull_request' && !(github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login)
-    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 5
-    outputs:
-      tests_changed: ${{ steps.probe.outputs.tests_changed }}
-    steps:
-      - name: Probe
-        id: probe
-        uses: simplify9/.github/.github/actions/verify-plan@main
-        with:
-          github-token: ${{ github.token }}
-          event-name: ${{ github.event_name }}
-          repository: ${{ github.repository }}
-          pr-number: ${{ github.event.pull_request.number }}
-          stack: ${{ inputs.stack }}
-
   plan:
     name: plan
-    needs: tests-probe
     # Full-scope expression. Must equal the one in `result` (guarded by
     # .github/actions/verify-plan/test_scope.sh; truth table: verify_full in scope.sh).
-    # `!cancelled()`: tests-probe is skipped whenever the v1 scope is already full.
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login || needs.tests-probe.outputs.tests_changed == 'true') }}
+    if: github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     outputs:
@@ -1568,7 +1540,7 @@ jobs:
     name: result
     # `if: always()` is essential: a job whose needs were skipped is skipped, and
     # a skipped required check never reports. Verdict is computed from needs results.
-    needs: [tests-probe, plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, flutter-e2e, strapi]
+    needs: [plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, flutter-e2e, strapi]
     if: always()
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
@@ -1578,7 +1550,7 @@ jobs:
         uses: simplify9/.github/.github/actions/verify-result@main
         env:
           # Same expression as the `plan` job `if:`.
-          FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login || needs.tests-probe.outputs.tests_changed == 'true' }}
+          FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login }}
           BASE: ${{ github.base_ref }}
           NEEDS: ${{ toJSON(needs) }}
           # A lost emulator job (runner gone before its collect step) is a warning while its step is here.

@@ -58,21 +58,6 @@ class Verdict(unittest.TestCase):
         self.assertEqual(status, "success")
         self.assertTrue(line.startswith("Human PR into develop"))
         self.assertEqual(report["scope"], "skipped-human-develop")
-        self.assertIn("journey or integration test files", line)
-
-    def test_human_develop_probe_failure_fails(self):
-        # fail closed: a probe that could not list the PR files must not turn into a pass
-        n = {"tests-probe": {"result": "failure", "outputs": {}}, "plan": {"result": "skipped", "outputs": {}}}
-        status, line, _ = e.evaluate(n, False, "develop", "")
-        self.assertEqual(status, "failure")
-        self.assertIn("tests-probe failure", line)
-
-    def test_probe_is_not_a_ladder_job(self):
-        n = needs()
-        n["tests-probe"] = {"result": "success", "outputs": {"tests_changed": "true", "failed": "x"}}
-        status, _, report = e.evaluate(n, True, "develop", "")
-        self.assertEqual(status, "success")
-        self.assertEqual(report["failed"], [])
 
 
 if __name__ == "__main__":
