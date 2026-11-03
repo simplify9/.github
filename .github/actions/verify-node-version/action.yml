@@ -1,0 +1,32 @@
+name: 'Verify: Node.js version'
+description: >-
+  The Node.js version verify sets up for a web or strapi repo: the caller's node-version input, else the
+  repo's .nvmrc/.node-version, else the first FROM node:<N> in its Dockerfiles, else 24 (node_version.sh).
+  Verify used to run every repo on 24, so a Node major bump was never actually tested.
+inputs:
+  working-directory:
+    description: Directory with package.json.
+    required: false
+    default: '.'
+  node-version:
+    description: The caller's explicit node-version input (empty = resolve from the repo).
+    required: false
+    default: ''
+outputs:
+  version:
+    description: The version to hand to actions/setup-node.
+    value: ${{ steps.resolve.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        DIR: ${{ inputs.working-directory }}
+        EXPLICIT: ${{ inputs.node-version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        read -r version source < <(bash "${ACTION_PATH}/node_version.sh" "${DIR}" "${EXPLICIT}")
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+        echo "::notice title=[VERIFY] Node.js::${version} (from ${source})"

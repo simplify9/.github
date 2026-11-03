@@ -848,7 +848,11 @@ jobs:
 
 One reusable workflow that runs the per-stack verification ladder for a PR and reports a single result. The required status check is **`verify / result`** (the caller job is named `verify`): mark exactly that check as required in the org ruleset. `result` always reports, so a skipped ladder never leaves the check pending.
 
-**Scope.** The full ladder runs on PRs into the repo's default branch, on Renovate PRs (author `s9-deps-bot[bot]`, input `bot-login`) whatever their base, and on manual `workflow_dispatch`. A human PR into `develop`, `development` or `staging` skips every job except `result`, which passes immediately (about one billed minute). "Default branch" is read from the repository, not hard-coded to `main`.
+**Scope.** The full ladder runs on PRs into the repo's default branch, on Renovate PRs (author `s9-deps-bot[bot]`, input `bot-login`) whatever their base, and on manual `workflow_dispatch`. It also runs on a human PR that changes journey or integration test files (`.maestro/`, `e2e/`, `integration_test/`, a Playwright config, and for .NET a test-project directory such as `tests/` or `*.Tests/`), so new tests prove themselves before they reach `develop` instead of first failing a Renovate PR. Any other human PR into `develop`, `development` or `staging` skips every job except `tests-probe` and `result`, which passes immediately (about two billed minutes). "Default branch" is read from the repository, not hard-coded to `main`.
+
+**A green check means the stack's ladder ran.** In a full run, `result` fails when the stack's own ladder job did not run (`web`: `node`; `strapi`: `node` and `strapi`; `dotnet-*`: `dotnet`; `react-native`; `flutter`). `tests-probe` has no `if:` on purpose: GitHub skips every job below a skipped one, and a skipped probe once skipped every ladder on Renovate PRs while `result` still passed.
+
+**What ships is what is tested.** `web` and `strapi` run on the repo's own Node (input `node-version`, else `.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24), and build every Dockerfile in the working directory (`docker`, below). A Node major bump is tested on the new Node, and a base image change that breaks the image (Node 26 images no longer include Yarn) fails the PR instead of the deploy.
 
 **Security.** `verify` installs dependencies and runs the PR's own code (tests, builds, the app under a smoke test). Every job has a read-only token (`contents: read`, `packages: read`) and no deploy secrets; the caller template passes only `dependabot-alerts-token` and `nuget-restore-token`.
 
@@ -859,7 +863,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `known-failing` | | `''` | Space-separated step ids tolerated until `contract-deadline` (see below) |
 | `contract-deadline` | | `''` | `YYYY-MM-DD`. Empty or invalid = warn mode and `known-failing` never expires |
 | `bot-login` | | `s9-deps-bot[bot]` | Login whose PRs always get the full ladder |
-| `node-version` | | `24` | Node.js (web, react-native, strapi) |
+| `node-version` | | (empty) | Node.js. Empty: `web` and `strapi` use the repo's own version (`.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24); `react-native` uses 24 |
 | `dotnet-version` | | `10.0.x` | .NET SDK (dotnet stacks) |
 | `java-version` | | `17` | Java (Android builds, Flutter) |
 | `flutter-version` | | `3.x` | Flutter (flutter stack) |
@@ -873,8 +877,8 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 | Stack | Steps |
 |---|---|
-| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `worker-dry-run` (Workers projects), then the repo's `test:e2e` under the network block (`e2e`, see below) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`, not blocked); `network` when the journeys passed only with network access. Runs on the GitHub-hosted runner |
-| `strapi` | `node` job: `install`, `consistency`; `strapi` job: `install`, `build`, `rehearsal` |
+| `web` | `install`, `consistency` (singleton `react`/`react-dom`/`next` check; skipped on Yarn PnP), `lint`, `typecheck`, `test`, `build`, `docker` (no-push build of every `Dockerfile` and `Dockerfile.*` in the working directory, any case; skipped without one), `worker-dry-run` (Workers projects), then the repo's `test:e2e` under the network block (`e2e`, see below) or, until the deadline, a built-in Chromium load that fails on page or console errors (also reported as `e2e`, not blocked); `network` when the journeys passed only with network access. Runs on the GitHub-hosted runner |
+| `strapi` | `node` job: `install`, `consistency`, `docker` (as for `web`); `strapi` job: `install`, `build`, `rehearsal` |
 | `dotnet-service`, `dotnet-library` | `build` (tests off), `consistency` (`dotnet restore --force-evaluate` with NU1605/NU1608/NU1107/NU1603 as errors, catches a csproj bumped alone), `test` (unit test projects, see below), `docker` (no-push build when a `Dockerfile` exists); `integration` (hosted job: Testcontainers test projects); `smoke` (`docker-smoke`: on by default for `dotnet-service`, opt-in for libraries) |
 | `react-native` | `install`, `consistency` (React/RN contract and `align-deps`), `lint`, `typecheck`, `test`, `bundle`; `android` (debug build); `maestro` (every `.maestro/` flow on an emulator, network-blocked, see below); `network` when flows passed only with network access |
 | `flutter` | `install`, `analyze`, `test`, `build` (debug APK; on GitHub-hosted runners the job first frees ~20 GB of unused toolchains, as the android job does); `flutter-e2e` job: `e2e` (integration tests on an emulator, network-blocked, see below) and `network` |
