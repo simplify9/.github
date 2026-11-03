@@ -848,7 +848,7 @@ jobs:
 
 One reusable workflow that runs the per-stack verification ladder for a PR and reports a single result. The required status check is **`verify / result`** (the caller job is named `verify`): mark exactly that check as required in the org ruleset. `result` always reports, so a skipped ladder never leaves the check pending.
 
-**Scope.** The full ladder runs on PRs into the repo's default branch, on Renovate PRs (author `s9-deps-bot[bot]`, input `bot-login`) whatever their base, and on manual `workflow_dispatch`. A human PR into `develop`, `development` or `staging` skips every job except `result`, which passes immediately (about one billed minute). "Default branch" is read from the repository, not hard-coded to `main`.
+**Scope.** The full ladder runs on PRs into the repo's default branch, on Renovate PRs (author `s9-deps-bot[bot]`, input `bot-login`) whatever their base, and on manual `workflow_dispatch`. It also runs on a human PR that changes journey or integration test files (`.maestro/`, `e2e/`, `integration_test/`, a Playwright config, and for .NET a test-project directory such as `tests/` or `*.Tests/`), so new tests prove themselves before they reach `develop` instead of first failing a Renovate PR. Any other human PR into `develop`, `development` or `staging` skips every job except `tests-probe` and `result`, which passes immediately (about two billed minutes). "Default branch" is read from the repository, not hard-coded to `main`.
 
 **Security.** `verify` installs dependencies and runs the PR's own code (tests, builds, the app under a smoke test). Every job has a read-only token (`contents: read`, `packages: read`) and no deploy secrets; the caller template passes only `dependabot-alerts-token` and `nuget-restore-token`.
 

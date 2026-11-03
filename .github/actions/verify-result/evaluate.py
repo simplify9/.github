@@ -27,7 +27,7 @@ def evaluate(needs, full, base, known_failing):
     if full and needs.get("plan", {}).get("result") != "success" and "plan" not in bad:
         problems.append("plan %s (expected success)" % needs.get("plan", {}).get("result"))
 
-    ladder = [j for j in needs if j not in ("plan", "contract")]
+    ladder = [j for j in needs if j not in ("tests-probe", "plan", "contract")]
     report = {
         "scope": "full" if full else "skipped-human-develop",
         "failed": sorted(w for j in ladder for w in out(j, "failed").split()),
@@ -38,8 +38,8 @@ def evaluate(needs, full, base, known_failing):
     if problems:
         return "failure", "Verification failed: " + "; ".join(problems), report
     if not full:
-        return ("success", "Human PR into %s: full verification runs on PRs into the default branch and on "
-                "Renovate PRs." % base, report)
+        return ("success", "Human PR into %s: full verification runs on PRs into the default branch, on "
+                "Renovate PRs and on PRs that change journey or integration test files." % base, report)
     line = "Verification passed."
     if lost:
         line += " Tolerated until its deadline: %s (the job ended without reporting its steps, e.g. its runner was lost)." % \
