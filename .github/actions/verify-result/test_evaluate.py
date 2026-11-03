@@ -58,6 +58,66 @@ class Verdict(unittest.TestCase):
         self.assertEqual(status, "success")
         self.assertTrue(line.startswith("Human PR into develop"))
         self.assertEqual(report["scope"], "skipped-human-develop")
+        self.assertIn("journey or integration test files", line)
+
+    def test_human_develop_probe_failure_fails(self):
+        # fail closed: a probe that could not list the PR files must not turn into a pass
+        n = {"tests-probe": {"result": "failure", "outputs": {}}, "plan": {"result": "skipped", "outputs": {}}}
+        status, line, _ = e.evaluate(n, False, "develop", "")
+        self.assertEqual(status, "failure")
+        self.assertIn("tests-probe failure", line)
+
+    def test_probe_is_not_a_ladder_job(self):
+        n = needs(node="success")
+        n["tests-probe"] = {"result": "success", "outputs": {"tests_changed": "true", "failed": "x"}}
+        status, _, report = e.evaluate(n, True, "develop", "")
+        self.assertEqual(status, "success")
+        self.assertEqual(report["failed"], [])
+
+
+class LadderMustRun(unittest.TestCase):
+    """A full run whose stack ladder was skipped tested nothing: red (#225 passed Renovate PRs that way)."""
+
+    def test_225_shape_fails(self):
+        # tests-probe skipped, plan ran, every ladder skipped behind the skipped probe
+        n = needs(node="skipped", contract="skipped", dotnet="skipped")
+        n["tests-probe"] = {"result": "skipped", "outputs": {}}
+        status, line, _ = e.evaluate(n, True, "develop", "", "web")
+        self.assertEqual(status, "failure")
+        self.assertIn("node did not run (skipped)", line)
+
+    def test_dotnet_skipped_fails(self):
+        status, line, _ = e.evaluate(needs(dotnet="skipped", integration="success"), True, "develop", "", "dotnet-service")
+        self.assertEqual(status, "failure")
+        self.assertIn("dotnet did not run", line)
+
+    def test_strapi_needs_both_jobs(self):
+        status, line, _ = e.evaluate(needs(node="success", strapi="skipped"), True, "main", "", "strapi")
+        self.assertEqual(status, "failure")
+        self.assertIn("strapi did not run", line)
+        status, _, _ = e.evaluate(needs(node="success", strapi="success"), True, "main", "", "strapi")
+        self.assertEqual(status, "success")
+
+    def test_absent_ladder_fails(self):
+        status, line, _ = e.evaluate(needs(), True, "main", "", "flutter")
+        self.assertIn("flutter did not run (absent)", line)
+
+    def test_ran_ladder_passes(self):
+        for stack, job in (("web", "node"), ("dotnet-library", "dotnet"), ("react-native", "react_native"), ("flutter", "flutter")):
+            status, _, _ = e.evaluate(needs(**{job: "success"}), True, "develop", "", stack)
+            self.assertEqual(status, "success", stack)
+
+    def test_unknown_stack_needs_some_ladder(self):
+        status, line, _ = e.evaluate(needs(contract="success"), True, "main", "", "")
+        self.assertIn("no ladder job ran", line)
+        status, _, _ = e.evaluate(needs(node="success"), True, "main", "", "")
+        self.assertEqual(status, "success")
+
+    def test_human_develop_skips_ladders_legitimately(self):
+        n = {"tests-probe": {"result": "success", "outputs": {"tests_changed": "false"}}, "plan": {"result": "skipped", "outputs": {}},
+             "node": {"result": "skipped", "outputs": {}}}
+        status, _, _ = e.evaluate(n, False, "develop", "", "web")
+        self.assertEqual(status, "success")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,20 @@ test_scope_develop_human_skipped() { eq "${FUNCNAME[0]}" false "$(verify_full pu
 test_scope_bot_author_full() { eq "${FUNCNAME[0]}" true "$(verify_full pull_request develop main "$BOT" "$BOT")"; }
 test_scope_dispatch_full() { eq "${FUNCNAME[0]}" true "$(verify_full workflow_dispatch '' main '' "$BOT")"; }
 test_scope_nondefault_main_name() { eq "${FUNCNAME[0]}" true "$(verify_full pull_request releases/r8.0 releases/r8.0 alice "$BOT")"; }
+test_scope_develop_human_tests_changed_full() { eq "${FUNCNAME[0]}" true "$(verify_full pull_request develop main alice "$BOT" true)"; }
+test_scope_develop_human_tests_unchanged_skipped() { eq "${FUNCNAME[0]}" false "$(verify_full pull_request develop main alice "$BOT" false)"; }
+# tests_changed_from_list <files> [stack]: journey/integration test files send a human develop PR through the full ladder
+test_tests_changed_maestro() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'src/App.tsx\n.maestro/login.yaml' react-native)"; }
+test_tests_changed_e2e_nested() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'apps/web/e2e/login.spec.ts' web)"; }
+test_tests_changed_e2e_mocks() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'e2e/mocks.json' flutter)"; }
+test_tests_changed_flutter_integration() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'integration_test/app_test.dart' flutter)"; }
+test_tests_changed_playwright_config() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'playwright.config.mjs' web)"; }
+test_tests_changed_dotnet_test_project() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'SW.Api.IntegrationTests/HealthTests.cs' dotnet-service)"; }
+test_tests_changed_dotnet_tests_dir() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'tests/Unit/CounterTests.cs' dotnet-library)"; }
+test_tests_changed_dotnet_dir_only_for_dotnet() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'SW.Api.IntegrationTests/HealthTests.cs' web)"; }
+test_tests_changed_false_unit_tests_mobile() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'__tests__/App.test.tsx\nsrc/screens/Login.tsx' react-native)"; }
+test_tests_changed_false_lowercase_suffix() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'src/Latest/Feed.cs\nsrc/Contests/List.cs' dotnet-service)"; }
+test_tests_changed_false_app_only() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'src/index.ts\nREADME.md' web)"; }
 test_known_failing_before_deadline() { eq "${FUNCNAME[0]}" "lint test" "$(known_failing_effective "lint test" 2026-12-20 2026-12-19)"; }
 test_known_failing_on_deadline() { eq "${FUNCNAME[0]}" "" "$(known_failing_effective "lint test" 2026-12-20 2026-12-20)"; }
 test_known_failing_after_deadline() { eq "${FUNCNAME[0]}" "" "$(known_failing_effective "lint" 2026-12-20 2027-01-01)"; }
@@ -82,11 +96,16 @@ test_strapi_changed_content_type_schema() { eq "${FUNCNAME[0]}" true "$(strapi_c
 test_strapi_changed_component() { eq "${FUNCNAME[0]}" true "$(strapi_changed_from_pr $'src/components/shared/seo.json')"; }
 test_strapi_changed_false_other_src() { eq "${FUNCNAME[0]}" false "$(strapi_changed_from_pr $'src/api/article/controllers/article.js\nsrc/index.js')"; }
 test_scope_expression_copies_identical() {
-  canon="github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login"
-  yml="${here}/../../workflows/verify.yml"
+  # base: the v1 full-scope rule. canon adds the probe's answer. The probe has NO if: it must never be
+  # skipped, because a skipped ancestor skips every ladder below it (#225).
+  local base="github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login"
+  local canon="${base} || needs.tests-probe.outputs.tests_changed == 'true'"
+  local yml="${here}/../../workflows/verify.yml" probe plan res
+  probe="$(awk '/^  tests-probe:/{f=1; next} f && /^  [a-z][a-z-]*:$/{exit} f && /^    if: /{sub(/^    if: /,""); print; exit}' "$yml")"
   plan="$(awk '/^  plan:/{f=1} f && /^    if: /{sub(/^    if: /,""); print; exit}' "$yml")"
   res="$(awk '/^  result:/{f=1} f && /FULL: /{sub(/.*FULL: \$\{\{ /,""); sub(/ \}\}$/,""); print; exit}' "$yml")"
-  eq "${FUNCNAME[0]}_plan" "$canon" "$plan"
+  eq "${FUNCNAME[0]}_probe_has_no_if" "" "$probe"
+  eq "${FUNCNAME[0]}_plan" "\${{ !cancelled() && (${canon}) }}" "$plan"
   eq "${FUNCNAME[0]}_result" "$canon" "$res"
 }
 # step_block <job> <step-id>: the lines of that step in verify.yml (empty when absent)

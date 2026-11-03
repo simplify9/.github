@@ -14,8 +14,16 @@ import os
 # the step id is still tolerated (known-failing) the lost job is a warning, not a red check.
 TOLERATED_JOBS = {"flutter-e2e": "e2e", "maestro": "maestro"}
 
+# The ladder jobs a full run of each stack must actually run. A skipped one means nothing was
+# tested: GitHub skips every job below a skipped ancestor, and #225 once passed Renovate PRs that
+# way. An unknown stack needs at least one ladder job that ran.
+STACK_LADDERS = {"web": ["node"], "strapi": ["node", "strapi"], "dotnet-service": ["dotnet"],
+                 "dotnet-library": ["dotnet"], "react-native": ["react-native"], "flutter": ["flutter"]}
+META_JOBS = ("tests-probe", "plan", "contract")
+RAN = ("success", "failure", "cancelled")
 
-def evaluate(needs, full, base, known_failing):
+
+def evaluate(needs, full, base, known_failing, stack=""):
     """-> (status, summary line, report dict)."""
     def out(job, key):
         return (needs.get(job, {}).get("outputs") or {}).get(key, "") or ""
@@ -26,8 +34,16 @@ def evaluate(needs, full, base, known_failing):
     problems = ["%s %s" % (j, needs[j]["result"]) for j in bad if j not in lost]
     if full and needs.get("plan", {}).get("result") != "success" and "plan" not in bad:
         problems.append("plan %s (expected success)" % needs.get("plan", {}).get("result"))
+    if full:
+        required = STACK_LADDERS.get(stack)
+        if required is None:
+            if not any(n.get("result") in RAN for j, n in needs.items() if j not in META_JOBS):
+                problems.append("no ladder job ran")
+        else:
+            problems += ["%s did not run (%s)" % (j, needs.get(j, {}).get("result", "absent"))
+                         for j in required if needs.get(j, {}).get("result") not in RAN]
 
-    ladder = [j for j in needs if j not in ("plan", "contract")]
+    ladder = [j for j in needs if j not in META_JOBS]
     report = {
         "scope": "full" if full else "skipped-human-develop",
         "failed": sorted(w for j in ladder for w in out(j, "failed").split()),
@@ -38,8 +54,8 @@ def evaluate(needs, full, base, known_failing):
     if problems:
         return "failure", "Verification failed: " + "; ".join(problems), report
     if not full:
-        return ("success", "Human PR into %s: full verification runs on PRs into the default branch and on "
-                "Renovate PRs." % base, report)
+        return ("success", "Human PR into %s: full verification runs on PRs into the default branch, on "
+                "Renovate PRs and on PRs that change journey or integration test files." % base, report)
     line = "Verification passed."
     if lost:
         line += " Tolerated until its deadline: %s (the job ended without reporting its steps, e.g. its runner was lost)." % \
@@ -49,7 +65,8 @@ def evaluate(needs, full, base, known_failing):
 
 def main():
     status, line, report = evaluate(json.loads(os.environ["NEEDS"]), os.environ["FULL"] == "true",
-                                    os.environ.get("BASE", ""), os.environ.get("KNOWN_FAILING", ""))
+                                    os.environ.get("BASE", ""), os.environ.get("KNOWN_FAILING", ""),
+                                    os.environ.get("STACK", ""))
     with open("verify-report.json", "w") as f:
         json.dump(report, f, indent=2)
     with open(os.environ["GITHUB_OUTPUT"], "a") as f:

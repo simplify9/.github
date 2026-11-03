@@ -7,12 +7,16 @@
 #
 # Scope: the full ladder runs when the event is workflow_dispatch,
 # OR the PR base is the repo's default branch, OR the PR author is the bot
-# (input `bot-login`). A human PR into develop/development/staging skips every
-# job except `result`, which then passes immediately (about 1 billed minute).
-# The scope expression appears in the `plan` and `result` jobs below; the verify-plan
-# action's test_scope.sh asserts both copies are identical and documents the truth table.
+# (input `bot-login`), OR a human PR changes critical-journey or integration test
+# files (.maestro/, e2e/, integration_test/, a Playwright config; .NET test projects),
+# which the `tests-probe` job checks, so new tests run before they reach develop.
+# Any other human PR into develop/development/staging skips every job except
+# `tests-probe` and `result`, which then passes (about 2 billed minutes).
+# The scope expression appears in the `tests-probe`, `plan` and `result` jobs below; the
+# verify-plan action's test_scope.sh asserts the copies match and documents the truth table.
 #
 # Jobs:
+#   tests-probe  human PRs into develop only: did the PR change journey/integration test files?
 #   plan      scope gate: effective known-failing list, deps_changed, contract_mode
 #   contract  per-stack verification contract (verify-contract action)
 #   node      web ladder: install, consistency, lint, typecheck, test, build, worker dry run, e2e/smoke,
@@ -62,10 +66,13 @@ on:
         type: string
         default: "s9-deps-bot[bot]"
       node-version:
-        description: Node.js version for web, react-native and strapi stacks.
+        description: >-
+          Node.js version. Empty (the default): web and strapi use the repo's own version (.nvmrc or
+          .node-version, else the first FROM node:<N> in its Dockerfiles, else 24), so a Node major bump
+          is tested on that Node; react-native uses 24.
         required: false
         type: string
-        default: "24"
+        default: ""
       dotnet-version:
         description: .NET SDK version for dotnet stacks.
         required: false
@@ -113,11 +120,38 @@ permissions:
   pull-requests: read
 
 jobs:
+  tests-probe:
+    name: tests-probe
+    # A human PR into develop/development/staging that changes journey or integration test files
+    # must run them here, or they first run on a Renovate PR and block it. The same verify-plan
+    # action lists the PR files (tests_changed); `plan` reads the answer.
+    # NO `if:` ON PURPOSE (guarded by test_scope.sh). Every ladder sits below this job, and a job
+    # whose ancestor was skipped is skipped too (GitHub's implicit success()): a skipped probe once
+    # skipped every ladder on Renovate PRs while `result` still passed (#225, reverted in #228).
+    # Where the scope is full anyway its answer is simply unused; on workflow_dispatch it is empty.
+    runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    outputs:
+      tests_changed: ${{ steps.probe.outputs.tests_changed }}
+    steps:
+      - name: Probe
+        id: probe
+        uses: simplify9/.github/.github/actions/verify-plan@main
+        with:
+          github-token: ${{ github.token }}
+          event-name: ${{ github.event_name }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+          stack: ${{ inputs.stack }}
+
   plan:
     name: plan
+    needs: tests-probe
     # Full-scope expression. Must equal the one in `result` (guarded by
     # .github/actions/verify-plan/test_scope.sh; truth table: verify_full in scope.sh).
-    if: github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login
+    # `!cancelled()`: a failed probe must not stop a full run; on a human develop PR the probe's
+    # failure reaches `result` (it is in its needs) and turns the check red.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login || needs.tests-probe.outputs.tests_changed == 'true') }}
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     outputs:
@@ -215,6 +249,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # The repo's own Node (.nvmrc, else its Dockerfile's FROM node:<N>), not a fixed one.
+      - name: Node.js version
+        id: node
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
       # Detect package manager, set up Node and install from the lockfile.
       - name: Install
         id: install
@@ -222,7 +264,7 @@ jobs:
         uses: simplify9/.github/.github/actions/verify-web-install@main
         with:
           working-directory: ${{ inputs.working-directory }}
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ steps.node.outputs.version }}
 
       - name: Consistency
         id: consistency
@@ -292,6 +334,66 @@ jobs:
             "${RUNNER}" run build
           else
             echo "::notice title=[VERIFY] build::no build script in package.json, skipped"
+          fi
+
+      # What ships is the image: build every Dockerfile here (no push, no run, nothing leaves the
+      # runner). A base image change (node:26 images no longer include Yarn) or a Dockerfile the
+      # update broke fails here, on the PR, instead of on the deploy after merge. Hosted runners
+      # build locally; office runners use the shared BuildKit (docker-build-push sets it up).
+      - name: Detect Dockerfiles
+        id: dockerfiles
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=()
+          for f in Dockerfile Dockerfile.*; do
+            case "$f" in *.dockerignore) continue ;; esac
+            if [ -f "$f" ]; then files+=("$f"); fi
+          done
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "has=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] docker::no Dockerfile, skipped"
+            exit 0
+          fi
+          { echo "has=true"; echo "first=${files[0]}"; echo "rest=${files[*]:1}"; echo "all=${files[*]}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Docker build (no push)
+        id: docker
+        if: ${{ !cancelled() && steps.dockerfiles.outputs.has == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' docker ') }}
+        uses: simplify9/.github/.github/actions/docker-build-push@main
+        with:
+          push: 'false'
+          image-name: verify-build
+          version: pr-${{ github.run_id }}
+          dockerfile: ${{ inputs.working-directory }}/${{ steps.dockerfiles.outputs.first }}
+          context: ${{ inputs.working-directory }}
+          build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', github.token) || '' }}
+
+      # The other Dockerfiles (staging/production variants), on the builder the step above set up.
+      - name: Docker build, other Dockerfiles (no push)
+        id: docker-more
+        if: ${{ !cancelled() && steps.dockerfiles.outputs.rest != '' && steps.docker.outcome != 'skipped' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' docker ') }}
+        shell: bash
+        env:
+          REST: ${{ steps.dockerfiles.outputs.rest }}
+          WITH_TOKEN: ${{ inputs.docker-build-github-token }}
+        run: |
+          set -uo pipefail
+          secret=()
+          if [ "${WITH_TOKEN}" = "true" ]; then secret=(--secret "id=GITHUB_TOKEN,env=GITHUB_TOKEN"); fi
+          failed=()
+          for f in ${REST}; do
+            echo "::group::docker build ${f}"
+            if ! docker buildx build --file "${f}" "${secret[@]}" .; then failed+=("${f}"); fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error title=[VERIFY] docker::build failed: ${failed[*]}"
+            exit 1
           fi
       - name: Workers dry run
         id: worker-dry-run
@@ -372,13 +474,15 @@ jobs:
           python3 - <<'PY'
           import json, os
           steps = json.loads(os.environ["STEPS"])
-          ids = ["install", "consistency", "lint", "typecheck", "test", "build", "worker-dry-run", "e2e", "smoke", "network"]
+          ids = ["install", "consistency", "lint", "typecheck", "test", "build", "docker", "docker-more", "worker-dry-run", "e2e", "smoke", "network"]
           failed, warned = [], []
           for i in ids:
               s = steps.get(i)
               if not s or s.get("outcome") != "failure":
                   continue
-              name = "e2e" if i == "smoke" else i
+              name = {"smoke": "e2e", "docker-more": "docker"}.get(i, i)
+              if name in failed or name in warned:
+                  continue
               # conclusion is "success" when continue-on-error swallowed the failure
               (warned if s.get("conclusion") == "success" else failed).append(name)
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -395,7 +499,9 @@ jobs:
           details: |
             | Field | Value |
             |-------|-------|
+            | Node.js | `${{ steps.node.outputs.version }}` |
             | Package manager | `${{ steps.install.outputs.package-manager }}` |
+            | Dockerfiles built | `${{ steps.dockerfiles.outputs.all || 'none' }}` |
             | Failed | `${{ steps.collect.outputs.failed }}` |
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
   # .NET ladder. Runs from the repo root: the dotnet-build action has no
@@ -735,7 +841,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ inputs.node-version || '24' }}
           cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
@@ -914,7 +1020,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ inputs.node-version || '24' }}
           cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
@@ -1063,7 +1169,7 @@ jobs:
         if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ inputs.node-version || '24' }}
           cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
@@ -1440,13 +1546,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Node.js version
+        id: node
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
       - name: Install
         id: install
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') }}
         uses: simplify9/.github/.github/actions/verify-web-install@main
         with:
           working-directory: ${{ inputs.working-directory }}
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ steps.node.outputs.version }}
 
       - name: Build
         id: build
@@ -1540,7 +1653,7 @@ jobs:
     name: result
     # `if: always()` is essential: a job whose needs were skipped is skipped, and
     # a skipped required check never reports. Verdict is computed from needs results.
-    needs: [plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, flutter-e2e, strapi]
+    needs: [tests-probe, plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, flutter-e2e, strapi]
     if: always()
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
@@ -1550,11 +1663,13 @@ jobs:
         uses: simplify9/.github/.github/actions/verify-result@main
         env:
           # Same expression as the `plan` job `if:`.
-          FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login }}
+          FULL: ${{ github.event_name == 'workflow_dispatch' || github.base_ref == github.event.repository.default_branch || github.event.pull_request.user.login == inputs.bot-login || needs.tests-probe.outputs.tests_changed == 'true' }}
           BASE: ${{ github.base_ref }}
           NEEDS: ${{ toJSON(needs) }}
           # A lost emulator job (runner gone before its collect step) is a warning while its step is here.
           KNOWN_FAILING: ${{ needs.plan.outputs.known_failing }}
+          # A full run fails when this stack's own ladder job did not run (evaluate.py STACK_LADDERS).
+          STACK: ${{ inputs.stack }}
 
       - name: Upload report
         if: always()
