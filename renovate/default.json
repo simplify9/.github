@@ -17,8 +17,9 @@
     "minimumReleaseAge": null
   },
   "packageRules": [
-    { "description": "Weekly routine group: non-breaking updates move together so lockstep sets cannot split; 0.x patches are non-breaking in practice and automerge",
+    { "description": "Weekly routine group: non-breaking updates move together so lockstep sets cannot split; 0.x patches are non-breaking in practice and automerge. An update whose leading version number changes is kept out (see the cross-major rule below)",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest", "pinDigest"],
+      "matchJsonata": ["$not($exists(currentValue) and $exists(newValue) and $number($match(currentValue, /\\d+/, 1).match) != $number($match(newValue, /\\d+/, 1).match))"],
       "groupName": "non-major dependencies", "groupSlug": "non-major", "automerge": true },
     { "description": "npm soak against compromised fresh releases",
       "matchDatasources": ["npm"], "minimumReleaseAge": "7 days" },
@@ -26,6 +27,9 @@
       "matchCurrentVersion": "/^v?0\\./", "matchUpdateTypes": ["minor"],
       "groupName": null, "dependencyDashboardApproval": true, "automerge": false },
     { "description": "Major updates need a human: dashboard approval, never automerged",
-      "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true, "automerge": false }
+      "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true, "automerge": false },
+    { "description": "Cross-major guard: Renovate can type a major as minor or patch. A NuGet bare version is a minimum, and when the current release is deprecated Renovate measures from the oldest non-deprecated one (MSTest 3.6.4 -> 4.5.2 was typed 4.5.1 -> 4.5.2, patch). So the leading number of the version actually written decides: if it changes, treat the update as a major",
+      "matchJsonata": ["$exists(currentValue) and $exists(newValue) and $number($match(currentValue, /\\d+/, 1).match) != $number($match(newValue, /\\d+/, 1).match)"],
+      "dependencyDashboardApproval": true, "automerge": false }
   ]
 }

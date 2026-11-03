@@ -1755,6 +1755,11 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
 - Non-breaking updates (minor, patch, pin, digest) form one weekly group and automerge. This includes 0.x patch updates.
 - npm releases wait 7 days; everything else waits 3 days.
 - 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
+- An update whose leading version number changes (`3.6.4` to `4.5.2`) is handled as a major even when Renovate
+  types it minor or patch. Renovate 44 does that for a NuGet package whose current release is deprecated: a bare
+  NuGet version is a minimum, so Renovate measures from the oldest non-deprecated release instead (MSTest 3.x,
+  all deprecated by Microsoft, came out as `4.5.1` to `4.5.2`, a "patch", and landed in the automerge group).
+  The rule compares the versions actually written, so it does not depend on Renovate's classification.
 - Security fixes open immediately with no release-age wait. Non-major security fixes automerge; major or 0.x minor security fixes are left for a human to merge.
 - Lock files are regenerated weekly, in the stack's own window, and automerge once `verify` passes. This is how
   vulnerable *transitive* dependencies get fixed: Renovate's security PRs cover direct dependencies only, and
