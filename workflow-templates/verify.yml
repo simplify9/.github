@@ -8,8 +8,9 @@
 #
 #   Then mark `verify / result` as the REQUIRED status check in the org ruleset.
 #   `result` always reports: a human PR into develop/development/staging passes
-#   immediately; PRs into the default branch, bot PRs and manual runs get the
-#   full verification ladder.
+#   immediately unless it changes journey or integration test files; PRs into the
+#   default branch, bot PRs, those test changes and manual runs get the full
+#   verification ladder.
 #
 #   Add your repo's default branch and Renovate target branch to `branches`
 #   below if they are not already listed.
