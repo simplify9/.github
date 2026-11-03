@@ -18,6 +18,7 @@ eq dockerfile_lowercase_as_platform "20.11 Dockerfile" "$(node_version "$(repo D
 eq dockerfile_variant_only "22 Dockerfile.staging" "$(node_version "$(repo Dockerfile.staging 'FROM node:22-alpine\n')")"
 eq dockerfile_non_numeric_tag "24 default" "$(node_version "$(repo Dockerfile 'FROM node:lts-alpine\n')")"
 eq dockerfile_other_base "24 default" "$(node_version "$(repo Dockerfile 'FROM nginx:1.27\n')")"
+eq dockerfile_any_case "20 DockerFile" "$(node_version "$(repo DockerFile 'FROM node:20-alpine\n')")"
 eq nothing "24 default" "$(node_version "$(repo package.json '{}')")"
 
 [ "${fails}" -eq 0 ] && echo "ALL PASS" || { echo "${fails} FAILED"; exit 1; }

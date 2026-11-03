@@ -14,10 +14,13 @@ node_version() {
       if [ -n "${v}" ]; then echo "${v} ${f}"; return; fi
     fi
   done
-  for f in "${dir}"/Dockerfile "${dir}"/Dockerfile.*; do
+  local name
+  for f in "${dir}"/*; do  # by lowercased name: DockerFile too (Linux runners are case-sensitive)
+    name="$(basename "${f}")"
+    case "${name,,}" in dockerfile.dockerignore) continue ;; dockerfile | dockerfile.*) ;; *) continue ;; esac
     [ -f "${f}" ] || continue
     v="$(sed -n -E 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?(docker\.io\/)?(library\/)?node:([0-9]+(\.[0-9]+)*).*/\4/p' "${f}" | head -n 1)"
-    if [ -n "${v}" ]; then echo "${v} $(basename "${f}")"; return; fi
+    if [ -n "${v}" ]; then echo "${v} ${name}"; return; fi
   done
   echo "24 default"
 }

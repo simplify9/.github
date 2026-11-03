@@ -346,10 +346,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # By lowercased name: some repos call it DockerFile, and Linux runners are case-sensitive
+          # (a glob such as Dockerfile without a wildcard never matches another case).
           shopt -s nullglob
           files=()
-          for f in Dockerfile Dockerfile.*; do
-            case "$f" in *.dockerignore) continue ;; esac
+          for f in *; do
+            case "${f,,}" in dockerfile.dockerignore) continue ;; dockerfile | dockerfile.*) ;; *) continue ;; esac
             if [ -f "$f" ]; then files+=("$f"); fi
           done
           if [ "${#files[@]}" -eq 0 ]; then
