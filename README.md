@@ -1039,6 +1039,8 @@ Either way:
 
 **Required caller permissions:** `contents: read`, `packages: read`, `pull-requests: read` (the `plan` job lists the PR's files).
 
+**Caller triggers.** `edited` is in the trigger list so a retargeted PR re-runs (its base decides the scope). Every other edit is ignored: Renovate rewrites its PR description right after each push, and before this rule that edit cancelled the push's run and started a second full ladder on the same commit (27% of verify runs on bot PRs were such repeats).
+
 ```yaml
 name: Verify
 on:
@@ -1052,12 +1054,15 @@ permissions:
   packages: read
   pull-requests: read
 
+# A PR edit that does not change the base (Renovate rewrites its description after every push)
+# gets its own group and a skipped job, so it never cancels or repeats the push's run.
 concurrency:
-  group: verify-${{ github.event.pull_request.number || github.ref }}
+  group: verify-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-edit-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    if: github.event.action != 'edited' || github.event.changes.base
     uses: simplify9/.github/.github/workflows/verify.yml@main
     with:
       stack: web

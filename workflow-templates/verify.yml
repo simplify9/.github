@@ -31,12 +31,16 @@ permissions:
   pull-requests: read
 
 # One billed run per PR. Safe to cancel: verification is read-only and deploys nothing.
+# `edited` is listed so a retargeted PR (new base, new scope) re-runs. Any other edit, such as
+# Renovate rewriting its description right after a push, gets its own group, so it never cancels
+# the run that push started, and its job is skipped: nothing to re-verify.
 concurrency:
-  group: verify-${{ github.event.pull_request.number || github.ref }}
+  group: verify-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-edit-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    if: github.event.action != 'edited' || github.event.changes.base
     uses: simplify9/.github/.github/workflows/verify.yml@main
     with:
       stack: REPLACE
