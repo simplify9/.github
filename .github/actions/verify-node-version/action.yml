@@ -1,8 +1,10 @@
 name: 'Verify: Node.js version'
 description: >-
-  The Node.js version verify sets up for a web or strapi repo: the caller's node-version input, else the
-  repo's .nvmrc/.node-version, else the first FROM node:<N> in its Dockerfiles, else 24 (node_version.sh).
-  Verify used to run every repo on 24, so a Node major bump was never actually tested.
+  The Node.js version verify sets up: the caller's node-version input, else the repo's
+  .nvmrc/.node-version, else the first FROM node:<N> in its Dockerfiles, else 24 (node_version.sh).
+  Verify used to run every repo on 24, so a Node major bump was never actually tested. With an explicit
+  version (react-native passes the Node its build workflows use), it warns when .nvmrc/.node-version
+  names another major.
 inputs:
   working-directory:
     description: Directory with package.json.
@@ -27,6 +29,12 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        read -r version source < <(bash "${ACTION_PATH}/node_version.sh" "${DIR}" "${EXPLICIT}")
+        source "${ACTION_PATH}/node_version.sh"
+        read -r version source < <(node_version "${DIR}" "${EXPLICIT}")
         echo "version=${version}" >> "$GITHUB_OUTPUT"
         echo "::notice title=[VERIFY] Node.js::${version} (from ${source})"
+        # An explicit version (the input; react-native always passes the Node its builds use) can differ
+        # from what the repo declares. Say so: a PR that only bumps .nvmrc is not tested on that Node.
+        if [ "${source}" = input ] && read -r file declared < <(declared_mismatch "${DIR}" "${version}"); then
+          echo "::warning title=[VERIFY] Node.js::${file} says Node ${declared}, but this check runs on Node ${version} (the node-version input; for react-native, the Node that android-build.yml and ios-build.yml build the app with). A change to ${file} alone is not tested here and does not change what CI builds."
+        fi

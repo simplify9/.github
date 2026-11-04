@@ -21,4 +21,25 @@ eq dockerfile_other_base "24 default" "$(node_version "$(repo Dockerfile 'FROM n
 eq dockerfile_any_case "20 DockerFile" "$(node_version "$(repo DockerFile 'FROM node:20-alpine\n')")"
 eq nothing "24 default" "$(node_version "$(repo package.json '{}')")"
 
+
+# declared_mismatch <dir> <version>: "<file> <declared>" when the repo's .nvmrc/.node-version names a
+# different major than the Node verify runs on; empty when it agrees, names no number, or is absent.
+eq mismatch_nvmrc ".nvmrc 26" "$(declared_mismatch "$(repo .nvmrc '26\n')" 24)"
+eq mismatch_node_version_file ".node-version 22" "$(declared_mismatch "$(repo .node-version '22\n')" 24.11)"
+eq same_major_full_version "" "$(declared_mismatch "$(repo .nvmrc ' v24.11.0 \n')" 24)"
+eq same_major_v_prefixed_input "" "$(declared_mismatch "$(repo .nvmrc '24\n')" v24.1.0)"
+eq alias_not_compared "" "$(declared_mismatch "$(repo .nvmrc 'lts/*\n')" 24)"
+eq dockerfile_not_a_declaration "" "$(declared_mismatch "$(repo Dockerfile 'FROM node:26-alpine\n')" 24)"
+eq no_file "" "$(declared_mismatch "$(repo package.json '{}')" 24)"
+
+# React Native apps ship on the Node that android-build.yml and ios-build.yml build with (their
+# node-version default; no caller overrides it). Every `inputs.node-version || '<N>'` fallback in
+# verify.yml (the react-native, android and maestro jobs) must be that same Node.
+wf="${here}/../../workflows"
+build_default() { awk '/^      node-version:$/ {f = 1} f && /^        default:/ {gsub(/[" ]/, ""); sub(/default:/, ""); print; exit}' "$1"; }
+eq android_build_node_default "24" "$(build_default "${wf}/android-build.yml")"
+eq ios_build_node_default "$(build_default "${wf}/android-build.yml")" "$(build_default "${wf}/ios-build.yml")"
+eq verify_rn_fallbacks_match_builds "$(build_default "${wf}/android-build.yml")" \
+  "$(grep -o "inputs.node-version || '[^']*'" "${wf}/verify.yml" | sed "s/.*|| '//; s/'//" | sort -u | tr '\n' ' ' | sed 's/ $//')"
+
 [ "${fails}" -eq 0 ] && echo "ALL PASS" || { echo "${fails} FAILED"; exit 1; }

@@ -863,7 +863,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `known-failing` | | `''` | Space-separated step ids tolerated until `contract-deadline` (see below) |
 | `contract-deadline` | | `''` | `YYYY-MM-DD`. Empty or invalid = warn mode and `known-failing` never expires |
 | `bot-login` | | `s9-deps-bot[bot]` | Login whose PRs always get the full ladder |
-| `node-version` | | (empty) | Node.js. Empty: `web` and `strapi` use the repo's own version (`.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24); `react-native` uses 24 |
+| `node-version` | | (empty) | Node.js. Empty: `web` and `strapi` use the repo's own version (`.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24); `react-native` uses 24, the Node `android-build.yml` and `ios-build.yml` build the app with (`.nvmrc` changes neither), and warns when `.nvmrc` / `.node-version` names another major |
 | `dotnet-version` | | `10.0.x` | .NET SDK (dotnet stacks) |
 | `java-version` | | `17` | Java (Android builds, Flutter) |
 | `flutter-version` | | `3.x` | Flutter (flutter stack) |
@@ -906,9 +906,9 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
 
 **Docker smoke (`smoke`).** With `smoke-path` set, `docker-smoke` builds the image, runs it and probes that path; a failure blocks. The on-by-default `/health` smoke for `dotnet-service` is **paused**: it ran the image with network access and no environment, so ASP.NET would load `appsettings.json` (and `appsettings.Production.json`), and an image that ships a real connection string would connect to, and migrate, a real database from CI. It comes back once the container runs network-isolated. Until then, opt in only for images whose committed settings point at no real database. The image must start without its database: `/health` is liveness only.
 
-`maestro` runs only when the Android job produced an APK, when dependencies changed or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
+`maestro` runs only when the Android job produced an APK, when dependencies changed, test files changed (a human PR into develop that changes `.maestro/` flows gets the full ladder, and the changed flows must run) or the PR targets the default branch, and when the repo has `.maestro/smoke.yaml`; without that file it is skipped (and the contract reports `maestro-smoke` missing).
 
-**Flutter journeys (`flutter-e2e` job, step `e2e`).** Runs when the repo has `integration_test/` and dependencies changed or the PR targets the default branch, on the GitHub-hosted runner. Starter in `starters/flutter-integration-test/`.
+**Flutter journeys (`flutter-e2e` job, step `e2e`).** Runs when the repo has `integration_test/` and dependencies changed, test files changed or the PR targets the default branch, on the GitHub-hosted runner. Starter in `starters/flutter-integration-test/`.
 1. Committed recordings and `e2e/mocks.json` are scanned, as for web.
 2. Before the block: the API 34 x86_64 emulator image, `flutter pub get` and a debug build (Gradle's downloads).
 3. The emulator boots with **outbound network blocked** (allowed: loopback and `e2e/allowed-hosts.txt`); 2 attempts, then "did not boot (infrastructure)".

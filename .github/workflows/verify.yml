@@ -69,7 +69,8 @@ on:
         description: >-
           Node.js version. Empty (the default): web and strapi use the repo's own version (.nvmrc or
           .node-version, else the first FROM node:<N> in its Dockerfiles, else 24), so a Node major bump
-          is tested on that Node; react-native uses 24.
+          is tested on that Node; react-native uses 24, the Node android-build.yml and ios-build.yml build
+          the app with (.nvmrc does not change it), and warns when .nvmrc names another major.
         required: false
         type: string
         default: ""
@@ -158,6 +159,7 @@ jobs:
       known_failing: ${{ steps.plan.outputs.known_failing }}
       repo_known_failing: ${{ steps.plan.outputs.repo_known_failing }}
       deps_changed: ${{ steps.plan.outputs.deps_changed }}
+      tests_changed: ${{ steps.plan.outputs.tests_changed }}
       contract_mode: ${{ steps.plan.outputs.contract_mode }}
       strapi_changed: ${{ steps.plan.outputs.strapi_changed }}
     steps:
@@ -840,10 +842,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # React Native apps build on the Node of android-build.yml and ios-build.yml (their node-version,
+      # default 24), not on .nvmrc, so verify tests that one. The action warns when .nvmrc or
+      # .node-version names another major: a PR that only bumps it is not tested on that Node.
+      - name: Node.js version
+        id: node
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version || '24' }}
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version || '24' }}
+          node-version: ${{ steps.node.outputs.version }}
           cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
@@ -978,10 +990,10 @@ jobs:
 
   android:
     name: android
-    needs: [plan, react-native]
-    # Every rung runs so one run reports all failures: build even when react-native failed; plan success is explicit
-    # because !cancelled() drops the implicit success() (human PRs skip plan).
-    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.react-native.result != 'cancelled' }}
+    # Beside react-native, not after it: it uses nothing react-native produces, and waiting cost 4-6 minutes
+    # per run. plan success is explicit because !cancelled() drops the implicit success() (human PRs skip plan).
+    needs: plan
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' }}
     runs-on: ${{ vars.S9_RUNNER_ANDROID || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     outputs:
@@ -1104,7 +1116,7 @@ jobs:
   maestro:
     name: maestro
     needs: [plan, android]
-    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.android.result != 'cancelled' && needs.android.outputs.apk == 'true' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && needs.android.result != 'cancelled' && needs.android.outputs.apk == 'true' && (needs.plan.outputs.deps_changed == 'true' || needs.plan.outputs.tests_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     outputs:
@@ -1387,11 +1399,12 @@ jobs:
             | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
 
   # Flutter integration tests on an emulator (hosted: office runner pods have no KVM).
-  # Same scope as maestro: dependencies changed or the PR targets the default branch.
+  # Same scope as maestro: dependencies changed, test files changed (a human develop PR that changes
+  # integration tests gets the full ladder, and those tests must then run) or the PR targets the default branch.
   flutter-e2e:
     name: flutter-e2e
     needs: plan
-    if: ${{ !cancelled() && inputs.stack == 'flutter' && needs.plan.result == 'success' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    if: ${{ !cancelled() && inputs.stack == 'flutter' && needs.plan.result == 'success' && (needs.plan.outputs.deps_changed == 'true' || needs.plan.outputs.tests_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
     runs-on: ${{ vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     outputs:
