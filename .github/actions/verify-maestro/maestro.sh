@@ -139,6 +139,11 @@ if [ "${#recheck[@]}" -gt 0 ]; then
   done
 fi
 
+# Failed flows with the emulator gone are infrastructure, not the app: on 2026-11-03 two runs lost
+# emulator-5554 mid-flow and reported the flows as failed. Still red (exit 2), but named for what it is.
+if [ "${#failed[@]}" -gt 0 ] && ! emulator_present; then
+  verify_infra_fail "the emulator disconnected during the flows (failed: ${failed[*]})"
+fi
 {
   echo "### Maestro"
   echo "Flows: ${#flows[@]}"

@@ -10,6 +10,7 @@
 #                                 sockets, which carry the app's traffic, are blocked); 2 attempts of
 #                                 300 s; exits 2 through verify_infra_fail when it never boots
 #   emulator_stop                 until adb lists no emulator (SIGKILL after a grace period)
+#   emulator_present              0 while adb still reaches the emulator (a failure after it left is infrastructure)
 #   emulator_boot_verdict RC1 RC2|-   booted | retry | failed
 #   verify_mem LABEL              one line of `free -m` in the step log
 #   verify_infra_fail MESSAGE     "MESSAGE (infrastructure, not the app)" as an error and in the job
@@ -105,6 +106,10 @@ _emulator_wait() {
 }
 
 _emulator_listed() { adb devices 2>/dev/null | grep -q '^emulator-'; }
+
+# emulator_present: 0 while adb still reaches the emulator. A run that fails after it went away
+# ("device 'emulator-5554' not found") says nothing about the app: callers report infrastructure.
+emulator_present() { [ "$(adb get-state 2>/dev/null | tr -d '\r')" = device ]; }
 
 emulator_stop() {
   adb emu kill >/dev/null 2>&1 || true

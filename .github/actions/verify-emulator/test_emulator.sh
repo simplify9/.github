@@ -34,6 +34,14 @@ STUB
 chmod +x "${tmp}/bin/adb"
 export PATH="${tmp}/bin:${PATH}" STUB_DIR="${tmp}"
 
+# A lost emulator (adb no longer answers "device") is infrastructure, not an app failure: maestro
+# checks emulator_present before blaming the flows (gig mobile lost emulator-5554 mid-run, 2026-11-03).
+eq emulator_gone false "$(emulator_present && echo true || echo false)"
+mkdir -p "${tmp}/up"
+printf '#!/usr/bin/env bash\n[ "$1" = get-state ] && echo device\nexit 0\n' > "${tmp}/up/adb"
+chmod +x "${tmp}/up/adb"
+eq emulator_up true "$(PATH="${tmp}/up:${PATH}" emulator_present && echo true || echo false)"
+
 # M2: an emulator that already exited ("Unknown AVD name") is not waited on for the full timeout.
 sh -c 'exit 0' & EMULATOR_PID=$!
 wait "${EMULATOR_PID}" 2>/dev/null
