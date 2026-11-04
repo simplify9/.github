@@ -1465,7 +1465,7 @@ jobs:
           xcodebuild -workspace "${ws}" -scheme "${scheme}" -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO CLANG_ENABLE_EXPLICIT_MODULES=NO -quiet build
-          ccache --show-stats 2>/dev/null | grep -iE 'hits|misses' || true
+          ccache --show-stats || true
 
       - name: Collect outcomes
         id: collect
