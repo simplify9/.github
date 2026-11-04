@@ -1789,6 +1789,10 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
   version younger than 7 days from Yarn and pub, except a version GitHub's reviewed advisories name as a first
   patched version. Using these presets without that filter gives the wait on direct dependencies only.
 - 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
+- Every Dependency Dashboard starts with a guide (`dependencyDashboardHeader` in `default.json`): what each section
+  lists and what ticking its box does, for example that a box under Pending Status Checks skips the release-age
+  wait and the approval step. Renovate lets a config replace only the text at the top of the issue, not the
+  sections, so the guide is one table there. It has no `{{`, because Renovate runs it through Handlebars.
 - An update whose leading version number changes (`3.6.4` to `4.5.2`) is handled as a major even when Renovate
   types it minor or patch. Renovate 44 does that for a NuGet package whose current release is deprecated: a bare
   NuGet version is a minimum, so Renovate measures from the oldest non-deprecated release instead (MSTest 3.x,
