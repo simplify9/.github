@@ -27,10 +27,11 @@ known_failing_effective() {
 #            when smoke-path is empty (an explicit opt-in uses repo_known_failing and keeps blocking)
 #   e2e      Flutter's emulator journeys (flutter-e2e job), shipped 2026-11-03; scoped to flutter because
 #            web's `e2e` already blocks
-#   ios      React Native iOS build (ios job: pod install + unsigned Release build), shipped 2026-11-04
+# `ios` (React Native iOS build, shipped 2026-11-04) is deliberately absent: it blocks from day one, because
+# while tolerated the bot would still merge a lock refresh that breaks the iOS release build (it did once).
 # `integration` is deliberately absent: its projects already ran, and blocked, inside `test`, so it
 # follows `test`'s tolerance in verify.yml.
-NEW_STEPS="*:network:2026-12-29 dotnet-service:smoke:2026-12-29 flutter:e2e:2026-12-29 react-native:ios:2026-12-30"
+NEW_STEPS="*:network:2026-12-29 dotnet-service:smoke:2026-12-29 flutter:e2e:2026-12-29"
 
 # new_steps_tolerated <repo-deadline> <today> [stack] -> the new step ids still tolerated for that stack
 # (without a stack, only `*` entries)
