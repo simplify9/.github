@@ -126,5 +126,24 @@ test_integration_build_carries_build_tolerance() {
       *) eq "${FUNCNAME[0]}_${step// /_}" "build tolerance" "missing" ;; esac
   done
 }
+# job_if <job>: that job's if: expression in verify.yml
+job_if() {
+  awk -v job="  $1:" '$0 == job {f = 1; next} f && /^  [a-z][a-z-]*:$/ {exit} f && /^    if: / {sub(/^    if: /, ""); print; exit}' \
+    "${here}/../../workflows/verify.yml"
+}
+test_emulator_journeys_run_when_tests_changed() {
+  # A human develop PR that changes only Maestro flows or Flutter integration tests gets the full
+  # ladder (tests-probe). The emulator jobs must then run those tests: before, they also required a
+  # dependency change or a PR into the default branch, so the changed tests were skipped and result passed.
+  local j
+  for j in maestro flutter-e2e; do
+    case "$(job_if "$j")" in *"needs.plan.outputs.tests_changed == 'true'"*) eq "${FUNCNAME[0]}_${j}" ok ok ;;
+      *) eq "${FUNCNAME[0]}_${j}" "runs when tests_changed" "missing" ;; esac
+  done
+  case "$(awk '/^  plan:$/ {f = 1; next} f && /^  [a-z][a-z-]*:$/ {exit} f && /^      tests_changed: / {print; exit}' "${here}/../../workflows/verify.yml")" in
+    *'steps.plan.outputs.tests_changed'*) eq "${FUNCNAME[0]}_plan_output" ok ok ;;
+    *) eq "${FUNCNAME[0]}_plan_output" "plan exposes tests_changed" "missing" ;;
+  esac
+}
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

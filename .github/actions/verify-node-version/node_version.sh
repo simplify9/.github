@@ -24,4 +24,16 @@ node_version() {
   done
   echo "24 default"
 }
+# declared_mismatch <dir> <version>: "<file> <declared>" when the repo's .nvmrc or .node-version names
+# a different major than <version>, the Node verify runs on; empty when it agrees, names no number
+# (lts/*) or is absent. React Native apps build on the Node of android-build.yml and ios-build.yml,
+# not on .nvmrc, so a PR that only bumps .nvmrc is green there without that Node ever running.
+declared_mismatch() {
+  local declared src want="${2#v}"
+  read -r declared src < <(node_version "$1")
+  case "${src}" in .nvmrc | .node-version) ;; *) return 0 ;; esac
+  declared="${declared#v}"
+  [[ "${declared%%.*}" =~ ^[0-9]+$ ]] || return 0
+  [ "${declared%%.*}" = "${want%%.*}" ] || echo "${src} ${declared}"
+}
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then node_version "$@"; fi
