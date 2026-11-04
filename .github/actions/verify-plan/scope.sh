@@ -63,7 +63,7 @@ contract_mode() {
 # deps_changed_from_list <newline-separated file paths> -> true|false
 # Here-string, not a pipe: `printf | grep -q` gets SIGPIPE under pipefail on big lists.
 deps_changed_from_list() {
-  local pattern='(^|/)(package\.json|yarn\.lock|package-lock\.json|pnpm-lock\.yaml|Directory\.Packages\.props|pubspec\..*|Gemfile.*)$|\.csproj$|(^|/)(android|ios)/'
+  local pattern='(^|/)(package\.json|yarn\.lock|package-lock\.json|pnpm-lock\.yaml|Directory\.Packages\.props|pubspec\..*|Gemfile.*|\.nvmrc|\.node-version)$|\.csproj$|(^|/)(android|ios)/'
   if grep -Eq "${pattern}" <<< "$1"; then echo true; else echo false; fi
 }
 

@@ -607,7 +607,7 @@ Builds, signs, and archives a React Native / native iOS app on a macOS runner, e
 | `configuration` | | `Release` | Build configuration |
 | `xcode-version` | | `''` | Xcode major or major.minor (e.g. `16.4`) |
 | `macos-runner` | | `macos-latest` | macOS runner label |
-| `node-version` | | `24` | Node.js version (React Native) |
+| `node-version` | | (empty) | Node.js version. Empty: the app's own, from `.nvmrc` / `.node-version` in `package-manager-directory`, else 24. `verify` resolves it the same way, so a Node bump is tested and shipped on the new Node |
 | `package-manager` | | `yarn` | `yarn` or `npm` |
 | `ios-dir` | | `ios` | iOS directory for pod operations |
 | `clean-reinstall-pods` | | `false` | `pod deintegrate` + `pod install --repo-update` |
@@ -659,7 +659,7 @@ Builds and signs a React Native Android App Bundle (AAB) via Gradle and publishe
 | `version-prefix` | | `1.0.0` | Base version (X.Y or X.Y.Z) |
 | `version-code-offset` | | `80000` | Added to `github.run_number` for versionCode |
 | `java-version` | | `17` | Java version (temurin) |
-| `node-version` | | `24` | Node.js version (React Native) |
+| `node-version` | | (empty) | Node.js version. Empty: the app's own, from `.nvmrc` / `.node-version` in `package-manager-directory`, else 24. `verify` resolves it the same way, so a Node bump is tested and shipped on the new Node |
 | `package-manager` | | `yarn` | `yarn` or `npm` |
 | `build-root-directory` | | `android` | Gradle project root |
 | `use-jetifier` | | `true` | Run `npx jetify` (AndroidX migration) |
@@ -852,7 +852,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 
 **A green check means the stack's ladder ran.** In a full run, `result` fails when the stack's own ladder job did not run (`web`: `node`; `strapi`: `node` and `strapi`; `dotnet-*`: `dotnet`; `react-native`; `flutter`). `tests-probe` has no `if:` on purpose: GitHub skips every job below a skipped one, and a skipped probe once skipped every ladder on Renovate PRs while `result` still passed.
 
-**What ships is what is tested.** `web` and `strapi` run on the repo's own Node (input `node-version`, else `.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24), and build every Dockerfile in the working directory (`docker`, below). A Node major bump is tested on the new Node, and a base image change that breaks the image (Node 26 images no longer include Yarn) fails the PR instead of the deploy.
+**What ships is what is tested.** `web`, `strapi` and `react-native` run on the repo's own Node (input `node-version`, else `.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24). For `react-native`, `android-build.yml` and `ios-build.yml` resolve the Node they build with by the same rule (Node version files count as dependency changes, so a bump gets the full ladder including Maestro). `web` and `strapi` also build every Dockerfile in the working directory (`docker`, below). A Node major bump is tested on the new Node, and a base image change that breaks the image (Node 26 images no longer include Yarn) fails the PR instead of the deploy.
 
 **Security.** `verify` installs dependencies and runs the PR's own code (tests, builds, the app under a smoke test). Every job has a read-only token (`contents: read`, `packages: read`) and no deploy secrets; the caller template passes only `dependabot-alerts-token` and `nuget-restore-token`.
 
@@ -863,7 +863,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `known-failing` | | `''` | Space-separated step ids tolerated until `contract-deadline` (see below) |
 | `contract-deadline` | | `''` | `YYYY-MM-DD`. Empty or invalid = warn mode and `known-failing` never expires |
 | `bot-login` | | `s9-deps-bot[bot]` | Login whose PRs always get the full ladder |
-| `node-version` | | (empty) | Node.js. Empty: `web` and `strapi` use the repo's own version (`.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24); `react-native` uses 24, the Node `android-build.yml` and `ios-build.yml` build the app with (`.nvmrc` changes neither), and warns when `.nvmrc` / `.node-version` names another major |
+| `node-version` | | (empty) | Node.js. Empty: every Node stack uses the repo's own version (`.nvmrc` / `.node-version`, else the first `FROM node:<N>` in its Dockerfiles, else 24); `react-native` resolves it the same way, as do `android-build.yml` and `ios-build.yml` |
 | `dotnet-version` | | `10.0.x` | .NET SDK (dotnet stacks) |
 | `java-version` | | `17` | Java (Android builds, Flutter) |
 | `flutter-version` | | `3.x` | Flutter (flutter stack) |

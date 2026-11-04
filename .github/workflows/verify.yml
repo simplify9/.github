@@ -69,8 +69,8 @@ on:
         description: >-
           Node.js version. Empty (the default): web and strapi use the repo's own version (.nvmrc or
           .node-version, else the first FROM node:<N> in its Dockerfiles, else 24), so a Node major bump
-          is tested on that Node; react-native uses 24, the Node android-build.yml and ios-build.yml build
-          the app with (.nvmrc does not change it), and warns when .nvmrc names another major.
+          is tested on that Node. react-native resolves it the same way, as do the android-build.yml and
+          ios-build.yml that ship the app, so what verify tests is what ships.
         required: false
         type: string
         default: ""
@@ -842,15 +842,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # React Native apps build on the Node of android-build.yml and ios-build.yml (their node-version,
-      # default 24), not on .nvmrc, so verify tests that one. The action warns when .nvmrc or
-      # .node-version names another major: a PR that only bumps it is not tested on that Node.
+      # The app's own Node (the input, else .nvmrc / .node-version, else 24). android-build.yml and
+      # ios-build.yml resolve it the same way, so a Node bump is tested on the Node that will ship.
       - name: Node.js version
         id: node
         uses: simplify9/.github/.github/actions/verify-node-version@main
         with:
           working-directory: ${{ inputs.working-directory }}
-          node-version: ${{ inputs.node-version || '24' }}
+          node-version: ${{ inputs.node-version }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -1031,10 +1030,18 @@ jobs:
         with:
           persist-credentials: false
 
+      # Same Node as the react-native job (see there).
+      - name: Node.js version
+        id: node
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version || '24' }}
+          node-version: ${{ steps.node.outputs.version }}
           cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
@@ -1179,11 +1186,20 @@ jobs:
           name: verify-apk
           path: ${{ runner.temp }}/apk
 
+      # Same Node as the react-native job (see there).
+      - name: Node.js version
+        id: node
+        if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
       - name: Setup Node
         if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version || '24' }}
+          node-version: ${{ steps.node.outputs.version }}
           cache: ${{ runner.environment == 'github-hosted' && 'yarn' || '' }}
           package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
