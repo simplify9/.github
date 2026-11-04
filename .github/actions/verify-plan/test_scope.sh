@@ -150,15 +150,15 @@ test_emulator_journeys_run_when_tests_changed() {
     *) eq "${FUNCNAME[0]}_plan_output" "plan exposes tests_changed" "missing" ;;
   esac
 }
-# iOS (2026-11-04): a new step, so tolerated for react-native until its own deadline (or the repo's later one).
-test_new_step_ios_tolerated_for_react_native() {
-  case " $(new_steps_tolerated '' 2026-11-10 react-native) " in *" ios "*) eq "${FUNCNAME[0]}" ok ok ;; *) eq "${FUNCNAME[0]}" "ios tolerated" "missing" ;; esac
+# iOS blocks from the day it shipped (2026-11-04), an exception to "new steps start tolerated": while
+# tolerated, a lock refresh that breaks the iOS build would still be merged by the bot, which is how an
+# enrolled app's iOS release builds broke in the first place. A repo can still list `ios` in known-failing.
+test_ios_blocks_from_day_one() {
+  case " $(new_steps_tolerated '' 2026-11-04 react-native) $(new_steps_tolerated 2026-12-21 2026-11-10 react-native) " in
+    *" ios "*) eq "${FUNCNAME[0]}" "enforced" "tolerated" ;; *) eq "${FUNCNAME[0]}" ok ok ;; esac
 }
-test_new_step_ios_enforced_after_its_deadline() {
-  case " $(new_steps_tolerated 2026-12-21 2027-01-05 react-native) " in *" ios "*) eq "${FUNCNAME[0]}" "enforced" "still tolerated" ;; *) eq "${FUNCNAME[0]}" ok ok ;; esac
-}
-test_new_step_ios_not_other_stacks() {
-  case " $(new_steps_tolerated '' 2026-11-10 web) $(new_steps_tolerated '' 2026-11-10 flutter) " in *" ios "*) eq "${FUNCNAME[0]}" "react-native only" "leaked" ;; *) eq "${FUNCNAME[0]}" ok ok ;; esac
+test_ios_tolerated_only_when_listed() {
+  case " $(effective_known_failing 'ios' 2026-12-21 2026-11-10 react-native) " in *" ios "*) eq "${FUNCNAME[0]}" ok ok ;; *) eq "${FUNCNAME[0]}" "listed ios tolerated" "missing" ;; esac
 }
 test_ios_job_scope_and_result_wiring() {
   # Same scope as maestro (macOS minutes cost ~10x Linux): dependencies changed or a PR into the default branch.
