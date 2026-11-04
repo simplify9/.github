@@ -162,6 +162,8 @@ blocked="$(grep -c . <<< "${attributable}" || true)"
 dests="$(tr '\n' ' ' <<< "${attributable}")"
 dests="${dests% }"
 verdict="$(flutter_e2e_verdict "${first}" "${rerun}" "${blocked}" "${NETWORK_RECHECK:-true}")"
+# A failure with the emulator gone is infrastructure, not the app (as in maestro.sh).
+case "${verdict}" in pass | flaky) ;; *) emulator_present || verify_infra_fail "the emulator disconnected during the tests" ;; esac
 # A timed-out run gets no network re-check, but the hosts it was refused still point at the cause.
 if [ "${verdict}" = fail ] && [ "${blocked}" -gt 0 ]; then
   echo "::notice title=[VERIFY] network::the block rejected traffic to ${blocked} destination(s) during the e2e step: ${dests}"
