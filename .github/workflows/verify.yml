@@ -8,7 +8,8 @@
 # Scope: the full ladder runs when the event is workflow_dispatch,
 # OR the PR base is the repo's default branch, OR the PR author is the bot
 # (input `bot-login`), OR a human PR changes critical-journey or integration test
-# files (.maestro/, e2e/, integration_test/, a Playwright config; .NET test projects),
+# files (.maestro/, e2e/, integration_test/, a Playwright config; .NET integration-test
+# projects such as *.IntegrationTests/, not unit or contract test projects),
 # which the `tests-probe` job checks, so new tests run before they reach develop.
 # Any other human PR into develop/development/staging skips every job except
 # `tests-probe` and `result`, which then passes (about 2 billed minutes).

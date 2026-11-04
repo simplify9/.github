@@ -82,14 +82,17 @@ strapi_changed_from_pr() {
 # tests_changed_from_list <newline-separated file paths> [stack] -> true|false
 # True when a PR changes critical-journey or integration test files: Maestro flows (.maestro/), e2e/
 # (Playwright specs, Mockoon mocks, allowed hosts), Flutter integration_test/, a Playwright config, and for
-# the .NET stacks a test-project directory (tests/, Tests/ or a name ending in Test or Tests, capital T so
-# Latest/ or Contests/ don't count). A human PR into develop that changes them gets the full ladder, so new
-# tests run before they reach develop instead of first failing a Renovate PR. Other stacks' unit-test
-# folders (__tests__, *.test.ts) stay out: they would send every mobile unit-test tweak through the
-# emulator ladder.
+# the .NET stacks an integration-test project: a directory named *Integration*Test(s) (SW.Api.IntegrationTests/)
+# or an integration folder under tests/ (tests/integration/). A human PR into develop that changes them gets
+# the full ladder, so new tests run before they reach develop instead of first failing a Renovate PR.
+# Unit and contract test projects (*.UnitTests/, *.ContractTests/, tests/Unit/) and other stacks' unit-test
+# folders (__tests__, *.test.ts) stay out: such a PR passes at once, like any other human develop PR.
+# ponytail: by name, as the probe has only the file list; verify's integration job finds Testcontainers
+# projects by content. Every enrolled one is named *IntegrationTests; one named otherwise first runs on
+# the promotion PR into the default branch or a Renovate PR.
 tests_changed_from_list() {
   local journeys='(^|/)(\.maestro|e2e|integration_test)/|(^|/)playwright\.config\.[cm]?[jt]s$'
-  local dotnet='(^|/)([Tt]ests?|[^/]*Tests?)/'
+  local dotnet='(^|/)[^/]*[Ii]ntegration[^/]*Tests?/|(^|/)[Tt]ests?/([^/]+/)*[Ii]ntegration[^/]*/'
   if grep -Eq "${journeys}" <<< "$1"; then echo true; return; fi
   case "${2:-}" in
     dotnet-service|dotnet-library) if grep -Eq "${dotnet}" <<< "$1"; then echo true; return; fi ;;
