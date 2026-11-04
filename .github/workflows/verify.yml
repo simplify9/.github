@@ -84,6 +84,13 @@ on:
         required: false
         type: string
         default: "17"
+      xcode-version:
+        description: >-
+          Xcode for the react-native iOS build, as ios-build.yml takes it (26, 16.4). Empty (the default): the
+          runner's own. Pass what your ios-build.yml caller passes.
+        required: false
+        type: string
+        default: ""
       flutter-version:
         description: Flutter version for the flutter stack.
         required: false
@@ -943,9 +950,20 @@ jobs:
           elif [ -f index.ts ]; then entry=index.ts
           else echo "::error title=[VERIFY] bundle::no index.js or index.ts entry file"; exit 1
           fi
+          # A release build ships Hermes bytecode, not this JS: compile each bundle with the app's own
+          # hermesc, as Gradle and Xcode do in release, unless the app turned Hermes off for that platform.
+          hermesc="$(find node_modules/react-native/sdks/hermesc node_modules/hermes-compiler -path '*linux64-bin/hermesc' -type f 2>/dev/null | head -n 1 || true)"
           for p in android ios; do
             npx react-native bundle --platform "$p" --dev false --entry-file "$entry" \
               --bundle-output "$RUNNER_TEMP/$p.bundle" --assets-dest "$RUNNER_TEMP/$p-assets"
+            if [ "$p" = android ] && grep -Eqs '^[[:space:]]*hermesEnabled[[:space:]]*=[[:space:]]*false' android/gradle.properties; then continue; fi
+            if [ "$p" = ios ] && grep -Eqs 'hermes_enabled[[:space:]]*(=>|:)[[:space:]]*false' ios/Podfile; then continue; fi
+            if [ -z "$hermesc" ]; then
+              echo "::notice title=[VERIFY] bundle::no hermesc in node_modules; the $p bundle was not compiled to Hermes bytecode"
+              continue
+            fi
+            "$hermesc" -emit-binary -O -out "$RUNNER_TEMP/$p.hbc" "$RUNNER_TEMP/$p.bundle"
+            echo "::notice title=[VERIFY] bundle::$p bundle compiled to Hermes bytecode ($(wc -c < "$RUNNER_TEMP/$p.hbc") bytes)"
           done
 
       - name: Collect outcomes
@@ -1055,6 +1073,14 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
+        with:
+          # The same parts as android-build.yml. actions/cache versions an entry by its path list, so
+          # with the same list this read-only run restores the Gradle home the deploy builds save on
+          # develop and main (configuration ~3.5 min faster, measured); without `wrapper` it never could.
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            wrapper
 
       - name: Install
         id: install
@@ -1069,7 +1095,7 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' android ') }}
         shell: bash
-        run: cd android && ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=x86_64
+        run: cd android && ./gradlew :app:assembleDebug --no-daemon -PreactNativeArchitectures=x86_64
 
       - name: Upload APK
         id: upload
@@ -1285,6 +1311,191 @@ jobs:
         uses: simplify9/.github/.github/actions/write-job-summary@main
         with:
           title: Verify maestro
+          status: ${{ job.status }}
+          details: |
+            | Field | Value |
+            |-------|-------|
+            | Failed | `${{ steps.collect.outputs.failed }}` |
+            | Warned (known failing) | `${{ steps.collect.outputs.warned }}` |
+
+  # React Native iOS: install the pods and build the app (Release, device SDK, unsigned), as ios-build.yml
+  # does minus signing and upload. Without it a lock refresh that moved a native module whose podspec
+  # needed a newer pod than ios/Podfile.lock pinned went green, merged, and every iOS release build then
+  # failed at pod install. Hosted macOS only (no self-hosted macOS runners; about 10x the Linux minute),
+  # so the same scope as maestro: dependencies changed or the PR targets the default branch. Caches are
+  # only restored, with the keys and paths ios-build.yml saves under, so the deploy builds keep them warm.
+  ios:
+    name: ios
+    needs: plan
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    runs-on: ${{ vars.S9_MACOS_RUNNER || 'macos-latest' }}
+    timeout-minutes: 60
+    outputs:
+      failed: ${{ steps.collect.outputs.failed }}
+      warned: ${{ steps.collect.outputs.warned }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      # A Release build would upload debug symbols where the app has the Sentry build phase.
+      SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+      IOS_PODS_PATH: ${{ inputs.working-directory == '.' && 'ios/Pods' || format('{0}/ios/Pods', inputs.working-directory) }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Detect the iOS project
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f ios/Podfile ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=[VERIFY] ios::no ios/Podfile - iOS build skipped"
+            exit 0
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+          # ios-build.yml callers pass ruby-version 3.1 with bundler; an app's own .ruby-version wins.
+          if [ -f Gemfile ]; then echo "bundler=true" >> "$GITHUB_OUTPUT"; else echo "bundler=false" >> "$GITHUB_OUTPUT"; fi
+          ruby=3.1
+          [ -f .ruby-version ] && ruby="$(head -n 1 .ruby-version | tr -d '[:space:]')"
+          echo "ruby=${ruby}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Ruby
+        if: ${{ steps.detect.outputs.present == 'true' && steps.detect.outputs.bundler == 'true' }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ steps.detect.outputs.ruby }}
+          bundler-cache: true
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Select Xcode
+        if: ${{ steps.detect.outputs.present == 'true' && inputs.xcode-version != '' }}
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+
+      # Same Node as the react-native job (see there).
+      - name: Node.js version
+        id: node
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup Node
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+          cache: yarn
+          cache-dependency-path: ${{ inputs.working-directory }}/yarn.lock
+
+      - name: Install
+        id: install
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' install ') || contains(format(' {0} ', needs.plan.outputs.known_failing), ' ios ') }}
+        shell: bash
+        run: yarn install --frozen-lockfile
+
+      # ccache, as ios-build.yml: React Native wires it into every target when USE_CCACHE=1 at pod install.
+      - name: Install ccache
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        shell: bash
+        run: command -v ccache >/dev/null 2>&1 || brew install ccache
+
+      - name: Restore ccache
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-ios-${{ runner.os }}-${{ hashFiles(format('{0}/ios/Podfile.lock', inputs.working-directory)) }}
+          restore-keys: |
+            ccache-ios-${{ runner.os }}-
+
+      - name: Restore pod specs
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cocoapods/repos
+          key: cocoapods-specs-${{ runner.os }}-${{ hashFiles(format('{0}/ios/Podfile.lock', inputs.working-directory)) }}
+          restore-keys: |
+            cocoapods-specs-${{ runner.os }}-
+
+      - name: Restore pods
+        if: ${{ steps.detect.outputs.present == 'true' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.IOS_PODS_PATH }}
+          key: pods-dir-${{ runner.os }}-${{ hashFiles(format('{0}/ios/Podfile.lock', inputs.working-directory)) }}
+          restore-keys: |
+            pods-dir-${{ runner.os }}-
+
+      # Plain `pod install`, as ios-build.yml runs it: a native module whose podspec needs another
+      # version than Podfile.lock pins fails here, the way it fails the release build.
+      - name: Pods
+        id: pods
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' ios ') }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}/ios
+        env:
+          BUNDLER: ${{ steps.detect.outputs.bundler }}
+          USE_CCACHE: '1'
+        run: |
+          set -euo pipefail
+          export CCACHE_DIR="$HOME/Library/Caches/ccache"
+          if [ "${BUNDLER}" = true ]; then bundle exec pod install; else pod install; fi
+
+      - name: Build (Release, unsigned)
+        id: build
+        if: ${{ !cancelled() && steps.pods.outcome == 'success' }}
+        continue-on-error: ${{ contains(format(' {0} ', needs.plan.outputs.known_failing), ' ios ') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CCACHE_DIR="$HOME/Library/Caches/ccache"
+          ws="$(find ios -maxdepth 1 -name '*.xcworkspace' ! -name 'Pods.xcworkspace' | head -n 1)"
+          if [ -z "${ws}" ]; then echo "::error title=[VERIFY] ios::no .xcworkspace in ios/ after pod install"; exit 1; fi
+          scheme="$(basename "${ws}" .xcworkspace)"
+          echo "::notice title=[VERIFY] ios::building ${ws}, scheme ${scheme}"
+          xcodebuild -workspace "${ws}" -scheme "${scheme}" -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO CLANG_ENABLE_EXPLICIT_MODULES=NO -quiet build
+          ccache --show-stats 2>/dev/null | grep -iE 'hits|misses' || true
+
+      - name: Collect outcomes
+        id: collect
+        if: always()
+        shell: bash
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          steps = json.loads(os.environ["STEPS"])
+          failed, warned = [], []
+          # One canonical id for the job; a failed install is reported under it too.
+          for i in ("install", "pods", "build"):
+              s = steps.get(i)
+              if not s or s.get("outcome") != "failure":
+                  continue
+              lst = warned if s.get("conclusion") == "success" else failed
+              if "ios" not in lst:
+                  lst.append("ios")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("failed=" + " ".join(failed) + "\n")
+              f.write("warned=" + " ".join(warned) + "\n")
+          PY
+
+      - name: Write summary
+        if: always()
+        uses: simplify9/.github/.github/actions/write-job-summary@main
+        with:
+          title: Verify ios
           status: ${{ job.status }}
           details: |
             | Field | Value |
@@ -1684,7 +1895,7 @@ jobs:
     name: result
     # `if: always()` is essential: a job whose needs were skipped is skipped, and
     # a skipped required check never reports. Verdict is computed from needs results.
-    needs: [tests-probe, plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, flutter, flutter-e2e, strapi]
+    needs: [tests-probe, plan, contract, node, dotnet, integration, docker-smoke, react-native, android, maestro, ios, flutter, flutter-e2e, strapi]
     if: always()
     runs-on: ${{ vars.S9_RUNNER || vars.S9_HOSTED_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
