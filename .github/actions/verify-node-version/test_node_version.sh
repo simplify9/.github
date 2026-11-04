@@ -20,6 +20,9 @@ eq dockerfile_non_numeric_tag "24 default" "$(node_version "$(repo Dockerfile 'F
 eq dockerfile_other_base "24 default" "$(node_version "$(repo Dockerfile 'FROM nginx:1.27\n')")"
 eq dockerfile_any_case "20 DockerFile" "$(node_version "$(repo DockerFile 'FROM node:20-alpine\n')")"
 eq nothing "24 default" "$(node_version "$(repo package.json '{}')")"
+# macOS runners (verify's ios job, ios-build.yml) run this with /bin/bash 3.2: no bash 4 syntax.
+# The whole file also passes there: /bin/bash test_node_version.sh on a Mac.
+eq bash32_safe "" "$(grep -nE '\$\{[A-Za-z_]+(,,?|\^\^?)\}|mapfile|readarray|declare -A|local -A' "${here}/node_version.sh")"
 
 
 # declared_mismatch <dir> <version>: "<file> <declared>" when the repo's .nvmrc/.node-version names a
