@@ -15,9 +15,11 @@ node_version() {
     fi
   done
   local name
-  for f in "${dir}"/*; do  # by lowercased name: DockerFile too (Linux runners are case-sensitive)
+  # By lowercased name: DockerFile too (Linux runners are case-sensitive). tr, not bash 4 case conversion: macOS
+  # runners run this with /bin/bash 3.2.
+  for f in "${dir}"/*; do
     name="$(basename "${f}")"
-    case "${name,,}" in dockerfile.dockerignore) continue ;; dockerfile | dockerfile.*) ;; *) continue ;; esac
+    case "$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')" in dockerfile.dockerignore) continue ;; dockerfile | dockerfile.*) ;; *) continue ;; esac
     [ -f "${f}" ] || continue
     v="$(sed -n -E 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?(docker\.io\/)?(library\/)?node:([0-9]+(\.[0-9]+)*).*/\4/p' "${f}" | head -n 1)"
     if [ -n "${v}" ]; then echo "${v} ${name}"; return; fi
