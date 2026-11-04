@@ -17,6 +17,11 @@ test_scope_dispatch_full() { eq "${FUNCNAME[0]}" true "$(verify_full workflow_di
 test_scope_nondefault_main_name() { eq "${FUNCNAME[0]}" true "$(verify_full pull_request releases/r8.0 releases/r8.0 alice "$BOT")"; }
 test_scope_develop_human_tests_changed_full() { eq "${FUNCNAME[0]}" true "$(verify_full pull_request develop main alice "$BOT" true)"; }
 test_scope_develop_human_tests_unchanged_skipped() { eq "${FUNCNAME[0]}" false "$(verify_full pull_request develop main alice "$BOT" false)"; }
+# A Node version file is a dependency: React Native and web build on the Node it names, so a bump gets
+# the full ladder, including the emulator journeys.
+test_deps_changed_nvmrc() { eq "${FUNCNAME[0]}" true "$(deps_changed_from_list '.nvmrc')"; }
+test_deps_changed_node_version_nested() { eq "${FUNCNAME[0]}" true "$(deps_changed_from_list $'README.md\napps/mobile/.node-version')"; }
+test_deps_changed_nvmrc_lookalike() { eq "${FUNCNAME[0]}" false "$(deps_changed_from_list $'docs/nvmrc.md\n.nvmrc.bak')"; }
 # tests_changed_from_list <files> [stack]: journey/integration test files send a human develop PR through the full ladder
 test_tests_changed_maestro() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'src/App.tsx\n.maestro/login.yaml' react-native)"; }
 test_tests_changed_e2e_nested() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'apps/web/e2e/login.spec.ts' web)"; }

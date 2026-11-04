@@ -32,14 +32,21 @@ eq alias_not_compared "" "$(declared_mismatch "$(repo .nvmrc 'lts/*\n')" 24)"
 eq dockerfile_not_a_declaration "" "$(declared_mismatch "$(repo Dockerfile 'FROM node:26-alpine\n')" 24)"
 eq no_file "" "$(declared_mismatch "$(repo package.json '{}')" 24)"
 
-# React Native apps ship on the Node that android-build.yml and ios-build.yml build with (their
-# node-version default; no caller overrides it). Every `inputs.node-version || '<N>'` fallback in
-# verify.yml (the react-native, android and maestro jobs) must be that same Node.
+# React Native: the build workflows (android-build.yml, ios-build.yml) and verify resolve Node the same
+# way, through this action (the node-version input, else .nvmrc / .node-version, else 24). So a Node bump
+# in the app is built AND tested on the new Node, and what verify tests is what ships.
 wf="${here}/../../workflows"
 build_default() { awk '/^      node-version:$/ {f = 1} f && /^        default:/ {gsub(/[" ]/, ""); sub(/default:/, ""); print; exit}' "$1"; }
-eq android_build_node_default "24" "$(build_default "${wf}/android-build.yml")"
-eq ios_build_node_default "$(build_default "${wf}/android-build.yml")" "$(build_default "${wf}/ios-build.yml")"
-eq verify_rn_fallbacks_match_builds "$(build_default "${wf}/android-build.yml")" \
-  "$(grep -o "inputs.node-version || '[^']*'" "${wf}/verify.yml" | sed "s/.*|| '//; s/'//" | sort -u | tr '\n' ' ' | sed 's/ $//')"
+setup_node_versions() { awk '/uses: actions\/setup-node/ {n = NR} n && NR <= n + 3 && /node-version:/ {sub(/.*node-version: /, ""); print; n = 0}' "$1" | sort -u; }
+for f in android-build.yml ios-build.yml; do
+  eq "${f}_node_input_default_empty" "" "$(build_default "${wf}/${f}")"
+done
+for f in android-build.yml ios-build.yml verify.yml; do
+  eq "${f}_every_setup_node_reads_the_resolver" "\${{ steps.node.outputs.version }}" "$(setup_node_versions "${wf}/${f}")"
+  case "$(grep -c 'uses: simplify9/.github/.github/actions/verify-node-version@main' "${wf}/${f}")" in
+    0) eq "${f}_uses_the_resolver" "verify-node-version" "missing" ;; *) eq "${f}_uses_the_resolver" ok ok ;;
+  esac
+done
+eq no_fixed_node_fallback_left "" "$(grep -ho "inputs.node-version || '[^']*'" "${wf}/android-build.yml" "${wf}/ios-build.yml" "${wf}/verify.yml")"
 
 [ "${fails}" -eq 0 ] && echo "ALL PASS" || { echo "${fails} FAILED"; exit 1; }

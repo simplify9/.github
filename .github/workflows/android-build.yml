@@ -80,10 +80,13 @@ on:
         type: string
         default: "27.1.12297006"
       node-version:
-        description: Node version for JS dependency install
+        description: >-
+          Node.js version. Empty (the default): the app's own, from .nvmrc or .node-version in the
+          package directory, else 24 (the same rule verify uses, so a Node bump is tested and shipped
+          on the new Node).
         required: false
         type: string
-        default: "24"
+        default: ""
       java-version:
         description: Java version for Android builds
         required: false
@@ -558,10 +561,19 @@ jobs:
             echo "jetifier_run_command=${JETIFIER_RUN_COMMAND}"
           } >> "$GITHUB_OUTPUT"
 
+      # The app's own Node: the input, else .nvmrc / .node-version in the package directory, else 24.
+      # verify resolves it the same way, so what it tested is what this builds.
+      - name: Node.js version
+        id: node
+        uses: simplify9/.github/.github/actions/verify-node-version@main
+        with:
+          working-directory: ${{ inputs.package-manager-directory || '.' }}
+          node-version: ${{ inputs.node-version }}
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ steps.node.outputs.version }}
           cache: ${{ steps.package_manager.outputs.cache }}
           cache-dependency-path: ${{ 
             steps.package_manager.outputs.cache_dependency_path }}
