@@ -29,7 +29,14 @@ test_tests_changed_e2e_mocks() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_
 test_tests_changed_flutter_integration() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'integration_test/app_test.dart' flutter)"; }
 test_tests_changed_playwright_config() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'playwright.config.mjs' web)"; }
 test_tests_changed_dotnet_test_project() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'SW.Api.IntegrationTests/HealthTests.cs' dotnet-service)"; }
-test_tests_changed_dotnet_tests_dir() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'tests/Unit/CounterTests.cs' dotnet-library)"; }
+test_tests_changed_dotnet_tests_integration_dir() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'tests/integration/CounterStoreTests.cs' dotnet-library)"; }
+test_tests_changed_dotnet_nested_integration_project() { eq "${FUNCNAME[0]}" true "$(tests_changed_from_list $'tests/Sbx.IntegrationTests/DbTests.cs' dotnet-service)"; }
+# Unit and contract test projects are not journey or integration tests: a human develop PR that changes
+# them passes at once, like any other develop PR (gig-onlineselling-api #237 changed only a UnitTests file).
+test_tests_changed_false_dotnet_unit_project() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'SW.GigOnlineSelling.UnitTests/MotorInspectionTests.cs\nSW.GigOnlineSelling.Web/Services/MotorInspection/MotorInspectionRules.cs\nSW.GigOnlineSelling.Web/BusConsumers/PolicySubmitedIntegrationHandler.cs' dotnet-service)"; }
+test_tests_changed_false_dotnet_tests_unit_dir() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'tests/Unit/CounterTests.cs\ntests/Sbx.Tests/SbxTests.cs' dotnet-library)"; }
+test_tests_changed_false_dotnet_contract_project() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'SW.TraxisShip.ContractTests/ShipmentContractTests.cs' dotnet-service)"; }
+test_tests_changed_false_dotnet_app_integrations_dir() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'SW.Api/Integrations/PaymentGateway.cs' dotnet-service)"; }
 test_tests_changed_dotnet_dir_only_for_dotnet() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'SW.Api.IntegrationTests/HealthTests.cs' web)"; }
 test_tests_changed_false_unit_tests_mobile() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'__tests__/App.test.tsx\nsrc/screens/Login.tsx' react-native)"; }
 test_tests_changed_false_lowercase_suffix() { eq "${FUNCNAME[0]}" false "$(tests_changed_from_list $'src/Latest/Feed.cs\nsrc/Contests/List.cs' dotnet-service)"; }
