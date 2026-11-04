@@ -150,5 +150,32 @@ test_emulator_journeys_run_when_tests_changed() {
     *) eq "${FUNCNAME[0]}_plan_output" "plan exposes tests_changed" "missing" ;;
   esac
 }
+# iOS (2026-11-04): a new step, so tolerated for react-native until its own deadline (or the repo's later one).
+test_new_step_ios_tolerated_for_react_native() {
+  case " $(new_steps_tolerated '' 2026-11-10 react-native) " in *" ios "*) eq "${FUNCNAME[0]}" ok ok ;; *) eq "${FUNCNAME[0]}" "ios tolerated" "missing" ;; esac
+}
+test_new_step_ios_enforced_after_its_deadline() {
+  case " $(new_steps_tolerated 2026-12-21 2027-01-05 react-native) " in *" ios "*) eq "${FUNCNAME[0]}" "enforced" "still tolerated" ;; *) eq "${FUNCNAME[0]}" ok ok ;; esac
+}
+test_new_step_ios_not_other_stacks() {
+  case " $(new_steps_tolerated '' 2026-11-10 web) $(new_steps_tolerated '' 2026-11-10 flutter) " in *" ios "*) eq "${FUNCNAME[0]}" "react-native only" "leaked" ;; *) eq "${FUNCNAME[0]}" ok ok ;; esac
+}
+test_ios_job_scope_and_result_wiring() {
+  # Same scope as maestro (macOS minutes cost ~10x Linux): dependencies changed or a PR into the default branch.
+  case "$(job_if ios)" in
+    *"inputs.stack == 'react-native'"*"needs.plan.outputs.deps_changed == 'true'"*"github.base_ref == github.event.repository.default_branch"*) eq "${FUNCNAME[0]}_if" ok ok ;;
+    *) eq "${FUNCNAME[0]}_if" "react-native, deps changed or default branch" "$(job_if ios)" ;;
+  esac
+  case "$(awk '/^  result:$/ {f = 1} f && /^    needs:/ {print; exit}' "${here}/../../workflows/verify.yml")" in
+    *" ios,"* | *" ios]"*) eq "${FUNCNAME[0]}_result_needs" ok ok ;; *) eq "${FUNCNAME[0]}_result_needs" "result needs ios" "missing" ;;
+  esac
+}
+test_android_gradle_cache_matches_deploy_build() {
+  # actions/cache versions an entry by its path list: verify restores the deploy build's Gradle cache only
+  # when both list the same Gradle User Home parts (it never did: verify lacked `wrapper`).
+  local inc='/gradle-home-cache-includes:/ {f = 1; next} f && /^ +[a-z.-]+$/ {gsub(/ /, ""); printf "%s ", $0; next} f {exit}'
+  eq "${FUNCNAME[0]}" "$(awk "${inc}" "${here}/../../workflows/android-build.yml")" \
+    "$(awk '/^  android:$/ {j = 1} j' "${here}/../../workflows/verify.yml" | awk "${inc}")"
+}
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

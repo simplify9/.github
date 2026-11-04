@@ -12,7 +12,7 @@ import os
 # Emulator jobs and the step id that tolerates them. Such a job can die with its runner (out of memory
 # on a 2-vCPU hosted runner) before its collect step runs: then no step recorded a failure, and while
 # the step id is still tolerated (known-failing) the lost job is a warning, not a red check.
-TOLERATED_JOBS = {"flutter-e2e": "e2e", "maestro": "maestro"}
+TOLERATED_JOBS = {"flutter-e2e": "e2e", "maestro": "maestro", "ios": "ios"}
 
 # The ladder jobs a full run of each stack must actually run. A skipped one means nothing was
 # tested: GitHub skips every job below a skipped ancestor, and #225 once passed Renovate PRs that

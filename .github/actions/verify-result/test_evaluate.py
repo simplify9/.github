@@ -30,6 +30,17 @@ class Verdict(unittest.TestCase):
         self.assertEqual(status, "success")
         self.assertIn("maestro", report["warned"])
 
+    def test_lost_ios_runner_is_warned_while_tolerated(self):
+        # The hosted macOS job can lose its runner like maestro; while `ios` is still a tolerated new
+        # step (scope.sh NEW_STEPS) that is a warning, not a red check.
+        status, _, report = e.evaluate(needs(react_native="success", ios="cancelled"), True, "main", "ios", "react-native")
+        self.assertEqual(status, "success")
+        self.assertIn("ios", report["warned"])
+
+    def test_ios_failure_blocks_once_enforced(self):
+        status, _, _ = e.evaluate(needs(react_native="success", ios=("failure", "ios")), True, "main", "", "react-native")
+        self.assertEqual(status, "failure")
+
     def test_crashed_job_not_tolerated_fails(self):
         status, line, _ = e.evaluate(needs(flutter_e2e="failure"), True, "main", "network")
         self.assertEqual(status, "failure")
