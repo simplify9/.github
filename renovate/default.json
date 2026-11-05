@@ -33,6 +33,8 @@
       "matchDatasources": ["npm"], "minimumReleaseAge": "7 days" },
     { "description": "Docker registries give Renovate no release timestamps, and Renovate 44 treats an update without one as too young forever (minimumReleaseAgeBehaviour timestamp-required), so it never updated a base image (FROM node, dotnet, nginx) and dropped them from branches silently. The age of a Docker tag cannot be measured: let those updates through",
       "matchDatasources": ["docker"], "minimumReleaseAgeBehaviour": "timestamp-optional" },
+    { "description": "A lock file refresh has no release timestamp either, so under timestamp-required its renovate/stability-days stayed pending forever. Where Renovate merges by itself (platformAutomerge off: repos whose develop needs the App's approval bypass) it waits for every status, so no lock refresh ever merged there. The age gate in front of the registries already holds every lock version to 7 days",
+      "matchUpdateTypes": ["lockFileMaintenance"], "minimumReleaseAgeBehaviour": "timestamp-optional" },
     { "description": "0.x minors can break: own branch, dashboard approval, never automerged (regex matcher works for every datasource, unlike isBreaking)",
       "matchCurrentVersion": "/^v?0\\./", "matchUpdateTypes": ["minor"],
       "groupName": null, "dependencyDashboardApproval": true, "automerge": false },
