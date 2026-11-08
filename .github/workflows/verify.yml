@@ -1067,7 +1067,7 @@ jobs:
 
       # No `cache: gradle` here: setup-gradle owns Gradle home caching (AGENTS.md).
       - name: Setup Java
-        uses: actions/setup-java@v6.1.0
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
@@ -1233,7 +1233,7 @@ jobs:
 
       - name: Setup Java
         if: ${{ !cancelled() && steps.flow.outputs.present == 'true' && steps.apk.outcome == 'success' }}
-        uses: actions/setup-java@v6.1.0
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
@@ -1545,7 +1545,7 @@ jobs:
 
       # Same JDK setup as flutter-android-build.yml; office images may lack one.
       - name: Setup Java
-        uses: actions/setup-java@v6.1.0
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
@@ -1683,7 +1683,7 @@ jobs:
 
       - name: Setup Java
         if: ${{ steps.probe.outputs.present == 'true' }}
-        uses: actions/setup-java@v6.1.0
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
