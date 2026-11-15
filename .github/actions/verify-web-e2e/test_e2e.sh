@@ -51,5 +51,13 @@ test_after_retry() {
   eq "${FUNCNAME[0]}_pass" network "$(e2e_after_retry 0)"
   eq "${FUNCNAME[0]}_fail" fail "$(e2e_after_retry 1)"
 }
+# Playwright before 1.60 stalls after the browser download on Node 26+ (measured: 1.49.1, 1.50.1,
+# 1.53.2, 1.56.1, 1.58.2, 1.59.1 hang; 1.60.0 and 1.65.1 finish; 1.49.1 finishes on Node 22).
+test_installer_hangs_old_playwright_node26() { eq "${FUNCNAME[0]}" yes "$(e2e_installer_hangs 1.49.1 26)"; }
+test_installer_hangs_1_59_node27() { eq "${FUNCNAME[0]}" yes "$(e2e_installer_hangs 1.59.1 27)"; }
+test_installer_ok_1_60_node26() { eq "${FUNCNAME[0]}" no "$(e2e_installer_hangs 1.60.0 26)"; }
+test_installer_ok_old_playwright_node24() { eq "${FUNCNAME[0]}" no "$(e2e_installer_hangs 1.45.0 24)"; }
+test_installer_ok_unknown_version() { eq "${FUNCNAME[0]}" no "$(e2e_installer_hangs '' 26)"; }
+
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi

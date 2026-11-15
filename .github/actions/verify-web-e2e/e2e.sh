@@ -65,6 +65,14 @@ e2e_after_retry() {
   if [ "$1" -eq 0 ]; then echo network; else echo fail; fi
 }
 
+# e2e_installer_hangs <playwright version> <node major>: yes when Playwright's browser installer
+# stalls after the download on this Node (every release before 1.60 does on Node 26+), else no.
+e2e_installer_hangs() {
+  local major minor
+  IFS=. read -r major minor _ <<< "$1"
+  if [ "$2" -ge 26 ] && [ "${major:-0}" = 1 ] && [ "${minor:-60}" -lt 60 ]; then echo yes; else echo no; fi
+}
+
 [ "${E2E_SH_LIB:-}" = 1 ] && return 0
 
 set -euo pipefail
@@ -80,7 +88,17 @@ e2e_scan_committed "${ACTION_PATH}/../verify-secret-scan/scan.py" || exit 1
 netblock_hosts e2e/allowed-hosts.txt >/dev/null
 
 # Everything that needs the internet happens before the block.
-npx playwright install --with-deps chromium
+# The browser files don't depend on the Node that downloads them, so an installer that stalls on
+# the repo's Node runs on the runner's Node 24; the journeys still run on the repo's Node.
+pw="$(npx playwright --version | awk '{print $2}')"
+node24=""
+for d in "${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}"/node/24.*/*/bin; do [ -x "${d}/node" ] && node24="${d}"; done
+if [ "$(e2e_installer_hangs "${pw}" "$(node -p 'process.versions.node.split(".")[0]')")" = yes ] && [ -n "${node24}" ]; then
+  echo "::warning title=[VERIFY] e2e::Playwright ${pw} stalls installing browsers on Node $(node -v) (fixed in 1.60), so verify installed them with Node 24. Update @playwright/test to 1.60 or later."
+  PATH="${node24}:${PATH}" npx playwright install --with-deps chromium
+else
+  npx playwright install --with-deps chromium
+fi
 if [ -f e2e/mocks.json ]; then
   mockoon_install
 fi
