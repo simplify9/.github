@@ -59,5 +59,24 @@ test_installer_ok_1_60_node26() { eq "${FUNCNAME[0]}" no "$(e2e_installer_hangs 
 test_installer_ok_old_playwright_node24() { eq "${FUNCNAME[0]}" no "$(e2e_installer_hangs 1.45.0 24)"; }
 test_installer_ok_unknown_version() { eq "${FUNCNAME[0]}" no "$(e2e_installer_hangs '' 26)"; }
 
+# The browser install gets a time limit, so a stalled installer fails the step with a reason
+# instead of running until the job is cancelled.
+test_browser_install_success() {
+  eq "${FUNCNAME[0]}" "0:" "$(out="$(E2E_INSTALL_TIMEOUT=5 e2e_browser_install true)"; echo "$?:${out}")"
+}
+test_browser_install_keeps_failure() {
+  eq "${FUNCNAME[0]}" "3:" "$(out="$(E2E_INSTALL_TIMEOUT=5 e2e_browser_install sh -c 'exit 3')"; echo "$?:${out}")"
+}
+test_browser_install_times_out() {
+  out="$(E2E_INSTALL_TIMEOUT=1 e2e_browser_install sleep 5)"; rc=$?
+  eq "${FUNCNAME[0]}_rc" 124 "${rc}"
+  case "${out}" in *"::error title=[VERIFY] e2e::playwright install did not finish in 1 s"*) r=ok ;; *) r="${out}" ;; esac
+  eq "${FUNCNAME[0]}_message" ok "${r}"
+}
+# shellcheck disable=SC2016 # $PATH must expand in the child shell, not here
+test_browser_install_keeps_path_prefix() { # the Node 24 switch prefixes PATH on the call
+  eq "${FUNCNAME[0]}" /node24/bin "$(PATH="/node24/bin:${PATH}" e2e_browser_install sh -c 'echo "${PATH%%:*}"')"
+}
+
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
