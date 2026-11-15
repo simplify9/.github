@@ -73,6 +73,18 @@ e2e_installer_hangs() {
   if [ "$2" -ge 26 ] && [ "${major:-0}" = 1 ] && [ "${minor:-60}" -lt 60 ]; then echo yes; else echo no; fi
 }
 
+# e2e_browser_install <command...>: Playwright's browser install with a time limit
+# (E2E_INSTALL_TIMEOUT seconds, default 600; a normal install takes under 2 minutes), so a stalled
+# installer fails the e2e step with a reason instead of running until the job is cancelled.
+e2e_browser_install() {
+  local limit="${E2E_INSTALL_TIMEOUT:-600}" rc=0
+  timeout -k 30 "${limit}" "$@" || rc=$?
+  if [ "${rc}" -eq 124 ] || [ "${rc}" -eq 137 ]; then
+    echo "::error title=[VERIFY] e2e::playwright install did not finish in ${limit} s (Playwright ${pw:-unknown}, Node $(node -v 2>/dev/null || echo unknown)). A Playwright that does not support this Node can stall here: update @playwright/test"
+  fi
+  return "${rc}"
+}
+
 [ "${E2E_SH_LIB:-}" = 1 ] && return 0
 
 set -euo pipefail
@@ -95,9 +107,9 @@ node24=""
 for d in "${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}"/node/24.*/*/bin; do [ -x "${d}/node" ] && node24="${d}"; done
 if [ "$(e2e_installer_hangs "${pw}" "$(node -p 'process.versions.node.split(".")[0]')")" = yes ] && [ -n "${node24}" ]; then
   echo "::warning title=[VERIFY] e2e::Playwright ${pw} stalls installing browsers on Node $(node -v) (fixed in 1.60), so verify installed them with Node 24. Update @playwright/test to 1.60 or later."
-  PATH="${node24}:${PATH}" npx playwright install --with-deps chromium
+  PATH="${node24}:${PATH}" e2e_browser_install npx playwright install --with-deps chromium
 else
-  npx playwright install --with-deps chromium
+  e2e_browser_install npx playwright install --with-deps chromium
 fi
 if [ -f e2e/mocks.json ]; then
   mockoon_install
