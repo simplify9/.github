@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Offline check: does every workflow-template grant what its reusable workflow requests?
+"""Offline check: does every workflow-template grant what its reusable workflow requests,
+and does the verify template always report its required check?
 
 A template's `permissions:` becomes the ceiling for the reusable workflow it
 calls. If any job in that workflow requests more, a repo created from the
@@ -16,7 +17,8 @@ import yaml
 
 sys.dont_write_bytecode = True  # importing the sibling must not leave __pycache__ in the repo
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from audit_caller_permissions import RANK, SCOPES, expand, requested  # noqa: E402
+from audit_caller_permissions import (  # noqa: E402
+    RANK, REQUIRED_CHECK, SCOPES, expand, required_check_gaps, requested)
 
 # Templates are copied into new repos, which get the org default ('write' today);
 # only an explicit block can under-grant, so treat "no block" as permissive.
@@ -35,10 +37,12 @@ def main():
             bad = sorted({f"{j}:{s}={lvl}>{ceil[s]}"
                           for j, p in requested(f".github/workflows/{m.group(1)}").items()
                           for s, lvl in p.items() if RANK[lvl] > RANK[ceil[s]]})
+            if m.group(1) in REQUIRED_CHECK:
+                bad += required_check_gaps(doc, job)
             failures += bool(bad)
             print(f"  {tpl.name:34} {jname:14} -> {m.group(1):32} "
                   + ("FAIL " + ", ".join(bad) if bad else "ok"))
-    print(f"\n{failures} template job(s) would fail to start.")
+    print(f"\n{failures} template job(s) would fail to start or block merging.")
     sys.exit(1 if failures else 0)
 
 
