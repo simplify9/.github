@@ -19,7 +19,7 @@ This repository is the **organization-wide shared CI/CD library** for Simplify9.
 └── profile/README.md       <- org profile page
 ```
 
-`scripts/fleet/audit_template_permissions.py` (offline) checks that every template grants what its reusable workflow requests; `scripts/fleet/audit_caller_permissions.py <workflow>` (needs `gh`) checks that every org caller still starts after a `permissions:` change. Both exit 1 on any failure.
+`scripts/fleet/audit_template_permissions.py` (offline) checks that every template grants what its reusable workflow requests; `scripts/fleet/audit_caller_permissions.py <workflow>` (needs `gh`) checks that every org caller still starts after a `permissions:` change. For `verify.yml` both also fail a caller that can leave a PR without `verify / result` (a job `if:` or a `pull_request` paths filter: GitHub judges a required check by the newest run, so a run without it blocks merging; `test_required_check_gaps.py`). Both exit 1 on any failure. A caller change that adds, skips or splits runs is proven by the PR's `mergeStateStatus` after each event (edit, retarget, push), not by the check list alone.
 
 Every file in `.github/workflows/` is a **reusable workflow** — it has `on: workflow_call:` (and occasionally `on: workflow_dispatch:`) and is never run standalone. Every directory in `.github/actions/` is a **composite action** with its own `action.yml`, except the script-only helpers `verify-secret-scan`, `verify-netblock`, `verify-mocks` and `verify-emulator`, which other actions call by path. Every file in `workflow-templates/` is a thin starter caller (paired with a `.properties.json` metadata sidecar) that GitHub offers when a user clicks "New workflow" in an org repo.
 

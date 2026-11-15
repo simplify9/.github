@@ -11,7 +11,8 @@ This script reads what each job of the LOCAL workflow file requests, finds every
 caller across the org (code search on default branches + a direct scan of the
 listed branches, since push-triggered callers run the file on the pushed
 branch), computes each caller job's effective ceiling, and exits 1 if any caller
-would fail to start.
+would fail to start. For verify.yml it also exits 1 if a caller can leave a PR
+without `verify / result` (required_check_gaps).
 
 Usage:
   scripts/fleet/audit_caller_permissions.py .github/workflows/vite-cloudflare-worker.yml
@@ -63,6 +64,23 @@ def requested(workflow):
         if perm is not None:
             out[name] = {s: lvl for s, lvl in expand(perm, {}).items() if lvl != "none"}
     return out
+
+
+# Reusable workflows whose result is a required check (`verify / result` in the org ruleset).
+REQUIRED_CHECK = {"verify.yml"}
+
+
+def required_check_gaps(doc, job):
+    """Ways a caller can leave a PR without its required check. GitHub judges the check by the
+    newest pull_request run of the caller: a run that skips the job (a job `if:`) blocks merging
+    even after an earlier run passed (.github #226), and a PR the trigger ignores (a paths filter)
+    never gets the check at all."""
+    gaps = ["job if: a run that skips it blocks merging"] if "if" in job else []
+    on = doc.get("on", doc.get(True))  # PyYAML reads the bare key `on` as True
+    pr = on.get("pull_request") if isinstance(on, dict) else None
+    if isinstance(pr, dict) and {"paths", "paths-ignore"} & pr.keys():
+        gaps.append("pull_request paths filter: an ignored PR never gets the check")
+    return gaps
 
 
 def org_default(org):
@@ -118,13 +136,15 @@ def main():
                     ceil[s] = lvl
             bad = [f"{j}:{s}={l}>{ceil[s]}" for j, p in req.items()
                    for s, l in p.items() if RANK[l] > RANK[ceil[s]]]
+            if wf_name in REQUIRED_CHECK:
+                bad += required_check_gaps(doc, job)
             failures += bool(bad)
             rows.append((repo.split("/")[1], br, jname, "FAIL " + ", ".join(bad) if bad else "ok"))
 
     w = max((len(r[0]) for r in rows), default=4)
     for r in sorted(rows):
         print(f"  {r[0]:<{w}}  {r[1]:<8} {r[2]:<12} {r[3]}")
-    print(f"\n{len(rows)} caller jobs, {failures} would fail to start.")
+    print(f"\n{len(rows)} caller jobs, {failures} would fail to start or block merging.")
     sys.exit(1 if failures else 0)
 
 
