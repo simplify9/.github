@@ -11,8 +11,9 @@
     { "description": "iOS toolchain (CocoaPods and the Ruby gems behind it): verify has no iOS build, so a person merges these after an iOS build",
       "matchManagers": ["cocoapods", "bundler"],
       "groupName": "ios toolchain", "groupSlug": "ios-toolchain", "automerge": false },
-    { "description": "Flutter SDK constraint changes need a human: dashboard approval, never automerged",
-      "matchDepNames": ["flutter"], "dependencyDashboardApproval": true, "automerge": false },
+    { "description": "Flutter SDK pin (the exact environment.flutter in pubspec.yaml, which verify and the deploys use): its own PR, in which Renovate regenerates pubspec.lock on the new Flutter; dashboard approval, never automerged. Its own group, because an update waiting for approval holds its whole branch, and in the non-major group it held every routine update",
+      "matchDatasources": ["flutter-version"],
+      "groupName": "flutter", "groupSlug": "flutter-sdk", "dependencyDashboardApproval": true, "automerge": false },
     { "description": "Resolved from the Flutter SDK, not Maven: the lookup always fails",
       "matchDepNames": ["dev.flutter.flutter-plugin-loader"], "enabled": false }
   ]

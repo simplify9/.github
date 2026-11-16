@@ -57,11 +57,12 @@ on:
       flutter-version:
         description: >
           Flutter version selector for subosito/flutter-action (for example
-          "3.x" or an exact "3.27.1"). Pin an exact version for reproducible
-          builds. Default "3.x" reproduces the laflef reference.
+          "3.x" or an exact "3.27.1"). Empty (default): the exact
+          environment.flutter in the project's pubspec.yaml, the version verify
+          tests and Renovate keeps current; else the latest 3.x, as before.
         required: false
         type: string
-        default: "3.x"
+        default: ""
       flutter-channel:
         description: Flutter release channel for subosito/flutter-action
         required: false
@@ -385,10 +386,17 @@ jobs:
             notifications
             wrapper
 
+      - name: Flutter version
+        id: flutter-version
+        uses: simplify9/.github/.github/actions/verify-flutter-version@main
+        with:
+          working-directory: ${{ inputs.project-directory }}
+          flutter-version: ${{ inputs.flutter-version }}
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ inputs.flutter-version }}
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           channel: ${{ inputs.flutter-channel }}
           # Self-hosted runner images carry the Flutter SDK already; restoring a
           # multi-GB cache over the network there only costs time and quota.
