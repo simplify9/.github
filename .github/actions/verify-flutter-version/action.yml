@@ -1,0 +1,38 @@
+name: 'Verify: Flutter version'
+description: >-
+  The Flutter version to set up: the caller's flutter-version input, else the exact environment.flutter
+  in the project's pubspec.yaml, else the latest 3.x with a warning (flutter_version.sh). An unpinned
+  Flutter changes with no PR: a new release can break every build at once (Flutter 3.50 made a lock
+  file stale overnight). With the pin, Renovate proposes each new Flutter as a PR that also updates
+  pubspec.lock, verify tests it, and the deploy builds use the same version.
+inputs:
+  working-directory:
+    description: Directory with pubspec.yaml.
+    required: false
+    default: '.'
+  flutter-version:
+    description: The caller's explicit flutter-version input (empty = resolve from pubspec.yaml).
+    required: false
+    default: ''
+outputs:
+  version:
+    description: The version to hand to subosito/flutter-action.
+    value: ${{ steps.resolve.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        DIR: ${{ inputs.working-directory }}
+        EXPLICIT: ${{ inputs.flutter-version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        source "${ACTION_PATH}/flutter_version.sh"
+        read -r version source < <(flutter_version "${DIR}" "${EXPLICIT}")
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+        echo "::notice title=[VERIFY] Flutter::${version} (from ${source})"
+        if [ "${source}" = default ]; then
+          echo "::warning title=[VERIFY] Flutter::Flutter is not pinned, so this uses the latest ${version}, which changes with no PR. Add an exact version to pubspec.yaml (environment: flutter: x.y.z, for example the one in 'flutter --version'): Renovate then proposes each new Flutter as a PR that also updates pubspec.lock."
+        fi

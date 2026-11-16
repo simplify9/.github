@@ -93,10 +93,10 @@ on:
         type: string
         default: ""
       flutter-version:
-        description: Flutter version for the flutter stack.
+        description: Flutter version for the flutter stack. Empty = the exact environment.flutter in pubspec.yaml, else the latest 3.x with a warning (verify-flutter-version).
         required: false
         type: string
-        default: "3.x"
+        default: ""
       smoke-path:
         description: "HTTP path the docker smoke test probes. Empty: /health for dotnet-service (on by default), off for dotnet-library. 'none' turns it off."
         required: false
@@ -1550,10 +1550,17 @@ jobs:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
+      - name: Flutter version
+        id: flutter-version
+        uses: simplify9/.github/.github/actions/verify-flutter-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          flutter-version: ${{ inputs.flutter-version }}
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ inputs.flutter-version }}
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
 
       - name: Install
@@ -1688,11 +1695,19 @@ jobs:
           distribution: temurin
           java-version: ${{ inputs.java-version }}
 
+      - name: Flutter version
+        if: ${{ steps.probe.outputs.present == 'true' }}
+        id: flutter-version
+        uses: simplify9/.github/.github/actions/verify-flutter-version@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          flutter-version: ${{ inputs.flutter-version }}
+
       - name: Setup Flutter
         if: ${{ steps.probe.outputs.present == 'true' }}
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ inputs.flutter-version }}
+          flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
 
       # Hermetic: the emulator (where the app and its tests run) and Mockoon run with outbound network

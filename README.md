@@ -718,7 +718,7 @@ Builds and signs a **Flutter** iOS app on a macOS runner, exports an IPA via `fl
 |---|---|---|---|
 | `macos-runner` | | `macos-latest` | macOS runner label (e.g. `macos-26`) |
 | `xcode-version` | | `""` | Xcode selector via `maxim-lobanov/setup-xcode` (empty = runner default) |
-| `flutter-version` | | `3.x` | `subosito/flutter-action` version selector (pin exact for reproducible builds) |
+| `flutter-version` | | `""` | `subosito/flutter-action` version selector. Empty: the exact `environment: flutter:` in the project's `pubspec.yaml` (the version verify tests), else `3.x` |
 | `flutter-channel` | | `stable` | Flutter channel |
 | `project-directory` | | `.` | Flutter project root relative to repo root (set to e.g. `mobile` for a monorepo); `ios-dir`/`pbxproj-path` resolve under it |
 | `ios-dir` | | `ios` | iOS project directory (Podfile + Runner project) |
@@ -773,7 +773,7 @@ Builds and signs a **Flutter** Android App Bundle (AAB) via `flutter build appbu
 | `app-id` | Yes | — | Android `applicationId` / Play package name |
 | `app-slug` | | `app` | Output AAB filename slug |
 | `project-directory` | | `.` | Flutter project root relative to repo root (set to e.g. `mobile` for a monorepo) |
-| `flutter-version` | | `3.x` | `subosito/flutter-action` version selector (pin exact for reproducible builds) |
+| `flutter-version` | | `""` | `subosito/flutter-action` version selector. Empty: the exact `environment: flutter:` in the project's `pubspec.yaml` (the version verify tests), else `3.x` |
 | `flutter-channel` | | `stable` | Flutter channel |
 | `java-version` | | `17` | Java version (temurin) |
 | `version-prefix` | | `1.0.0` | Base version (X.Y or X.Y.Z) |
@@ -867,7 +867,7 @@ One reusable workflow that runs the per-stack verification ladder for a PR and r
 | `dotnet-version` | | `10.0.x` | .NET SDK (dotnet stacks) |
 | `java-version` | | `17` | Java (Android builds, Flutter) |
 | `xcode-version` | | (empty) | Xcode for the `react-native` iOS build, as `ios-build.yml` takes it (`26`, `16.4`). Empty: the runner's own. Pass what your `ios-build.yml` caller passes |
-| `flutter-version` | | `3.x` | Flutter (flutter stack) |
+| `flutter-version` | | `""` | Flutter (flutter stack). Empty: the exact `environment: flutter:` in `pubspec.yaml`, else the latest `3.x` with a warning (`verify-flutter-version`) |
 | `smoke-path` | | `''` | HTTP path probed by `docker-smoke` (opt-in). Empty or `none`: no smoke. The on-by-default `/health` smoke for `dotnet-service` is paused (see below) |
 | `docker-build-github-token` | | `false` | Boolean, opt-in. Mounts the job's `GITHUB_TOKEN` into the docker build as the BuildKit secret `GITHUB_TOKEN` (`RUN --mount=type=secret,id=GITHUB_TOKEN`) for GitHub Packages installs; never in the image. Applies to the docker rung and `docker-smoke` |
 | `postgres-version` | | (empty) | PostgreSQL major for the strapi job. Empty: the version in `ci/fixture.sql.gz`'s header, else 17. A newer version restores dumps from older servers, never the reverse. |
@@ -1769,7 +1769,7 @@ The org ships Renovate presets in `renovate/`. They are inert until a self-hoste
 | `dotnet` | Mon 00:00-08:59 | NuGet wildcard versions (`3.*`) get majors only: a wildcard already takes new minors and patches at restore, and Renovate 44 would narrow `3.*` to `3.1*` (it rounds the new minor down to a multiple of ten). Its major PR comes out as `4.1*` the same way: write `4.*` when you approve it |
 | `web` | Tue 00:00-08:59 | none |
 | `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) never automerged, as verify builds no iOS |
-| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android and iOS toolchain rules as `react-native` |
+| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android and iOS toolchain rules as `react-native`. Pin Flutter as an exact `environment: flutter: x.y.z` in `pubspec.yaml`: Renovate then proposes each new Flutter (after the 3-day release age) as one PR that also regenerates `pubspec.lock` with that Flutter, its lock refreshes run on the pinned Flutter, and verify and the Flutter deploy workflows use the same version. Unpinned, verify and the deploys take the latest `3.x`, which changes with no PR: Flutter 3.50 made an unpinned app's `pubspec.lock` fail `pub get --enforce-lockfile` overnight |
 | `strapi` | Thu 00:00-08:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
 | `infra` | Thu 00:00-08:59 | none |
 
