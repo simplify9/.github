@@ -177,6 +177,39 @@ test_ios_job_scope_and_result_wiring() {
     *" ios,"* | *" ios]"*) eq "${FUNCNAME[0]}_result_needs" ok ok ;; *) eq "${FUNCNAME[0]}_result_needs" "result needs ios" "missing" ;;
   esac
 }
+# Strict branches (renovate/strict-*): Renovate's developer-tool majors, which merge by themselves. They are
+# judged as if the contract deadline were today: nothing in known-failing is tolerated and every contract item
+# is enforced, so a tool that cannot run (ESLint 10 without eslint.config.*) turns the check red instead of
+# "tolerated". Only a branch that starts with the prefix counts.
+test_strict_branch_deadline_is_today() { eq "${FUNCNAME[0]}" 2026-11-17 "$(effective_deadline 2026-12-21 2026-11-17 renovate/strict-major-jest-monorepo)"; }
+test_strict_branch_without_repo_deadline() { eq "${FUNCNAME[0]}" 2026-11-17 "$(effective_deadline '' 2026-11-17 renovate/strict-typescript-7.x)"; }
+test_other_branch_keeps_deadline() { eq "${FUNCNAME[0]}" 2026-12-21 "$(effective_deadline 2026-12-21 2026-11-17 renovate/major-jest-monorepo)"; }
+test_strict_prefix_must_lead() { eq "${FUNCNAME[0]}" 2026-12-21 "$(effective_deadline 2026-12-21 2026-11-17 feature/renovate/strict-x)"; }
+test_no_branch_keeps_deadline() { eq "${FUNCNAME[0]}" '' "$(effective_deadline '' 2026-11-17 '')"; }
+test_strict_branch_tolerates_no_listed_step() {
+  local d; d="$(effective_deadline 2026-12-21 2026-11-17 renovate/strict-major-eslint-monorepo)"
+  # `network` is a new step with its own deadline (2026-12-29): as for any repo past its deadline, it stays tolerated
+  eq "${FUNCNAME[0]}" "network" "$(effective_known_failing "lint test typecheck" "$d" 2026-11-17 react-native)"
+  eq "${FUNCNAME[0]}_mode" enforce "$(contract_mode "$d" 2026-11-17)"
+}
+# iOS toolchain branches (renovate/ios-toolchain, renovate/lock-file-maintenance-ios-toolchain) merge by themselves
+# on react-native once verify's iOS build passes, so that build must block there even if the repo lists `ios`.
+test_ios_toolchain_branch_drops_ios() { eq "${FUNCNAME[0]}" "lint test" "$(branch_known_failing "lint ios test" renovate/ios-toolchain)"; }
+test_ios_toolchain_lock_refresh_drops_ios() { eq "${FUNCNAME[0]}" "" "$(branch_known_failing "ios" renovate/lock-file-maintenance-ios-toolchain)"; }
+test_other_branch_keeps_ios() { eq "${FUNCNAME[0]}" "lint ios" "$(branch_known_failing "lint ios" renovate/non-major)"; }
+test_no_branch_keeps_list() { eq "${FUNCNAME[0]}" "ios" "$(branch_known_failing "ios" '')"; }
+test_plan_and_contract_use_the_branch_deadline() {
+  # The contract job must read the plan's deadline (strict branches enforce the contract), and the plan must get
+  # the branch name: the PR's head branch, or the dispatched branch.
+  local yml="${here}/../../workflows/verify.yml"
+  case "$(step_block contract contract)" in *'deadline: ${{ needs.plan.outputs.deadline }}'*) eq "${FUNCNAME[0]}_contract" ok ok ;;
+    *) eq "${FUNCNAME[0]}_contract" "contract reads needs.plan.outputs.deadline" "missing" ;; esac
+  case "$(step_block plan plan)" in *'head-ref: ${{ github.head_ref || github.ref_name }}'*) eq "${FUNCNAME[0]}_head_ref" ok ok ;;
+    *) eq "${FUNCNAME[0]}_head_ref" "plan gets head-ref" "missing" ;; esac
+  case "$(awk '/^  plan:$/ {f = 1; next} f && /^  [a-z][a-z-]*:$/ {exit} f && /^      deadline: / {print; exit}' "$yml")" in
+    *'steps.plan.outputs.deadline'*) eq "${FUNCNAME[0]}_plan_output" ok ok ;;
+    *) eq "${FUNCNAME[0]}_plan_output" "plan exposes deadline" "missing" ;; esac
+}
 test_android_gradle_cache_matches_deploy_build() {
   # actions/cache versions an entry by its path list: verify restores the deploy build's Gradle cache only
   # when both list the same Gradle User Home parts (it never did: verify lacked `wrapper`).

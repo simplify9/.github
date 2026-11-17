@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Developer tools whose majors merge by themselves (web and react-native presets extend this after default)",
+  "packageRules": [
+    { "description": "Majors of developer tools (linters, formatters, test runners, TypeScript) merge by themselves: none of them is in what ships (Vite, Next and Metro build without them), and verify runs each of them (lint, typecheck, test). The strict- branch prefix makes verify judge the PR as if the contract deadline were today, so a tool that fails or cannot run turns the check red instead of 'tolerated' (ESLint 10 without eslint.config.* did). No @types/* beyond Jest's: type packages of libraries move with their library's group. At most 2 open bot PRs when one is created, so these never take the routine updates' slots",
+      "matchDatasources": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "matchPackageNames": [
+        "eslint", "@eslint/**", "eslint-plugin-*", "eslint-config-*", "@typescript-eslint/**", "typescript-eslint",
+        "prettier", "prettier-plugin-*",
+        "jest", "@jest/**", "jest-*", "babel-jest", "ts-jest", "@types/jest",
+        "vitest", "@vitest/**", "@testing-library/**",
+        "typescript"
+      ],
+      "dependencyDashboardApproval": false, "automerge": true,
+      "additionalBranchPrefix": "strict-", "prConcurrentLimit": 2 }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>simplify9/.github//renovate/default"],
+  "extends": ["github>simplify9/.github//renovate/default", "github>simplify9/.github//renovate/dev-tools"],
   "schedule": ["* 0-8 * * 2"],
   "lockFileMaintenance": { "schedule": ["* 0-8 * * 2"] }
 }

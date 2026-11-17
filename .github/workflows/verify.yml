@@ -166,6 +166,7 @@ jobs:
     outputs:
       known_failing: ${{ steps.plan.outputs.known_failing }}
       repo_known_failing: ${{ steps.plan.outputs.repo_known_failing }}
+      deadline: ${{ steps.plan.outputs.deadline }}
       deps_changed: ${{ steps.plan.outputs.deps_changed }}
       tests_changed: ${{ steps.plan.outputs.tests_changed }}
       contract_mode: ${{ steps.plan.outputs.contract_mode }}
@@ -182,6 +183,9 @@ jobs:
           known-failing: ${{ inputs.known-failing }}
           deadline: ${{ inputs.contract-deadline }}
           stack: ${{ inputs.stack }}
+          # renovate/strict-* (developer-tool majors that merge by themselves) is judged as if the deadline were
+          # today; renovate/*ios-toolchain* never tolerates `ios`. A dispatch has no head_ref: its branch counts.
+          head-ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Write summary
         if: always()
@@ -195,6 +199,7 @@ jobs:
             | Stack | `${{ inputs.stack }}` |
             | Deps changed | `${{ steps.plan.outputs.deps_changed }}` |
             | Contract mode | `${{ steps.plan.outputs.contract_mode }}` |
+            | Deadline applied | `${{ steps.plan.outputs.deadline }}` |
 
   contract:
     name: contract
@@ -216,7 +221,8 @@ jobs:
         with:
           stack: ${{ inputs.stack }}
           working-directory: ${{ inputs.working-directory }}
-          deadline: ${{ inputs.contract-deadline }}
+          # The plan's deadline, not the input: a renovate/strict-* branch enforces the contract today.
+          deadline: ${{ needs.plan.outputs.deadline }}
 
       - name: Write summary
         if: always()
