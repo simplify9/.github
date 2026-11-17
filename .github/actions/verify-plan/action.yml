@@ -14,7 +14,10 @@
 #   deadline           (optional)  YYYY-MM-DD; empty means warn mode, known-failing never expires.
 #   stack              (optional)  The verify stack; scopes the tolerated new step ids.
 #   github-token       (optional)  Token with pull-requests: read.
-# Outputs: known_failing, repo_known_failing, deps_changed, contract_mode, strapi_changed, tests_changed.
+#   head-ref           (optional)  The branch under test. renovate/strict-* (Renovate's developer-tool
+#                                  majors, which merge by themselves) is judged as if the deadline were today;
+#                                  renovate/*ios-toolchain* never tolerates `ios`.
+# Outputs: known_failing, repo_known_failing, deadline, deps_changed, contract_mode, strapi_changed, tests_changed.
 # =============================================================================
 name: 'Verify Plan'
 author: 'Simplify9'
@@ -49,6 +52,10 @@ inputs:
     description: 'Token with pull-requests: read, used to list PR files.'
     required: false
     default: ''
+  head-ref:
+    description: 'The branch under test (the PR head branch, or the dispatched branch). renovate/strict-* is judged as if the deadline were today; renovate/*ios-toolchain* never tolerates ios.'
+    required: false
+    default: ''
 
 outputs:
   known_failing:
@@ -57,6 +64,9 @@ outputs:
   repo_known_failing:
     description: "The caller's own known-failing list before its deadline (else empty), without new step ids."
     value: ${{ steps.plan.outputs.repo_known_failing }}
+  deadline:
+    description: 'The contract deadline this run applies: today on a renovate/strict-* branch, else the deadline input.'
+    value: ${{ steps.plan.outputs.deadline }}
   deps_changed:
     description: 'true when dependency files changed (always true on workflow_dispatch).'
     value: ${{ steps.plan.outputs.deps_changed }}
@@ -84,6 +94,7 @@ runs:
         KNOWN_FAILING: ${{ inputs.known-failing }}
         STACK: ${{ inputs.stack }}
         DEADLINE: ${{ inputs.deadline }}
+        HEAD_REF: ${{ inputs.head-ref }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
@@ -91,9 +102,13 @@ runs:
         # shellcheck source=scope.sh
         source "${ACTION_PATH}/scope.sh"
         today="$(date -u +%F)"
-        known="$(effective_known_failing "${KNOWN_FAILING}" "${DEADLINE}" "${today}" "${STACK}")"
-        repo_known="$(known_failing_effective "${KNOWN_FAILING}" "${DEADLINE}" "${today}")"
-        mode="$(contract_mode "${DEADLINE}" "${today}")"
+        deadline="$(effective_deadline "${DEADLINE}" "${today}" "${HEAD_REF}")"
+        if [ "${deadline}" != "${DEADLINE}" ]; then
+          echo "::notice title=[VERIFY] Strict::${HEAD_REF} is a developer-tool major that merges by itself: judged as if the contract deadline were today (${today}), so nothing in known-failing is tolerated and the contract is enforced"
+        fi
+        known="$(branch_known_failing "$(effective_known_failing "${KNOWN_FAILING}" "${deadline}" "${today}" "${STACK}")" "${HEAD_REF}")"
+        repo_known="$(branch_known_failing "$(known_failing_effective "${KNOWN_FAILING}" "${deadline}" "${today}")" "${HEAD_REF}")"
+        mode="$(contract_mode "${deadline}" "${today}")"
         deps=true
         strapi=false
         tests=false
@@ -106,12 +121,13 @@ runs:
         {
           echo "known_failing=${known}"
           echo "repo_known_failing=${repo_known}"
+          echo "deadline=${deadline}"
           echo "deps_changed=${deps}"
           echo "contract_mode=${mode}"
           echo "strapi_changed=${strapi}"
           echo "tests_changed=${tests}"
         } >> "${GITHUB_OUTPUT}"
-        echo "::notice title=[VERIFY] Plan::event=${EVENT} deps_changed=${deps} strapi_changed=${strapi} tests_changed=${tests} contract_mode=${mode} known_failing=${known:-none}"
+        echo "::notice title=[VERIFY] Plan::event=${EVENT} deps_changed=${deps} strapi_changed=${strapi} tests_changed=${tests} contract_mode=${mode} deadline=${deadline:-none} known_failing=${known:-none}"
         echo "VERIFY_PLAN_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
 branding:

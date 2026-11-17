@@ -57,6 +57,25 @@ effective_known_failing() {
   echo "${out# }"
 }
 
+# effective_deadline <repo-deadline> <today> <head-ref> -> today on a strict branch, else the repo deadline.
+# Strict branches (renovate/strict-*) carry Renovate's developer-tool majors (renovate/dev-tools.json), which
+# merge by themselves. Judged as if the deadline were today, nothing in known-failing is tolerated and every
+# contract item is enforced: a green check then means the tool ran and passed (ESLint 10 that cannot load the
+# repo's config fails instead of being tolerated). Only the bot's prefix counts, and it can only tighten.
+effective_deadline() {
+  case "${3:-}" in renovate/strict-*) echo "$2" ;; *) echo "$1" ;; esac
+}
+
+# branch_known_failing <list> <head-ref> -> the list without `ios` on an iOS toolchain branch
+# (renovate/ios-toolchain, renovate/lock-file-maintenance-ios-toolchain). On react-native those merge by
+# themselves once verify's iOS build passes, so that build must block there even when the repo lists `ios`.
+branch_known_failing() {
+  case "${2:-}" in renovate/*ios-toolchain*) ;; *) echo "$1"; return ;; esac
+  local out="" id
+  for id in $1; do [ "${id}" = ios ] || out="${out} ${id}"; done
+  echo "${out# }"
+}
+
 # contract_mode <deadline> <today> -> warn|enforce (mirrors verify-contract)
 contract_mode() {
   if [ -z "$1" ] || [[ "$2" < "$1" ]]; then echo warn; else echo enforce; fi

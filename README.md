@@ -931,7 +931,7 @@ The smoke fallback (no `test:e2e`) is not blocked: it loads the real app with it
    - Once `network` is enforced for the repo, that unblocked re-run no longer happens (no real hosts): the flow fails, naming the blocked destinations.
 5. The summary names passed, flaky, network-only and failed flows. On failure, JUnit files, screenshots, Maestro logs and the Metro and emulator logs are uploaded as `maestro-report` (5 days).
 
-**`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
+**`known-failing` and `contract-deadline`.** Before the deadline, a failing step whose id is in `known-failing` is reported as a warning (and listed under `warned` in `verify-report`) instead of failing the job. On and after the deadline the list is ignored and those steps fail. The same date flips the contract job from `warn` to `enforce`. A PR from a `renovate/strict-` branch (a developer-tool major that merges by itself, see the `dev-tools` preset) is judged as if the deadline were today, and on an iOS toolchain branch (`renovate/*ios-toolchain*`) `ios` is never tolerated. Set the deadline to the enrollment date plus 56 days; leave both empty to stay in warn mode forever.
 
 **New steps start tolerated.** A step id added to the ladder after a repo enrolled is treated as if it were in `known-failing` until the later of `contract-deadline` and the day it shipped + 56 days (forever without a deadline), with no change to the caller. Each one applies to the stacks it was added for only. Today that is `network` (web, shipped 2026-11-03: tolerated until 2026-12-29 or the repo's later deadline), the default-on `smoke` (`dotnet-service` only, shipped 2026-11-03: until 2026-12-29) `e2e` for `flutter` only (the `flutter-e2e` job, shipped 2026-11-03: until 2026-12-29; web's `e2e` keeps blocking). `ios` (react-native, shipped 2026-11-04) is the exception: it blocks from day one, because a tolerated iOS failure would still let the bot merge the lock refresh that breaks the iOS release build, which is how one app's iOS releases broke. A repo whose iOS build is known broken lists `ios` in `known-failing`.
 
@@ -1149,7 +1149,7 @@ All 31 actions are **composite** (`runs.using: composite`). Only `gateway-onboar
 
 | Action | Purpose | Key inputs | Key outputs |
 |---|---|---|---|
-| `verify-plan` | Scope helper (`scope.sh`, tested by `test_scope.sh`): effective known-failing list (the caller's list before its deadline plus the stack's tolerated new steps, `NEW_STEPS` entries `<stack>:<id>:<deadline>`, `*` = every stack), whether dependency files changed, contract mode | `event-name`, `repository`, `pr-number`, `known-failing`, `deadline`, `stack`, `github-token` | `known_failing`, `repo_known_failing`, `deps_changed`, `contract_mode`, `strapi_changed` |
+| `verify-plan` | Scope helper (`scope.sh`, tested by `test_scope.sh`): effective known-failing list (the caller's list before its deadline plus the stack's tolerated new steps, `NEW_STEPS` entries `<stack>:<id>:<deadline>`, `*` = every stack), whether dependency files changed, contract mode | `event-name`, `repository`, `pr-number`, `known-failing`, `deadline`, `stack`, `github-token`, `head-ref` | `known_failing`, `repo_known_failing`, `deadline`, `deps_changed`, `contract_mode`, `strapi_changed` |
 | `verify-contract` | Report which Verification Contract items a repo lacks (`contract.py`); warn before the deadline, error after | `stack` (required), `working-directory`, `deadline` | `missing`, `mode` |
 | `verify-web-install` | Detect the package manager from the lockfile (`detect_pm.sh`), set up Node, install from the lockfile without modifying it | `working-directory`, `node-version` | `package-manager` (`npm`/`yarn`/`yarn-berry`/`pnpm`), `runner` |
 | `verify-node-deps` | Fail on duplicate singleton packages in `node_modules` and, for npm, on invalid peer dependencies; reports "skipped (PnP)" when there is no `node_modules` | `package-manager` (required), `working-directory`, `names` (default `react,react-dom,react-native,next`) | - |
@@ -1767,11 +1767,12 @@ The org ships Renovate presets in `renovate/`. They are inert until a self-hoste
 |---|---|---|
 | `default` | (none) | Base policy for every stack (see below) |
 | `dotnet` | Mon 00:00-08:59 | NuGet wildcard versions (`3.*`) get majors only: a wildcard already takes new minors and patches at restore, and Renovate 44 would narrow `3.*` to `3.1*` (it rounds the new minor down to a multiple of ten). Its major PR comes out as `4.1*` the same way: write `4.*` when you approve it |
-| `web` | Tue 00:00-08:59 | none |
-| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) never automerged, as verify builds no iOS |
-| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android and iOS toolchain rules as `react-native`. Pin Flutter as an exact `environment: flutter: x.y.z` in `pubspec.yaml`: Renovate then proposes each new Flutter (after the 3-day release age) as one PR that also regenerates `pubspec.lock` with that Flutter, its lock refreshes run on the pinned Flutter, and verify and the Flutter deploy workflows use the same version. pub enforces an exact pin, so developers need that same Flutter (`flutter pub get` on another version stops with "requires Flutter SDK version x.y.z"; FVM or a matching install), and the pin moves only through Renovate's PR. Unpinned, verify and the deploys take the latest `3.x`, which changes with no PR: Flutter 3.50 made an unpinned app's `pubspec.lock` fail `pub get --enforce-lockfile` overnight |
+| `web` | Tue 00:00-08:59 | Developer-tool majors merge by themselves (`dev-tools`, below) |
+| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) in its own group: routine updates and its lock refresh merge by themselves once verify's iOS build (`bundle exec pod install` and an unsigned Release build) passes, and on that branch the iOS build always blocks, even when the repo lists `ios` in `known-failing`; majors need dashboard approval. Developer-tool majors merge by themselves (`dev-tools`, below) |
+| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android toolchain rule as `react-native`; the iOS toolchain is never automerged, because verify builds no iOS for Flutter. Pin Flutter as an exact `environment: flutter: x.y.z` in `pubspec.yaml`: Renovate then proposes each new Flutter (after the 3-day release age) as one PR that also regenerates `pubspec.lock` with that Flutter, its lock refreshes run on the pinned Flutter, and verify and the Flutter deploy workflows use the same version. pub enforces an exact pin, so developers need that same Flutter (`flutter pub get` on another version stops with "requires Flutter SDK version x.y.z"; FVM or a matching install), and the pin moves only through Renovate's PR. Unpinned, verify and the deploys take the latest `3.x`, which changes with no PR: Flutter 3.50 made an unpinned app's `pubspec.lock` fail `pub get --enforce-lockfile` overnight |
 | `strapi` | Thu 00:00-08:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
 | `infra` | Thu 00:00-08:59 | none |
+| `dev-tools` | (none) | Extended by `web` and `react-native`, see below |
 
 Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack preset extends `default`.
 
@@ -1789,6 +1790,17 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
   version younger than 7 days from Yarn and pub, except a version GitHub's reviewed advisories name as a first
   patched version. Using these presets without that filter gives the wait on direct dependencies only.
 - 0.x minor updates and all major updates get their own branch, need dashboard approval, and never automerge.
+  The exception, on `web` and `react-native` only (`dev-tools`): majors of developer tools (ESLint and its
+  plugins and configs, typescript-eslint, Prettier and its plugins, Jest, Vitest, Testing Library, `@types/jest`,
+  TypeScript) open without approval on a `renovate/strict-` branch and merge once verify passes. None of them is in
+  what ships (Vite, Next and Metro build without them) and verify runs each one (`lint`, `typecheck`, `test`), but a
+  step in `known-failing` would let a tool that cannot even start pass as "tolerated" (ESLint 10 in a repo that
+  still uses `.eslintrc.*` did). So verify judges a `renovate/strict-` branch as if `contract-deadline` were today:
+  nothing in `known-failing` is tolerated and the contract is enforced. In a repo with tolerated failures these PRs
+  stay red until the team fixes them. Each is created only while the repo has fewer than 2 open bot PRs, so they
+  never take the slots routine updates need (Renovate compares a branch's own limit with the repo's open-PR count).
+  Other `@types/*` packages are left out: they move with their library's group. Libraries, frameworks, runtimes and
+  build toolchains (Babel included: it transforms the shipped code) keep the approval step.
 - Every Dependency Dashboard starts with a guide (`dependencyDashboardHeader` in `default.json`): what each section
   lists and what ticking its box does, for example that a box under Pending Status Checks skips the release-age
   wait and the approval step. Renovate lets a config replace only the text at the top of the issue, not the

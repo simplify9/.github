@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>simplify9/.github//renovate/default"],
+  "extends": ["github>simplify9/.github//renovate/default", "github>simplify9/.github//renovate/dev-tools"],
   "schedule": ["* 0-8 * * 3"],
   "lockFileMaintenance": { "schedule": ["* 0-8 * * 3"] },
   "packageRules": [
@@ -8,9 +8,9 @@
       "matchManagers": ["gradle", "gradle-wrapper"],
       "matchDepNames": ["gradle", "com.android.application", "com.android.library", "com.android.tools.build:gradle", "/^org\\.jetbrains\\.kotlin/"],
       "groupName": "android toolchain", "groupSlug": "android-toolchain", "dependencyDashboardApproval": true, "automerge": false },
-    { "description": "iOS toolchain (CocoaPods and the Ruby gems behind it): verify has no iOS build, so a person merges these after an iOS build",
+    { "description": "iOS toolchain (CocoaPods and the Ruby gems behind it) in its own group. Routine updates and its lock refresh merge by themselves: verify's ios job runs bundle exec pod install and an unsigned Release build, and on an ios-toolchain branch that build always blocks (verify-plan drops ios from known-failing there). Majors still need dashboard approval",
       "matchManagers": ["cocoapods", "bundler"],
-      "groupName": "ios toolchain", "groupSlug": "ios-toolchain", "automerge": false },
+      "groupName": "ios toolchain", "groupSlug": "ios-toolchain" },
     { "description": "React Native core moves as one lockstep set; placed after default rules so it wins",
       "matchPackageNames": ["react", "react-dom", "react-native", "@react-native/**", "@react-native-community/cli**", "metro**", "react-test-renderer", "@types/react"],
       "groupName": "react-native core", "groupSlug": "rn-core" }
