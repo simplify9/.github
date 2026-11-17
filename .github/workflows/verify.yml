@@ -102,6 +102,15 @@ on:
         required: false
         type: string
         default: ""
+      docker-build-args:
+        description: >-
+          Docker build args, one KEY=VALUE per line, for every image verify builds: the same input as the
+          deploy workflows' docker-build-args (use the develop deploy's values), for build-time configuration
+          such as VITE_* or NEXT_PUBLIC_* URLs a Dockerfile refuses to build without. NOT for secrets: build args
+          are readable from the image history. NUGET_PACKAGE_PAT is added from nuget-restore-token, as the deploys add it.
+        required: false
+        type: string
+        default: ""
       docker-build-github-token:
         description: >-
           Mount the job's GITHUB_TOKEN into the docker build as the BuildKit secret GITHUB_TOKEN
@@ -389,6 +398,11 @@ jobs:
           dockerfile: ${{ inputs.working-directory }}/${{ steps.dockerfiles.outputs.first }}
           context: ${{ inputs.working-directory }}
           build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', github.token) || '' }}
+          # The build args the deploy workflows pass: NUGET_PACKAGE_PAT (when the NuGet token is set) plus the
+          # caller's docker-build-args. Empty lines are dropped.
+          build-args: |
+            ${{ secrets.nuget-restore-token != '' && format('NUGET_PACKAGE_PAT={0}', secrets.nuget-restore-token) || '' }}
+            ${{ inputs.docker-build-args }}
 
       # The other Dockerfiles (staging/production variants), on the builder the step above set up.
       - name: Docker build, other Dockerfiles (no push)
@@ -399,14 +413,21 @@ jobs:
         env:
           REST: ${{ steps.dockerfiles.outputs.rest }}
           WITH_TOKEN: ${{ inputs.docker-build-github-token }}
+          NUGET_PACKAGE_PAT: ${{ secrets.nuget-restore-token }}
+          EXTRA_BUILD_ARGS: ${{ inputs.docker-build-args }}
         run: |
           set -uo pipefail
           secret=()
           if [ "${WITH_TOKEN}" = "true" ]; then secret=(--secret "id=GITHUB_TOKEN,env=GITHUB_TOKEN"); fi
+          # The deploy workflows' build args (see the docker step above): --build-arg NAME takes the value from
+          # this environment, so the token never appears on the command line.
+          args=()
+          if [ -n "${NUGET_PACKAGE_PAT}" ]; then args+=(--build-arg NUGET_PACKAGE_PAT); fi
+          while IFS= read -r line; do [ -n "${line// }" ] && args+=(--build-arg "${line}"); done <<< "${EXTRA_BUILD_ARGS}"
           failed=()
           for f in ${REST}; do
             echo "::group::docker build ${f}"
-            if ! docker buildx build --file "${f}" "${secret[@]}" .; then failed+=("${f}"); fi
+            if ! docker buildx build --file "${f}" "${secret[@]}" ${args[@]+"${args[@]}"} .; then failed+=("${f}"); fi
             echo "::endgroup::"
           done
           if [ "${#failed[@]}" -gt 0 ]; then
@@ -608,6 +629,11 @@ jobs:
           dockerfile: ${{ inputs.working-directory }}/Dockerfile
           context: ${{ inputs.working-directory }}
           build-secrets: ${{ inputs.docker-build-github-token && format('GITHUB_TOKEN={0}', github.token) || '' }}
+          # The build args the deploy workflows pass: NUGET_PACKAGE_PAT (when the NuGet token is set) plus the
+          # caller's docker-build-args. Empty lines are dropped.
+          build-args: |
+            ${{ secrets.nuget-restore-token != '' && format('NUGET_PACKAGE_PAT={0}', secrets.nuget-restore-token) || '' }}
+            ${{ inputs.docker-build-args }}
 
       - name: Collect outcomes
         id: collect
@@ -779,16 +805,23 @@ jobs:
           DEFAULT_RUN: ${{ inputs.smoke-path == '' }}
           GITHUB_TOKEN: ${{ inputs.docker-build-github-token && github.token || '' }}
           WITH_TOKEN: ${{ inputs.docker-build-github-token }}
+          NUGET_PACKAGE_PAT: ${{ secrets.nuget-restore-token }}
+          EXTRA_BUILD_ARGS: ${{ inputs.docker-build-args }}
         run: |
           set -euo pipefail
           if [ "$DEFAULT_RUN" = "true" ] && [ ! -f Dockerfile ]; then
             echo "::notice title=[VERIFY] smoke::no Dockerfile, default smoke skipped"
             exit 0
           fi
+          # Same build args as the docker rung (the deploy workflows' set); --build-arg NAME reads the token
+          # from this environment.
+          args=()
+          if [ -n "$NUGET_PACKAGE_PAT" ]; then args+=(--build-arg NUGET_PACKAGE_PAT); fi
+          while IFS= read -r line; do [ -n "${line// }" ] && args+=(--build-arg "$line"); done <<< "$EXTRA_BUILD_ARGS"
           if [ "$WITH_TOKEN" = "true" ]; then
-            DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t verify .
+            DOCKER_BUILDKIT=1 docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN ${args[@]+"${args[@]}"} -t verify .
           else
-            docker build -t verify .
+            docker build ${args[@]+"${args[@]}"} -t verify .
           fi
           docker run -d --name verify-smoke -p 8080:8080 -e ASPNETCORE_URLS=http://+:8080 verify
           # --max-time bounds each attempt (an accepted but unanswered connection

@@ -210,6 +210,30 @@ test_plan_and_contract_use_the_branch_deadline() {
     *'steps.plan.outputs.deadline'*) eq "${FUNCNAME[0]}_plan_output" ok ok ;;
     *) eq "${FUNCNAME[0]}_plan_output" "plan exposes deadline" "missing" ;; esac
 }
+# Every image verify builds gets the build args the deploy workflows give it (generic-*-helm-template.yml,
+# "Assemble Docker build args"): NUGET_PACKAGE_PAT when the NuGet token is set, plus the caller's
+# docker-build-args. Without them a Dockerfile that restores private NuGet packages, or that refuses to build
+# without its VITE_*/NEXT_PUBLIC_* URLs, fails in verify although it ships fine, and `docker` gets tolerated.
+test_docker_builds_get_the_deploy_build_args() {
+  local site
+  for site in "node docker" "dotnet docker"; do
+    # shellcheck disable=SC2086 # two words on purpose: job and step id
+    case "$(step_block ${site})" in
+      *"build-args: |"*"secrets.nuget-restore-token"*"inputs.docker-build-args"*) eq "${FUNCNAME[0]}_${site// /_}" ok ok ;;
+      *) eq "${FUNCNAME[0]}_${site// /_}" "build-args from the NuGet token and docker-build-args" "missing" ;;
+    esac
+  done
+  for site in "node docker-more" "docker-smoke smoke"; do
+    # shellcheck disable=SC2086
+    case "$(step_block ${site})" in
+      *"secrets.nuget-restore-token"*"inputs.docker-build-args"*"--build-arg"*) eq "${FUNCNAME[0]}_${site// /_}" ok ok ;;
+      *) eq "${FUNCNAME[0]}_${site// /_}" "--build-arg from the NuGet token and docker-build-args" "missing" ;;
+    esac
+  done
+  case "$(awk '/^      docker-build-args:$/ {f = 1; next} f && /^      [a-z]/ {exit} f' "${here}/../../workflows/verify.yml")" in
+    *"type: string"*) eq "${FUNCNAME[0]}_input" ok ok ;; *) eq "${FUNCNAME[0]}_input" "docker-build-args input" "missing" ;;
+  esac
+}
 test_android_gradle_cache_matches_deploy_build() {
   # actions/cache versions an entry by its path list: verify restores the deploy build's Gradle cache only
   # when both list the same Gradle User Home parts (it never did: verify lacked `wrapper`).
