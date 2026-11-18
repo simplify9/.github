@@ -1767,12 +1767,12 @@ The org ships Renovate presets in `renovate/`. They are inert until a self-hoste
 | Preset | Schedule (Asia/Amman) | Extra rules |
 |---|---|---|
 | `default` | (none) | Base policy for every stack (see below) |
-| `dotnet` | Mon 00:00-08:59 | NuGet wildcard versions (`3.*`) get majors only: a wildcard already takes new minors and patches at restore, and Renovate 44 would narrow `3.*` to `3.1*` (it rounds the new minor down to a multiple of ten). Its major PR comes out as `4.1*` the same way: write `4.*` when you approve it |
-| `web` | Tue 00:00-08:59 | Developer-tool majors merge by themselves (`dev-tools`, below) |
-| `react-native` | Wed 00:00-08:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) in its own group: routine updates and its lock refresh merge by themselves once verify's iOS build (`bundle exec pod install` and an unsigned Release build) passes, and on that branch the iOS build always blocks, even when the repo lists `ios` in `known-failing`; majors need dashboard approval. Developer-tool majors merge by themselves (`dev-tools`, below) |
-| `flutter` | Wed 00:00-08:59 | `flutter` SDK bumps need dashboard approval; same Android toolchain rule as `react-native`; the iOS toolchain is never automerged, because verify builds no iOS for Flutter. Pin Flutter as an exact `environment: flutter: x.y.z` in `pubspec.yaml`: Renovate then proposes each new Flutter (after the 3-day release age) as one PR that also regenerates `pubspec.lock` with that Flutter, its lock refreshes run on the pinned Flutter, and verify and the Flutter deploy workflows use the same version. pub enforces an exact pin, so developers need that same Flutter (`flutter pub get` on another version stops with "requires Flutter SDK version x.y.z"; FVM or a matching install), and the pin moves only through Renovate's PR. Unpinned, verify and the deploys take the latest `3.x`, which changes with no PR: Flutter 3.50 made an unpinned app's `pubspec.lock` fail `pub get --enforce-lockfile` overnight |
-| `strapi` | Thu 00:00-08:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
-| `infra` | Thu 00:00-08:59 | none |
+| `dotnet` | Mon 00:00-14:59 | NuGet wildcard versions (`3.*`) get majors only: a wildcard already takes new minors and patches at restore, and Renovate 44 would narrow `3.*` to `3.1*` (it rounds the new minor down to a multiple of ten). Its major PR comes out as `4.1*` the same way: write `4.*` when you approve it |
+| `web` | Tue 00:00-14:59 | Developer-tool majors merge by themselves (`dev-tools`, below) |
+| `react-native` | Wed 00:00-14:59 | React core set grouped as `react-native core`; Android toolchain (Gradle, AGP, Kotlin) grouped behind dashboard approval; iOS toolchain (CocoaPods, bundler gems) in its own group: routine updates and its lock refresh merge by themselves once verify's iOS build (`bundle exec pod install` and an unsigned Release build) passes, and on that branch the iOS build always blocks, even when the repo lists `ios` in `known-failing`; majors need dashboard approval. Developer-tool majors merge by themselves (`dev-tools`, below) |
+| `flutter` | Wed 00:00-14:59 | `flutter` SDK bumps need dashboard approval; same Android toolchain rule as `react-native`; the iOS toolchain is never automerged, because verify builds no iOS for Flutter. Pin Flutter as an exact `environment: flutter: x.y.z` in `pubspec.yaml`: Renovate then proposes each new Flutter (after the 3-day release age) as one PR that also regenerates `pubspec.lock` with that Flutter, its lock refreshes run on the pinned Flutter, and verify and the Flutter deploy workflows use the same version. pub enforces an exact pin, so developers need that same Flutter (`flutter pub get` on another version stops with "requires Flutter SDK version x.y.z"; FVM or a matching install), and the pin moves only through Renovate's PR. Unpinned, verify and the deploys take the latest `3.x`, which changes with no PR: Flutter 3.50 made an unpinned app's `pubspec.lock` fail `pub get --enforce-lockfile` overnight |
+| `strapi` | Thu 00:00-14:59 | `@strapi/**` grouped and pinned; majors carry a migration runbook note |
+| `infra` | Thu 00:00-14:59 | none |
 | `dev-tools` | (none) | Extended by `web` and `react-native`, see below |
 
 Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack preset extends `default`.
@@ -1816,8 +1816,19 @@ Reference a preset as `github>simplify9/.github//renovate/<name>`. Every stack p
   vulnerable *transitive* dependencies get fixed: Renovate's security PRs cover direct dependencies only, and
   enrolled repos have Dependabot security updates turned off. A transitive fix that needs a parent's major,
   or that a parent pins exactly, waits for that parent's own update or shows up in the vulnerability gate.
-- No hourly PR cap (`prHourlyLimit: 0`). Each stack gets one in-window run a week, so security PRs opened in
-  that run must not push the weekly group to the next week. At most 5 PRs are open per repo (`prConcurrentLimit`).
+- No hourly PR cap (`prHourlyLimit: 0`). Each stack gets two in-window runs a week (01:00 and 13:00 on its day),
+  so security PRs opened in those runs must not push the weekly group to the next week. At most 5 PRs are open
+  per repo (`prConcurrentLimit`).
+- An open bot PR is refreshed only inside the window (`updateNotScheduled: false`). Renovate's default refreshes
+  it at every run, twice a day, whenever a newer version clears the release-age wait or the base branch moves, and
+  each refresh runs verify again (on React Native that includes the macOS iOS build, billed at 10x Linux). A PR
+  that stays red, because of the update or because the base branch itself is red, was rebuilt up to 14 times a
+  week (one React Native PR was rebuilt 13 times in 13 days). Security PRs are not held back (Renovate gives
+  `vulnerabilityAlerts` an empty schedule), a ticked dashboard box and a PR's own rebase checkbox still act at the
+  next run, and GitHub's auto-merge still merges a PR whenever verify turns green. Outside the window Renovate
+  also skips its own merge step, which repos with `platformAutomerge` off rely on (their base branch needs an
+  approval only the bot can bypass). That is why the window spans both daily runs: the 13:00 run merges what went
+  green after the 01:00 run.
 - Renovate updates npm lock files with npm 11 (`constraints`), the npm that ships with Node 24, which verify and
   the Docker builds use. Without it, a repo whose `engines.npm` is open-ended (`>=6`) got npm 12, whose new
   `allow-remote=none` default refused a registry package that bundles its dependencies (`EALLOWREMOTE`), so the

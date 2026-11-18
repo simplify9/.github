@@ -1,8 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>simplify9/.github//renovate/default", "github>simplify9/.github//renovate/dev-tools"],
-  "schedule": ["* 0-8 * * 3"],
-  "lockFileMaintenance": { "schedule": ["* 0-8 * * 3"] },
+  "schedule": ["* 0-14 * * 3"],
+  "lockFileMaintenance": { "schedule": ["* 0-14 * * 3"] },
   "packageRules": [
     { "description": "Android build toolchain (Gradle, Android Gradle Plugin, Kotlin) must match what the framework supports: it moves with the framework upgrade, behind dashboard approval, never automerged",
       "matchManagers": ["gradle", "gradle-wrapper"],
