@@ -177,6 +177,7 @@ jobs:
       repo_known_failing: ${{ steps.plan.outputs.repo_known_failing }}
       deadline: ${{ steps.plan.outputs.deadline }}
       deps_changed: ${{ steps.plan.outputs.deps_changed }}
+      ios_changed: ${{ steps.plan.outputs.ios_changed }}
       tests_changed: ${{ steps.plan.outputs.tests_changed }}
       contract_mode: ${{ steps.plan.outputs.contract_mode }}
       strapi_changed: ${{ steps.plan.outputs.strapi_changed }}
@@ -195,6 +196,8 @@ jobs:
           # renovate/strict-* (developer-tool majors that merge by themselves) is judged as if the deadline were
           # today; renovate/*ios-toolchain* never tolerates `ios`. A dispatch has no head_ref: its branch counts.
           head-ref: ${{ github.head_ref || github.ref_name }}
+          # React Native: where ios/Podfile.lock lives (ios_changed compares the PR's packages with its native modules).
+          working-directory: ${{ inputs.working-directory }}
 
       - name: Write summary
         if: always()
@@ -207,6 +210,7 @@ jobs:
             |-------|-------|
             | Stack | `${{ inputs.stack }}` |
             | Deps changed | `${{ steps.plan.outputs.deps_changed }}` |
+            | iOS inputs changed | `${{ steps.plan.outputs.ios_changed }}` |
             | Contract mode | `${{ steps.plan.outputs.contract_mode }}` |
             | Deadline applied | `${{ steps.plan.outputs.deadline }}` |
 
@@ -1362,12 +1366,14 @@ jobs:
   # does minus signing and upload. Without it a lock refresh that moved a native module whose podspec
   # needed a newer pod than ios/Podfile.lock pinned went green, merged, and every iOS release build then
   # failed at pod install. Hosted macOS only (no self-hosted macOS runners; about 10x the Linux minute),
-  # so the same scope as maestro: dependencies changed or the PR targets the default branch. Caches are
-  # only restored, with the keys and paths ios-build.yml saves under, so the deploy builds keep them warm.
+  # so it runs only when an iOS build input changed (plan's ios_changed: ios/, Gemfile*, a native module or
+  # any React Native package; not a JS-only tool such as jest or babel, whose bundle the react-native job
+  # already builds for iOS) or the PR targets the default branch. Caches are only restored, with the keys
+  # and paths ios-build.yml saves under, so the deploy builds keep them warm.
   ios:
     name: ios
     needs: plan
-    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && (needs.plan.outputs.deps_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
+    if: ${{ !cancelled() && inputs.stack == 'react-native' && needs.plan.result == 'success' && (needs.plan.outputs.ios_changed == 'true' || github.base_ref == github.event.repository.default_branch) }}
     runs-on: ${{ vars.S9_MACOS_RUNNER || 'macos-latest' }}
     timeout-minutes: 60
     outputs:

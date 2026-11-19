@@ -118,3 +118,59 @@ tests_changed_from_list() {
   esac
   echo false
 }
+
+# ios_changed_from_list <newline-separated file paths> -> true|false|packages
+# What only verify's macOS ios job checks is pod install and the native iOS compile: the JS bundle is
+# built and Hermes-compiled for iOS by the react-native job on Linux. true when the PR changes an iOS build
+# input outright: ios/, Gemfile*, the Ruby, Xcode or Node version, patches/ (patch-package can patch native
+# code), react-native.config.* (autolinking), a lock file the plan cannot compare (npm, pnpm), or
+# package.json without yarn.lock. `packages` when yarn.lock changed: the plan then asks
+# ios_relevant_packages whether a package with native iOS code moved. false otherwise (JS source, Android).
+# ponytail: a package.json change beside yarn.lock is judged by the lock alone; a change to its
+# `codegenConfig` or `react-native` fields in the same PR is not seen (rare; a PR into the default branch
+# always builds iOS).
+ios_changed_from_list() {
+  local direct='(^|/)(ios/|patches/)|(^|/)(Gemfile(\.lock)?|\.ruby-version|\.xcode-version|\.nvmrc|\.node-version|package-lock\.json|pnpm-lock\.yaml|react-native\.config\.[cm]?[jt]s)$'
+  if grep -Eq "${direct}" <<< "$1"; then echo true; return; fi
+  if grep -Eq '(^|/)yarn\.lock$' <<< "$1"; then echo packages; return; fi
+  if grep -Eq '(^|/)package\.json$' <<< "$1"; then echo true; return; fi
+  echo false
+}
+
+# lock_versions <yarn.lock text> -> sorted unique "name version" lines (Yarn 1 and Berry lock files)
+lock_versions() {
+  awk '
+    /^[^ ]/ { name = "" }
+    /^[^ #_][^ ]*.*:$/ || /^"/ {
+      key = $0; sub(/:$/, "", key); gsub(/"/, "", key); split(key, specs, ", "); s = specs[1]
+      at = substr(s, 1, 1) == "@" ? index(substr(s, 2), "@") + 1 : index(s, "@")
+      name = at > 1 ? substr(s, 1, at - 1) : s
+      next
+    }
+    /^  version:? / && name != "" { v = $2; gsub(/"/, "", v); print name " " v }
+  ' <<< "$1" | LC_ALL=C sort -u
+}
+
+# lock_changed_packages <base yarn.lock> <head yarn.lock> -> names whose resolved versions differ, one per line
+lock_changed_packages() {
+  LC_ALL=C comm -3 <(lock_versions "$1") <(lock_versions "$2") | awk '{print $1}' | LC_ALL=C sort -u
+}
+
+# podfile_lock_packages <ios/Podfile.lock text> -> the JS packages the iOS app builds native code from
+# (every autolinked module appears as a ../node_modules/<package> path), one per line
+podfile_lock_packages() {
+  { grep -oE 'node_modules/(@[^/"`]+/)?[^/"`]+' <<< "$1" || true; } | sed 's#^node_modules/##' | LC_ALL=C sort -u
+}
+
+# ios_relevant_packages <changed names> <native names> -> true|false
+# true when a changed package has native iOS code, or is React Native or Expo tooling: any React Native or
+# Expo package counts, because one can gain native code in a new version before Podfile.lock lists it.
+ios_relevant_packages() {
+  local name
+  while IFS= read -r name; do
+    [ -n "${name}" ] || continue
+    case "${name}" in *react-native* | expo | expo-* | @expo/*) echo true; return ;; esac
+    if grep -qxF -- "${name}" <<< "$2"; then echo true; return; fi
+  done <<< "$1"
+  echo false
+}
