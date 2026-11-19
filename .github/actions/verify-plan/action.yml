@@ -17,7 +17,10 @@
 #   head-ref           (optional)  The branch under test. renovate/strict-* (Renovate's developer-tool
 #                                  majors, which merge by themselves) is judged as if the deadline were today;
 #                                  renovate/*ios-toolchain* never tolerates `ios`.
-# Outputs: known_failing, repo_known_failing, deadline, deps_changed, contract_mode, strapi_changed, tests_changed.
+#   working-directory  (optional)  The app's directory (react-native: where ios/Podfile.lock lives).
+# Outputs: known_failing, repo_known_failing, deadline, deps_changed, ios_changed, contract_mode, strapi_changed,
+#          tests_changed.
+# Needs contents: read besides pull-requests: read (react-native: reads yarn.lock and ios/Podfile.lock).
 # =============================================================================
 name: 'Verify Plan'
 author: 'Simplify9'
@@ -56,6 +59,10 @@ inputs:
     description: 'The branch under test (the PR head branch, or the dispatched branch). renovate/strict-* is judged as if the deadline were today; renovate/*ios-toolchain* never tolerates ios.'
     required: false
     default: ''
+  working-directory:
+    description: "The app's directory; react-native reads <dir>/ios/Podfile.lock at the PR head."
+    required: false
+    default: '.'
 
 outputs:
   known_failing:
@@ -70,6 +77,9 @@ outputs:
   deps_changed:
     description: 'true when dependency files changed (always true on workflow_dispatch).'
     value: ${{ steps.plan.outputs.deps_changed }}
+  ios_changed:
+    description: 'react-native: true when an iOS build input changed (scope.sh ios_changed_from_list; for yarn.lock, a package with native iOS code or any React Native package moved). Always true on workflow_dispatch and when the comparison cannot be made; false on other stacks.'
+    value: ${{ steps.plan.outputs.ios_changed }}
   contract_mode:
     description: 'warn or enforce.'
     value: ${{ steps.plan.outputs.contract_mode }}
@@ -95,6 +105,7 @@ runs:
         STACK: ${{ inputs.stack }}
         DEADLINE: ${{ inputs.deadline }}
         HEAD_REF: ${{ inputs.head-ref }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
@@ -112,22 +123,54 @@ runs:
         deps=true
         strapi=false
         tests=false
+        ios=false
+        [ "${STACK}" != react-native ] || ios=true
+        # ios_from_lock_diff <files>: sets ios=true|false - did a package with native iOS code move in yarn.lock?
+        # Compares the resolved versions at the merge base and the PR head with the packages ios/Podfile.lock
+        # autolinks. Any API failure returns non-zero: the caller then builds iOS.
+        ios_from_lock_diff() {
+          local base head merge_base lock old new changed="" podfile
+          read -r base head < <(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '"\(.base.sha) \(.head.sha)"') || return 1
+          merge_base="$(gh api "repos/${REPO}/compare/${base}...${head}" --jq '.merge_base_commit.sha')" || return 1
+          raw() { gh api -H 'Accept: application/vnd.github.raw+json' "repos/${REPO}/contents/$1?ref=$2"; }
+          while IFS= read -r lock; do
+            [ -n "${lock}" ] || continue
+            old="$(raw "${lock}" "${merge_base}")" || return 1
+            new="$(raw "${lock}" "${head}")" || return 1
+            changed="${changed}"$'\n'"$(lock_changed_packages "${old}" "${new}")"
+          done < <(grep -E '(^|/)yarn\.lock$' <<< "$1")
+          podfile="${WORKING_DIRECTORY%/}/ios/Podfile.lock"
+          podfile="${podfile#./}"
+          new="$(raw "${podfile}" "${head}")" || return 1
+          ios="$(ios_relevant_packages "${changed}" "$(podfile_lock_packages "${new}")")"
+          echo "::notice title=[VERIFY] Plan::yarn.lock moved $(grep -c . <<< "${changed}" || true) package(s); ${podfile} autolinks $(podfile_lock_packages "${new}" | grep -c . || true); iOS build needed: ${ios}"
+        }
         if [ "${EVENT}" != "workflow_dispatch" ]; then
           files="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
           deps="$(deps_changed_from_list "${files}")"
           strapi="$(strapi_changed_from_pr "${files}")"
           tests="$(tests_changed_from_list "${files}" "${STACK}")"
+          if [ "${STACK}" = react-native ]; then
+            ios="$(ios_changed_from_list "${files}")"
+            if [ "${ios}" = packages ]; then
+              if ! ios_from_lock_diff "${files}"; then
+                echo "::warning title=[VERIFY] Plan::could not compare yarn.lock with ios/Podfile.lock - the iOS build runs"
+                ios=true
+              fi
+            fi
+          fi
         fi
         {
           echo "known_failing=${known}"
           echo "repo_known_failing=${repo_known}"
           echo "deadline=${deadline}"
           echo "deps_changed=${deps}"
+          echo "ios_changed=${ios}"
           echo "contract_mode=${mode}"
           echo "strapi_changed=${strapi}"
           echo "tests_changed=${tests}"
         } >> "${GITHUB_OUTPUT}"
-        echo "::notice title=[VERIFY] Plan::event=${EVENT} deps_changed=${deps} strapi_changed=${strapi} tests_changed=${tests} contract_mode=${mode} deadline=${deadline:-none} known_failing=${known:-none}"
+        echo "::notice title=[VERIFY] Plan::event=${EVENT} deps_changed=${deps} ios_changed=${ios} strapi_changed=${strapi} tests_changed=${tests} contract_mode=${mode} deadline=${deadline:-none} known_failing=${known:-none}"
         echo "VERIFY_PLAN_CP1_STATUS=PASSED" >> "$GITHUB_ENV"
 
 branding:
