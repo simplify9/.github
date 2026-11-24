@@ -998,8 +998,12 @@ jobs:
           # hermesc, as Gradle and Xcode do in release, unless the app turned Hermes off for that platform.
           hermesc="$(find node_modules/react-native/sdks/hermesc node_modules/hermes-compiler -path '*linux64-bin/hermesc' -type f 2>/dev/null | head -n 1 || true)"
           for p in android ios; do
+            # Metro sizes its worker pools from the machine's cores, not the job's share of them. A
+            # self-hosted runner whose job gets a slice of a bigger machine caps them with
+            # S9_METRO_MAX_WORKERS; unset on GitHub-hosted runners, so Metro's default applies there.
             npx react-native bundle --platform "$p" --dev false --entry-file "$entry" \
-              --bundle-output "$RUNNER_TEMP/$p.bundle" --assets-dest "$RUNNER_TEMP/$p-assets"
+              --bundle-output "$RUNNER_TEMP/$p.bundle" --assets-dest "$RUNNER_TEMP/$p-assets" \
+              ${S9_METRO_MAX_WORKERS:+--max-workers "$S9_METRO_MAX_WORKERS"}
             if [ "$p" = android ] && grep -Eqs '^[[:space:]]*hermesEnabled[[:space:]]*=[[:space:]]*false' android/gradle.properties; then continue; fi
             if [ "$p" = ios ] && grep -Eqs 'hermes_enabled[[:space:]]*(=>|:)[[:space:]]*false' ios/Podfile; then continue; fi
             if [ -z "$hermesc" ]; then
