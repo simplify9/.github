@@ -130,9 +130,9 @@ runs:
         # autolinks. Any API failure returns non-zero: the caller then builds iOS.
         ios_from_lock_diff() {
           local base head merge_base lock old new changed="" podfile
-          read -r base head < <(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '"\(.base.sha) \(.head.sha)"') || return 1
-          merge_base="$(gh api "repos/${REPO}/compare/${base}...${head}" --jq '.merge_base_commit.sha')" || return 1
-          raw() { gh api -H 'Accept: application/vnd.github.raw+json' "repos/${REPO}/contents/$1?ref=$2"; }
+          read -r base head < <(gh_retry api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '"\(.base.sha) \(.head.sha)"') || return 1
+          merge_base="$(gh_retry api "repos/${REPO}/compare/${base}...${head}" --jq '.merge_base_commit.sha')" || return 1
+          raw() { gh_retry api -H 'Accept: application/vnd.github.raw+json' "repos/${REPO}/contents/$1?ref=$2"; }
           while IFS= read -r lock; do
             [ -n "${lock}" ] || continue
             old="$(raw "${lock}" "${merge_base}")" || return 1
@@ -146,7 +146,7 @@ runs:
           echo "::notice title=[VERIFY] Plan::yarn.lock moved $(grep -c . <<< "${changed}" || true) package(s); ${podfile} autolinks $(podfile_lock_packages "${new}" | grep -c . || true); iOS build needed: ${ios}"
         }
         if [ "${EVENT}" != "workflow_dispatch" ]; then
-          files="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
+          files="$(gh_retry api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')"
           deps="$(deps_changed_from_list "${files}")"
           strapi="$(strapi_changed_from_pr "${files}")"
           tests="$(tests_changed_from_list "${files}" "${STACK}")"

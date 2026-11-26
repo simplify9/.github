@@ -2,6 +2,22 @@
 # Scope helpers for verify.yml. Sourced by the verify-plan action and by test_scope.sh.
 # All dates are ISO YYYY-MM-DD, compared as strings.
 
+# gh_retry <gh args...>: gh, tried up to 3 times. GitHub's API answers the odd 5xx, and one 502 on the PR's
+# file list failed a whole verify run on 2026-11-26 (red until someone re-ran it). Output is printed only
+# from the attempt that succeeded, so a page or file cut off by a failed attempt never reaches the caller.
+# GH_RETRY_DELAY (seconds, default 10) is the first pause; the second is twice that.
+gh_retry() {
+  local out attempt
+  for attempt in 1 2 3; do
+    if out="$(command gh "$@")"; then
+      [ -z "${out}" ] || printf '%s\n' "${out}"
+      return 0
+    fi
+    [ "${attempt}" = 3 ] || sleep "$((attempt * ${GH_RETRY_DELAY:-10}))"
+  done
+  return 1
+}
+
 # verify_full <event> <base> <default-branch> <author> <bot-login> [tests-changed] -> true|false
 # tests-changed is the tests-probe job's answer (tests_changed_from_list) for a human PR into develop.
 verify_full() {

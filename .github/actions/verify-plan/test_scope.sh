@@ -357,5 +357,20 @@ test_android_gradle_cache_matches_deploy_build() {
   eq "${FUNCNAME[0]}" "$(awk "${inc}" "${here}/../../workflows/android-build.yml")" \
     "$(awk '/^  android:$/ {j = 1} j' "${here}/../../workflows/verify.yml" | awk "${inc}")"
 }
+# gh_retry: a fake gh on PATH fails twice (printing a partial answer each time), then answers.
+fake_gh() { # dir fails-before-success
+  # shellcheck disable=SC2016 # the fake gh's own script: its $n expands when it runs, not here
+  printf '#!/usr/bin/env bash\nn=$(cat "%s/n" 2>/dev/null || echo 0); echo $((n + 1)) > "%s/n"\n[ "$n" -ge %s ] || { echo partial; exit 1; }\necho ok\n' "$1" "$1" "$2" > "$1/gh"
+  chmod +x "$1/gh"
+}
+test_gh_retry_recovers_without_partial_output() {
+  local d; d="$(mktemp -d)"; fake_gh "$d" 2
+  eq "${FUNCNAME[0]}" ok "$(PATH="$d:$PATH" GH_RETRY_DELAY=0 gh_retry api x)"; rm -rf "$d"
+}
+test_gh_retry_gives_up_after_three() {
+  local d rc=0; d="$(mktemp -d)"; fake_gh "$d" 3
+  PATH="$d:$PATH" GH_RETRY_DELAY=0 gh_retry api x > /dev/null || rc=$?
+  eq "${FUNCNAME[0]}" "1 3" "${rc} $(cat "$d/n")"; rm -rf "$d"
+}
 for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "${fails} FAILED"; exit 1; fi
